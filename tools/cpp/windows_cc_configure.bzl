@@ -193,7 +193,7 @@ def _find_env_vars(repository_ctx, vc_path):
   vcvarsall = _find_vcvarsall_bat_script(repository_ctx, vc_path)
   repository_ctx.file("get_env.bat",
                       "@echo off\n" +
-                      "call \"" + vcvarsall + "\" amd64 > NUL \n" +
+                      "call \"" + vcvarsall + "\" amd64 8.1 > NUL \n" +
                       "echo PATH=%PATH%,INCLUDE=%INCLUDE%,LIB=%LIB% \n", True)
   env = _add_system_root(repository_ctx,
                          {"PATH": "", "INCLUDE": "", "LIB": ""})

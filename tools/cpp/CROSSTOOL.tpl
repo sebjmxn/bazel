@@ -178,37 +178,37 @@ toolchain {
   compiler_flag: "/DNOMINMAX"
 
   # Platform defines.
-  compiler_flag: "/D_WIN32_WINNT=0x0600"
+  #compiler_flag: "/D_WIN32_WINNT=0x0600"
   # Turn off warning messages.
-  compiler_flag: "/D_CRT_SECURE_NO_DEPRECATE"
-  compiler_flag: "/D_CRT_SECURE_NO_WARNINGS"
-  compiler_flag: "/D_SILENCE_STDEXT_HASH_DEPRECATION_WARNINGS"
+  #compiler_flag: "/D_CRT_SECURE_NO_DEPRECATE"
+  #compiler_flag: "/D_CRT_SECURE_NO_WARNINGS"
+  #compiler_flag: "/D_SILENCE_STDEXT_HASH_DEPRECATION_WARNINGS"
 
   # Useful options to have on for compilation.
   # Increase the capacity of object files to 2^32 sections.
-  compiler_flag: "/bigobj"
+  #compiler_flag: "/bigobj"
   # Allocate 500MB for precomputed headers.
-  compiler_flag: "/Zm500"
+  #compiler_flag: "/Zm500"
   # Use unsigned char by default.
-  compiler_flag: "/J"
+  #compiler_flag: "/J"
   # Use function level linking.
-  compiler_flag: "/Gy"
+  #compiler_flag: "/Gy"
   # Use string pooling.
-  compiler_flag: "/GF"
+  #compiler_flag: "/GF"
   # Catch both asynchronous (structured) and synchronous (C++) exceptions.
-  compiler_flag: "/EHsc"
+  #compiler_flag: "/EHsc"
 
   # Globally disabled warnings.
   # Don't warn about elements of array being be default initialized.
-  compiler_flag: "/wd4351"
+  #compiler_flag: "/wd4351"
   # Don't warn about no matching delete found.
-  compiler_flag: "/wd4291"
+  #compiler_flag: "/wd4291"
   # Don't warn about diamond inheritance patterns.
-  compiler_flag: "/wd4250"
+  #compiler_flag: "/wd4250"
   # Don't warn about insecure functions (e.g. non _s functions).
-  compiler_flag: "/wd4996"
+  #compiler_flag: "/wd4996"
 
-  linker_flag: "/MACHINE:X64"
+  #linker_flag: "/MACHINE:X64"
 
   feature {
     name: "no_legacy_features"
