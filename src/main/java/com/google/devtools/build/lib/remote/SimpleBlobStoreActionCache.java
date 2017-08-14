@@ -54,7 +54,7 @@ import java.util.concurrent.Semaphore;
  */
 @ThreadSafe
 public final class SimpleBlobStoreActionCache implements RemoteActionCache {
-  private static final int MAX_MEMORY_KBYTES = 512 * 1024;
+  private static final int MAX_MEMORY_KBYTES = 3072 * 1024;
   private static final int MAX_BLOB_SIZE_FOR_INLINE = 10 * 1024;
 
   private final SimpleBlobStore blobStore;
