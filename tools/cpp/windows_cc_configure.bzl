@@ -175,6 +175,13 @@ def _is_vs_2017(vc_path):
   # C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\
   return vc_path.find("2017") != -1
 
+def _fixup_env_value(value):
+  """Normalize certain upper/lowercase issues."""
+  value = value.replace("\\", "\\\\")
+  value = escape_string(value)
+  value = value.replace("WINDOWS", "Windows")
+  return value
+
 
 def _find_vcvarsall_bat_script(repository_ctx, vc_path):
   """Find vcvarsall.bat script. Doesn't %-escape the result."""
@@ -201,7 +208,7 @@ def _find_env_vars(repository_ctx, vc_path):
   env_map = {}
   for env in envs:
     key, value = env.split("=", 1)
-    env_map[key] = escape_string(value.replace("\\", "\\\\"))
+    env_map[key] = _fixup_env_value(value)
   return env_map
 
 
