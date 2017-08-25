@@ -105,6 +105,9 @@ public class CrosstoolCompilationSupport extends CompilationSupport {
 
   private static final String GENERATE_LINKMAP_FEATURE_NAME = "generate_linkmap";
 
+  /** Enabled if this target has objc sources in its transitive closure. */
+  private static final String CONTAINS_OBJC = "contains_objc_sources";
+
   private static final ImmutableList<String> ACTIVATED_ACTIONS =
       ImmutableList.of(
           "objc-compile",
@@ -193,16 +196,26 @@ public class CrosstoolCompilationSupport extends CompilationSupport {
       registerObjFilelistAction(getObjFiles(compilationArtifacts, intermediateArtifacts), objList);
   
       extension.addVariableCategory(VariableCategory.ARCHIVE_VARIABLES);
-      
+
       helper =
           createCcLibraryHelper(
-                  objcProvider, compilationArtifacts, extension.build(), ccToolchain, fdoSupport)
+                  objcProvider,
+                  compilationArtifacts,
+                  extension.build(),
+                  extraCompileArgs,
+                  ccToolchain,
+                  fdoSupport)
               .setLinkType(LinkTargetType.OBJC_ARCHIVE)
               .addLinkActionInput(objList);
     } else {
       helper =
           createCcLibraryHelper(
-              objcProvider, compilationArtifacts, extension.build(), ccToolchain, fdoSupport);
+              objcProvider,
+              compilationArtifacts,
+              extension.build(),
+              extraCompileArgs,
+              ccToolchain,
+              fdoSupport);
     }
 
     Info info = helper.build();
@@ -241,7 +254,7 @@ public class CrosstoolCompilationSupport extends CompilationSupport {
                 outputArchive,
                 ccToolchain,
                 fdoSupport,
-                getFeatureConfiguration(ruleContext, ccToolchain, buildConfiguration))
+                getFeatureConfiguration(ruleContext, ccToolchain, buildConfiguration, objcProvider))
             .addActionInputs(objcProvider.getObjcLibraries())
             .addActionInputs(objcProvider.getCcLibraries())
             .addActionInputs(objcProvider.get(IMPORTED_LIBRARY).toSet())
@@ -317,7 +330,7 @@ public class CrosstoolCompilationSupport extends CompilationSupport {
                 binaryToLink,
                 toolchain,
                 fdoSupport,
-                getFeatureConfiguration(ruleContext, toolchain, buildConfiguration))
+                getFeatureConfiguration(ruleContext, toolchain, buildConfiguration, objcProvider))
             .setMnemonic("ObjcLink")
             .addActionInputs(bazelBuiltLibraries)
             .addActionInputs(objcProvider.getCcLibraries())
@@ -390,6 +403,7 @@ public class CrosstoolCompilationSupport extends CompilationSupport {
       ObjcProvider objcProvider,
       CompilationArtifacts compilationArtifacts,
       VariablesExtension extension,
+      ExtraCompileArgs extraCompileArgs,
       CcToolchainProvider ccToolchain,
       FdoSupportProvider fdoSupport) {
     PrecompiledFiles precompiledFiles = new PrecompiledFiles(ruleContext);
@@ -415,7 +429,7 @@ public class CrosstoolCompilationSupport extends CompilationSupport {
         new CcLibraryHelper(
                 ruleContext,
                 semantics,
-                getFeatureConfiguration(ruleContext, ccToolchain, buildConfiguration),
+                getFeatureConfiguration(ruleContext, ccToolchain, buildConfiguration, objcProvider),
                 CcLibraryHelper.SourceCategory.CC_AND_OBJC,
                 ccToolchain,
                 fdoSupport,
@@ -439,6 +453,7 @@ public class CrosstoolCompilationSupport extends CompilationSupport {
                         ruleContext
                             .getFragment(ObjcConfiguration.class)
                             .getCoptsForCompilationMode())
+                    .addAll(extraCompileArgs)
                     .build())
             .addIncludeDirs(objcProvider.get(INCLUDE))
             .addSystemIncludeDirs(objcProvider.get(INCLUDE_SYSTEM))
@@ -460,8 +475,11 @@ public class CrosstoolCompilationSupport extends CompilationSupport {
     return result;
   }
 
-  private FeatureConfiguration getFeatureConfiguration(RuleContext ruleContext,
-      CcToolchainProvider ccToolchain, BuildConfiguration configuration) {
+  private FeatureConfiguration getFeatureConfiguration(
+      RuleContext ruleContext,
+      CcToolchainProvider ccToolchain,
+      BuildConfiguration configuration,
+      ObjcProvider objcProvider) {
     boolean isHost = ruleContext.getConfiguration().isHostConfiguration();
     ImmutableSet.Builder<String> activatedCrosstoolSelectables =
         ImmutableSet.<String>builder()
@@ -511,6 +529,9 @@ public class CrosstoolCompilationSupport extends CompilationSupport {
         configuration.getFragment(AppleConfiguration.class).getBitcodeMode();
     if (bitcodeMode != AppleBitcodeMode.NONE) {
       activatedCrosstoolSelectables.addAll(bitcodeMode.getFeatureNames());
+    }
+    if (objcProvider.is(Flag.USES_OBJC)) {
+      activatedCrosstoolSelectables.add(CONTAINS_OBJC);
     }
 
     activatedCrosstoolSelectables.addAll(ruleContext.getFeatures());

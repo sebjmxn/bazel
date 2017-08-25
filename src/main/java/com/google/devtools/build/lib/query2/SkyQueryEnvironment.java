@@ -49,7 +49,6 @@ import com.google.devtools.build.lib.events.DelegatingEventHandler;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventKind;
 import com.google.devtools.build.lib.events.ExtendedEventHandler;
-import com.google.devtools.build.lib.graph.Digraph;
 import com.google.devtools.build.lib.packages.BuildFileContainsErrorsException;
 import com.google.devtools.build.lib.packages.DependencyFilter;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
@@ -107,11 +106,8 @@ import com.google.devtools.build.skyframe.SkyValue;
 import com.google.devtools.build.skyframe.WalkableGraph;
 import com.google.devtools.build.skyframe.WalkableGraph.WalkableGraphFactory;
 import java.io.IOException;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Deque;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
@@ -163,7 +159,7 @@ public class SkyQueryEnvironment extends AbstractBlazeQueryEnvironment<Target>
   private GraphBackedRecursivePackageProvider graphBackedRecursivePackageProvider;
   private ListeningExecutorService executor;
   private RecursivePackageProviderBackedTargetPatternResolver resolver;
-  private final SkyKey universeKey;
+  protected final SkyKey universeKey;
   private final ImmutableList<TargetPatternKey> universeTargetPatternKeys;
 
   public SkyQueryEnvironment(
@@ -239,17 +235,27 @@ public class SkyQueryEnvironment extends AbstractBlazeQueryEnvironment<Target>
     }
   }
 
-  private void beforeEvaluateQuery() throws InterruptedException {
-    if (graph == null || !graphFactory.isUpToDate(universeKey)) {
+  /** Gets roots of graph which contains all nodes needed to evaluate {@code expr}. */
+  protected Set<SkyKey> getGraphRootsFromExpression(QueryExpression expr)
+      throws QueryException, InterruptedException {
+    return ImmutableSet.of(universeKey);
+  }
+
+  private void beforeEvaluateQuery(QueryExpression expr)
+      throws QueryException, InterruptedException {
+    Set<SkyKey> roots = getGraphRootsFromExpression(expr);
+    if (graph == null || !graphFactory.isUpToDate(roots)) {
       // If this environment is uninitialized or the graph factory needs to evaluate, do so. We
       // assume here that this environment cannot be initialized-but-stale if the factory is up
       // to date.
       EvaluationResult<SkyValue> result;
       try (AutoProfiler p = AutoProfiler.logged("evaluation and walkable graph", LOG)) {
-        result =
-            graphFactory.prepareAndGet(universeKey, loadingPhaseThreads, universeEvalEventHandler);
+        result = graphFactory.prepareAndGet(roots, loadingPhaseThreads, universeEvalEventHandler);
       }
-      checkEvaluationResult(result);
+
+      if (roots.size() == 1 && Iterables.getOnlyElement(roots).equals(universeKey)) {
+        checkEvaluationResult(result);
+      }
 
       packageSemaphore = makeFreshPackageMultisetSemaphore();
       graph = result.getWalkableGraph();
@@ -335,7 +341,7 @@ public class SkyQueryEnvironment extends AbstractBlazeQueryEnvironment<Target>
     }
 
     @Override
-    public QueryExpression map(FunctionExpression functionExpression) {
+    public QueryExpression visit(FunctionExpression functionExpression) {
       if (functionExpression.getFunction().getName().equals(new RdepsFunction().getName())) {
         List<Argument> args = functionExpression.getArgs();
         QueryExpression universeExpression = args.get(0).getExpression();
@@ -349,14 +355,14 @@ public class SkyQueryEnvironment extends AbstractBlazeQueryEnvironment<Target>
           }
         }
       }
-      return super.map(functionExpression);
+      return super.visit(functionExpression);
     }
   }
 
   @Override
   public final QueryExpression transformParsedQuery(QueryExpression queryExpression) {
     QueryExpressionMapper mapper = getQueryExpressionMapper();
-    QueryExpression transformedQueryExpression = queryExpression.getMapped(mapper);
+    QueryExpression transformedQueryExpression = queryExpression.accept(mapper);
     LOG.info(String.format(
         "transformed query [%s] to [%s]",
         Ascii.truncate(
@@ -406,7 +412,7 @@ public class SkyQueryEnvironment extends AbstractBlazeQueryEnvironment<Target>
   public QueryEvalResult evaluateQuery(
       QueryExpression expr, ThreadSafeOutputFormatterCallback<Target> callback)
           throws QueryException, InterruptedException, IOException {
-    beforeEvaluateQuery();
+    beforeEvaluateQuery(expr);
 
     // SkyQueryEnvironment batches callback invocations using a BatchStreamedCallback, created here
     // so that there's one per top-level evaluateQuery call. The batch size is large enough that
@@ -503,7 +509,7 @@ public class SkyQueryEnvironment extends AbstractBlazeQueryEnvironment<Target>
     return getReverseDepsOfTransitiveTraversalKeys(Iterables.transform(targets, TARGET_TO_SKY_KEY));
   }
 
-  Collection<Target> getReverseDepsOfTransitiveTraversalKeys(
+  private Collection<Target> getReverseDepsOfTransitiveTraversalKeys(
       Iterable<SkyKey> transitiveTraversalKeys) throws InterruptedException {
     Map<SkyKey, Collection<Target>> rawReverseDeps = getRawReverseDeps(transitiveTraversalKeys);
     return processRawReverseDeps(rawReverseDeps);
@@ -553,51 +559,14 @@ public class SkyQueryEnvironment extends AbstractBlazeQueryEnvironment<Target>
   @Override
   public ThreadSafeMutableSet<Target> getTransitiveClosure(ThreadSafeMutableSet<Target> targets)
       throws InterruptedException {
-    ThreadSafeMutableSet<Target> visited = createThreadSafeMutableSet();
-    ThreadSafeMutableSet<Target> current = targets;
-    while (!current.isEmpty()) {
-      Iterable<Target> toVisit = Iterables.filter(current,
-          Predicates.not(Predicates.in(visited)));
-      current = getFwdDeps(toVisit);
-      Iterables.addAll(visited, toVisit);
-    }
-    return visited;
+    return SkyQueryUtils.getTransitiveClosure(
+        targets, this::getFwdDeps, createThreadSafeMutableSet());
   }
 
-  // Implemented with a breadth-first search.
   @Override
   public ImmutableList<Target> getNodesOnPath(Target from, Target to)
       throws InterruptedException {
-    // Tree of nodes visited so far.
-    Map<Label, Label> nodeToParent = new HashMap<>();
-    Map<Label, Target> labelToTarget = new HashMap<>();
-    // Contains all nodes left to visit in a (LIFO) stack.
-    Deque<Target> toVisit = new ArrayDeque<>();
-    toVisit.add(from);
-    nodeToParent.put(from.getLabel(), null);
-    labelToTarget.put(from.getLabel(), from);
-    while (!toVisit.isEmpty()) {
-      Target current = toVisit.removeFirst();
-      if (to.getLabel().equals(current.getLabel())) {
-        List<Label> labelPath = Digraph.getPathToTreeNode(nodeToParent, to.getLabel());
-        ImmutableList.Builder<Target> targetPathBuilder = ImmutableList.builder();
-        for (Label label : labelPath) {
-          targetPathBuilder.add(Preconditions.checkNotNull(labelToTarget.get(label), label));
-        }
-        return targetPathBuilder.build();
-      }
-      for (Target dep : getFwdDeps(ImmutableList.of(current))) {
-        Label depLabel = dep.getLabel();
-        if (!nodeToParent.containsKey(depLabel)) {
-          nodeToParent.put(depLabel, current.getLabel());
-          labelToTarget.put(depLabel, dep);
-          toVisit.addFirst(dep);
-        }
-      }
-    }
-    // Note that the only current caller of this method checks first to see if there is a path
-    // before calling this method. It is not clear what the return value should be here.
-    return null;
+    return SkyQueryUtils.getNodesOnPath(from, to, this::getFwdDeps, Target::getLabel);
   }
 
   private <R> ListenableFuture<R> safeSubmit(Callable<R> callable) {
@@ -1153,7 +1122,7 @@ public class SkyQueryEnvironment extends AbstractBlazeQueryEnvironment<Target>
       implements InterruptibleSupplier<ImmutableSet<PathFragment>> {
     private final WalkableGraph graph;
 
-    BlacklistSupplier(WalkableGraph graph) {
+    private BlacklistSupplier(WalkableGraph graph) {
       this.graph = graph;
     }
 

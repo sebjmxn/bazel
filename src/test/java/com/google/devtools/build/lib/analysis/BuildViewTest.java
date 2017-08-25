@@ -17,7 +17,6 @@ package com.google.devtools.build.lib.analysis;
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
 import static com.google.devtools.build.lib.packages.Attribute.attr;
-import static com.google.devtools.build.lib.testutil.MoreAsserts.assertEventCount;
 import static com.google.devtools.build.lib.testutil.MoreAsserts.assertEventCountAtLeast;
 import static org.junit.Assert.fail;
 
@@ -34,7 +33,6 @@ import com.google.devtools.build.lib.actions.FailAction;
 import com.google.devtools.build.lib.analysis.BuildView.AnalysisResult;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
-import com.google.devtools.build.lib.analysis.util.AnalysisMock;
 import com.google.devtools.build.lib.analysis.util.BuildViewTestBase;
 import com.google.devtools.build.lib.analysis.util.ExpectedDynamicConfigurationErrors;
 import com.google.devtools.build.lib.analysis.util.MockRule;
@@ -394,21 +392,12 @@ public class BuildViewTest extends BuildViewTestBase {
     Iterable<Dependency> targets = getView().getDirectPrerequisiteDependenciesForTesting(
         reporter, top, getBuildConfigurationCollection()).values();
 
-    Dependency innerDependency;
-    Dependency fileDependency;
-    if (top.getConfiguration().useDynamicConfigurations()) {
-      innerDependency =
-          Dependency.withTransitionAndAspects(
-              Label.parseAbsolute("//package:inner"),
-              Attribute.ConfigurationTransition.NONE,
-              AspectCollection.EMPTY);
-    } else {
-      innerDependency =
-          Dependency.withConfiguration(
-              Label.parseAbsolute("//package:inner"),
-              getTargetConfiguration());
-    }
-    fileDependency =
+    Dependency innerDependency =
+        Dependency.withTransitionAndAspects(
+            Label.parseAbsolute("//package:inner"),
+            Attribute.ConfigurationTransition.NONE,
+            AspectCollection.EMPTY);
+    Dependency fileDependency =
         Dependency.withNullConfiguration(
             Label.parseAbsolute("//package:file"));
 
@@ -542,11 +531,9 @@ public class BuildViewTest extends BuildViewTestBase {
     // the transitive target closure) and in the normal configured target cycle detection path.
     // So we get an additional instance of this check (which varies depending on whether Skyframe
     // loading phase is enabled).
-    // TODO(gregce): refactor away this variation. Note that the duplicate doesn't make it into
+    // TODO(gregce): Fix above and uncomment the below. Note that the duplicate doesn't make it into
     // real user output (it only affects tests).
-    if (!getTargetConfiguration().useDynamicConfigurations()) {
-      assertEventCount(3, eventCollector);
-    }
+    //  assertEventCount(3, eventCollector);
   }
 
   @Test
@@ -1109,7 +1096,6 @@ public class BuildViewTest extends BuildViewTestBase {
         "filegroup(name = 'jdk', srcs = [",
         "    '//does/not/exist:a-piii', '//does/not/exist:b-k8', '//does/not/exist:c-default'])");
     scratch.file("does/not/exist/BUILD");
-    useConfigurationFactory(AnalysisMock.get().createConfigurationFactory());
     useConfiguration("--javabase=//jdk");
     reporter.removeHandler(failFastHandler);
     try {

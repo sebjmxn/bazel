@@ -13,7 +13,6 @@
 // limitations under the License.
 package com.google.devtools.build.lib.rules.android;
 
-import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.google.common.collect.FluentIterable;
@@ -56,6 +55,7 @@ public class AndroidResourceValidatorActionBuilder {
   private Artifact aapt2SourceJarOut;
   private Artifact aapt2RTxtOut;
   private Artifact compiledSymbols;
+  private Artifact apkOut;
 
   /** @param ruleContext The RuleContext that was used to create the SpawnAction.Builder. */
   public AndroidResourceValidatorActionBuilder(RuleContext ruleContext) {
@@ -131,6 +131,11 @@ public class AndroidResourceValidatorActionBuilder {
     return this;
   }
 
+  public AndroidResourceValidatorActionBuilder setApkOut(Artifact apkOut) {
+    this.apkOut = apkOut;
+    return this;
+  }
+
   /**
    * This creates a static library using aapt2. It also generates a source jar and R.txt from aapt.
    *
@@ -151,7 +156,7 @@ public class AndroidResourceValidatorActionBuilder {
     // Set the busybox tool.
     builder.add("--tool").add("LINK_STATIC_LIBRARY").add("--");
 
-    builder.add("--aapt2", sdk.getAapt2().getExecutable());
+    builder.addExecPath("--aapt2", sdk.getAapt2().getExecutable());
 
     FluentIterable<Artifact> libraries =
         FluentIterable.from(resourceDeps.getResources()).transform(
@@ -159,28 +164,29 @@ public class AndroidResourceValidatorActionBuilder {
 
     builder
         .add("--libraries")
-        .add(libraries.join(Joiner.on(context.getConfiguration().getHostPathSeparator())));
+        .addJoinedExecPaths(
+            context.getConfiguration().getHostPathSeparator(), ImmutableList.copyOf(libraries));
     inputs.addAll(libraries);
 
-    builder.add("--compiled", compiledSymbols);
+    builder.addExecPath("--compiled", compiledSymbols);
     inputs.add(compiledSymbols);
 
-    builder.add("--manifest", primary.getManifest());
+    builder.addExecPath("--manifest", primary.getManifest());
     inputs.add(validated.getManifest());
 
     if (!Strings.isNullOrEmpty(customJavaPackage)) {
       // Sets an alternative java package for the generated R.java
       // this allows android rules to generate resources outside of the java{,tests} tree.
-      builder.add("--packageForR").add(customJavaPackage);
+      builder.add("--packageForR", customJavaPackage);
     }
 
-    builder.add("--sourceJarOut", aapt2SourceJarOut);
+    builder.addExecPath("--sourceJarOut", aapt2SourceJarOut);
     outs.add(aapt2SourceJarOut);
 
-    builder.add("--rTxtOut", aapt2RTxtOut);
+    builder.addExecPath("--rTxtOut", aapt2RTxtOut);
     outs.add(aapt2RTxtOut);
 
-    builder.add("--staticLibraryOut", staticLibraryOut);
+    builder.addExecPath("--staticLibraryOut", staticLibraryOut);
     outs.add(staticLibraryOut);
 
     ruleContext.registerAction(
@@ -214,24 +220,24 @@ public class AndroidResourceValidatorActionBuilder {
     builder.add("--tool").add("VALIDATE").add("--");
 
     if (!Strings.isNullOrEmpty(sdk.getBuildToolsVersion())) {
-      builder.add("--buildToolsVersion").add(sdk.getBuildToolsVersion());
+      builder.add("--buildToolsVersion", sdk.getBuildToolsVersion());
     }
 
-    builder.add("--aapt", sdk.getAapt().getExecutable());
+    builder.addExecPath("--aapt", sdk.getAapt().getExecutable());
 
     ImmutableList.Builder<Artifact> inputs = ImmutableList.builder();
 
-    builder.add("--annotationJar", sdk.getAnnotationsJar());
+    builder.addExecPath("--annotationJar", sdk.getAnnotationsJar());
     inputs.add(sdk.getAnnotationsJar());
 
-    builder.add("--androidJar", sdk.getAndroidJar());
+    builder.addExecPath("--androidJar", sdk.getAndroidJar());
     inputs.add(sdk.getAndroidJar());
 
     Preconditions.checkNotNull(mergedResources);
-    builder.add("--mergedResources", mergedResources);
+    builder.addExecPath("--mergedResources", mergedResources);
     inputs.add(mergedResources);
 
-    builder.add("--manifest", primary.getManifest());
+    builder.addExecPath("--manifest", primary.getManifest());
     inputs.add(primary.getManifest());
 
     if (debug) {
@@ -241,16 +247,21 @@ public class AndroidResourceValidatorActionBuilder {
     if (!Strings.isNullOrEmpty(customJavaPackage)) {
       // Sets an alternative java package for the generated R.java
       // this allows android rules to generate resources outside of the java{,tests} tree.
-      builder.add("--packageForR").add(customJavaPackage);
+      builder.add("--packageForR", customJavaPackage);
     }
     List<Artifact> outs = new ArrayList<>();
     Preconditions.checkNotNull(rTxtOut);
-    builder.add("--rOutput", rTxtOut);
+    builder.addExecPath("--rOutput", rTxtOut);
     outs.add(rTxtOut);
 
     Preconditions.checkNotNull(sourceJarOut);
-    builder.add("--srcJarOutput", sourceJarOut);
+    builder.addExecPath("--srcJarOutput", sourceJarOut);
     outs.add(sourceJarOut);
+
+    if (apkOut != null) {
+      builder.addExecPath("--packagePath", apkOut);
+      outs.add(apkOut);
+    }
 
     SpawnAction.Builder spawnActionBuilder = new SpawnAction.Builder();
     // Create the spawn action.

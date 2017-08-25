@@ -389,9 +389,12 @@ public final class ReleaseBundlingSupport {
         ObjcRuleClasses.spawnAppleEnvActionBuilder(configuration, platform)
             .setMnemonic("EnvironmentPlist")
             .setExecutable(attributes.environmentPlist())
-            .addArguments("--platform", platformWithVersion)
-            .addArguments("--output", getGeneratedEnvironmentPlist().getExecPathString())
             .addOutput(getGeneratedEnvironmentPlist())
+            .setCommandLine(
+                CustomCommandLine.builder()
+                    .add("--platform", platformWithVersion)
+                    .addExecPath("--output", getGeneratedEnvironmentPlist())
+                    .build())
             .build(ruleContext));
   }
 
@@ -603,10 +606,13 @@ public final class ReleaseBundlingSupport {
         new SpawnAction.Builder()
             .setMnemonic("MergeEntitlementsFiles")
             .setExecutable(attributes.plmerge())
-            .addArgument("--control")
-            .addInputArgument(plMergeControlArtifact)
             .addTransitiveInputs(entitlements)
             .addOutput(intermediateArtifacts.entitlements())
+            .addInput(plMergeControlArtifact)
+            .setCommandLine(
+                CustomCommandLine.builder()
+                    .addExecPath("--control", plMergeControlArtifact)
+                    .build())
             .build(ruleContext));
   }
 
@@ -852,9 +858,11 @@ public final class ReleaseBundlingSupport {
             .setMnemonic("IosBundle")
             .setProgressMessage("Bundling iOS application: %s", ruleContext.getLabel())
             .setExecutable(attributes.bundleMergeExecutable())
-            .addInputArgument(bundleMergeControlArtifact)
+            .addInput(bundleMergeControlArtifact)
             .addTransitiveInputs(bundling.getBundleContentArtifacts())
             .addOutput(intermediateArtifacts.unprocessedIpa())
+            .setCommandLine(
+                CustomCommandLine.builder().addExecPath(bundleMergeControlArtifact).build())
             .build(ruleContext));
   }
 
@@ -1024,17 +1032,17 @@ public final class ReleaseBundlingSupport {
 
     CustomCommandLine.Builder commandLine = CustomCommandLine.builder();
     if (appleConfiguration.getXcodeToolchain() != null) {
-      commandLine.add("--toolchain").add(appleConfiguration.getXcodeToolchain());
+      commandLine.add("--toolchain", appleConfiguration.getXcodeToolchain());
     }
 
     commandLine
         .add("--output_zip_path")
-        .add(intermediateArtifacts.swiftFrameworksFileZip().getExecPath())
+        .addPath(intermediateArtifacts.swiftFrameworksFileZip().getExecPath())
         .add("--bundle_path")
         .add("Frameworks")
         .add("--platform")
-        .add(platform.getLowerCaseNameInPlist())
-        .add("--scan-executable", combinedArchBinary);
+        .addDynamicString(platform.getLowerCaseNameInPlist())
+        .addExecPath("--scan-executable", combinedArchBinary);
 
     ruleContext.registerAction(
         ObjcRuleClasses.spawnAppleEnvActionBuilder(appleConfiguration, platform)
@@ -1056,17 +1064,17 @@ public final class ReleaseBundlingSupport {
 
     CustomCommandLine.Builder commandLine = CustomCommandLine.builder();
     if (configuration.getXcodeToolchain() != null) {
-      commandLine.add("--toolchain").add(configuration.getXcodeToolchain());
+      commandLine.add("--toolchain", configuration.getXcodeToolchain());
     }
 
     commandLine
         .add("--output_zip_path")
-        .add(intermediateArtifacts.swiftSupportZip().getExecPath())
+        .addPath(intermediateArtifacts.swiftSupportZip().getExecPath())
         .add("--bundle_path")
-        .add("SwiftSupport/" + platform.getLowerCaseNameInPlist())
+        .addDynamicString("SwiftSupport/" + platform.getLowerCaseNameInPlist())
         .add("--platform")
-        .add(platform.getLowerCaseNameInPlist())
-        .add("--scan-executable", combinedArchBinary);
+        .addDynamicString(platform.getLowerCaseNameInPlist())
+        .addExecPath("--scan-executable", combinedArchBinary);
 
     ruleContext.registerAction(
         ObjcRuleClasses.spawnAppleEnvActionBuilder(configuration, platform)

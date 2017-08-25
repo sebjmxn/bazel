@@ -22,7 +22,6 @@ import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.actions.ActionConstructionContext;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine.Builder;
-import com.google.devtools.build.lib.analysis.actions.CustomCommandLine.VectorArg;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.rules.android.AndroidConfiguration.AndroidAaptVersion;
@@ -282,7 +281,7 @@ public class AndroidResourcesProcessorBuilder {
     // Set the busybox tool.
     builder.add("--tool").add("AAPT2_PACKAGE").add("--");
 
-    builder.add("--aapt2", sdk.getAapt2().getExecutable());
+    builder.addExecPath("--aapt2", sdk.getAapt2().getExecutable());
     ResourceContainerConverter.convertDependencies(
         dependencies, builder, inputs, AAPT2_RESOURCE_DEP_TO_ARG, AAPT2_RESOURCE_DEP_TO_ARTIFACTS);
 
@@ -345,7 +344,7 @@ public class AndroidResourcesProcessorBuilder {
 
     ResourceContainerConverter.convertDependencies(
         dependencies, builder, inputs, RESOURCE_DEP_TO_ARG, RESOURCE_DEP_TO_ARTIFACTS);
-    builder.add("--aapt", sdk.getAapt().getExecutable());
+    builder.addExecPath("--aapt", sdk.getAapt().getExecutable());
     configureCommonFlags(outs, inputs, builder);
 
     if (OS.getCurrent() == OS.WINDOWS) {
@@ -397,17 +396,17 @@ public class AndroidResourcesProcessorBuilder {
       List<Artifact> outs, NestedSetBuilder<Artifact> inputs, Builder builder) {
 
     // Add data
-    builder.add("--primaryData").add(RESOURCE_CONTAINER_TO_ARG.apply(primary));
+    builder.add("--primaryData", RESOURCE_CONTAINER_TO_ARG.apply(primary));
     inputs.addTransitive(RESOURCE_CONTAINER_TO_ARTIFACTS.apply(primary));
 
     if (!Strings.isNullOrEmpty(sdk.getBuildToolsVersion())) {
-      builder.add("--buildToolsVersion").add(sdk.getBuildToolsVersion());
+      builder.add("--buildToolsVersion", sdk.getBuildToolsVersion());
     }
 
-    builder.add("--annotationJar", sdk.getAnnotationsJar());
+    builder.addExecPath("--annotationJar", sdk.getAnnotationsJar());
     inputs.add(sdk.getAnnotationsJar());
 
-    builder.add("--androidJar", sdk.getAndroidJar());
+    builder.addExecPath("--androidJar", sdk.getAndroidJar());
     inputs.add(sdk.getAndroidJar());
 
     if (isLibrary) {
@@ -415,98 +414,95 @@ public class AndroidResourcesProcessorBuilder {
     }
 
     if (rTxtOut != null) {
-      builder.add("--rOutput", rTxtOut);
+      builder.addExecPath("--rOutput", rTxtOut);
       outs.add(rTxtOut);
     }
 
     if (symbols != null) {
-      builder.add("--symbolsOut", symbols);
+      builder.addExecPath("--symbolsOut", symbols);
       outs.add(symbols);
     }
     if (sourceJarOut != null) {
-      builder.add("--srcJarOutput", sourceJarOut);
+      builder.addExecPath("--srcJarOutput", sourceJarOut);
       outs.add(sourceJarOut);
     }
     if (proguardOut != null) {
-      builder.add("--proguardOutput", proguardOut);
+      builder.addExecPath("--proguardOutput", proguardOut);
       outs.add(proguardOut);
     }
 
     if (mainDexProguardOut != null) {
-      builder.add("--mainDexProguardOutput", mainDexProguardOut);
+      builder.addExecPath("--mainDexProguardOutput", mainDexProguardOut);
       outs.add(mainDexProguardOut);
     }
 
     if (manifestOut != null) {
-      builder.add("--manifestOutput", manifestOut);
+      builder.addExecPath("--manifestOutput", manifestOut);
       outs.add(manifestOut);
     }
 
     if (mergedResourcesOut != null) {
-      builder.add("--resourcesOutput", mergedResourcesOut);
+      builder.addExecPath("--resourcesOutput", mergedResourcesOut);
       outs.add(mergedResourcesOut);
     }
 
     if (apkOut != null) {
-      builder.add("--packagePath", apkOut);
+      builder.addExecPath("--packagePath", apkOut);
       outs.add(apkOut);
     }
-    if (resourceFilter.hasConfigurationFilters() && !resourceFilter.isPrefiltering()) {
-      builder.add("--resourceConfigs").add(resourceFilter.getConfigurationFilterString());
+    if (resourceFilter.shouldPropagateConfigs(ruleContext)) {
+      builder.add("--resourceConfigs", resourceFilter.getConfigurationFilterString());
     }
     if (resourceFilter.hasDensities() && !resourceFilter.isPrefiltering()) {
-      builder.add("--densities").add(resourceFilter.getDensityString());
+      builder.add("--densities", resourceFilter.getDensityString());
     }
     ImmutableList<String> filteredResources = resourceFilter.getResourcesToIgnoreInExecution();
     if (!filteredResources.isEmpty()) {
-      builder.add("--prefilteredResources", VectorArg.of(filteredResources).joinWith(","));
+      builder.addJoined("--prefilteredResources", ",", filteredResources);
     }
     if (!uncompressedExtensions.isEmpty()) {
-      builder.add(
-          "--uncompressedExtensions",
-          VectorArg.of(ImmutableList.copyOf(uncompressedExtensions)).joinWith(","));
+      builder.addJoined("--uncompressedExtensions", ",", uncompressedExtensions);
     }
     if (!crunchPng) {
       builder.add("--useAaptCruncher=no");
     }
     if (!assetsToIgnore.isEmpty()) {
-      builder.add(
-          "--assetsToIgnore", VectorArg.of(ImmutableList.copyOf(assetsToIgnore)).joinWith(","));
+      builder.addJoined("--assetsToIgnore", ",", assetsToIgnore);
     }
     if (debug) {
       builder.add("--debug");
     }
 
     if (versionCode != null) {
-      builder.add("--versionCode").add(versionCode);
+      builder.add("--versionCode", versionCode);
     }
 
     if (versionName != null) {
-      builder.add("--versionName").add(versionName);
+      builder.add("--versionName", versionName);
     }
 
     if (applicationId != null) {
-      builder.add("--applicationId").add(applicationId);
+      builder.add("--applicationId", applicationId);
     }
 
     if (dataBindingInfoZip != null) {
-      builder.add("--dataBindingInfoOut", dataBindingInfoZip);
+      builder.addExecPath("--dataBindingInfoOut", dataBindingInfoZip);
       outs.add(dataBindingInfoZip);
     }
 
     if (!Strings.isNullOrEmpty(customJavaPackage)) {
       // Sets an alternative java package for the generated R.java
       // this allows android rules to generate resources outside of the java{,tests} tree.
-      builder.add("--packageForR").add(customJavaPackage);
+      builder.add("--packageForR", customJavaPackage);
     }
 
     if (featureOf != null) {
-      builder.add("--featureOf", featureOf);
+      builder.addExecPath("--featureOf", featureOf);
       inputs.add(featureOf);
     }
 
     if (featureAfter != null) {
-      builder.add("--featureAfter", featureAfter);
+      builder.addExecPath("--featureAfter", featureAfter);
       inputs.add(featureAfter);
     }
 

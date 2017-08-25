@@ -29,12 +29,14 @@ import com.google.devtools.build.lib.actions.ActionInput;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.BaseSpawn;
+import com.google.devtools.build.lib.actions.CommandLineExpansionException;
 import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.ParameterFile;
 import com.google.devtools.build.lib.actions.ParameterFile.ParameterFileType;
 import com.google.devtools.build.lib.actions.ResourceSet;
 import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.actions.SpawnActionContext;
+import com.google.devtools.build.lib.actions.UserExecException;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.actions.CommandLine;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
@@ -121,11 +123,14 @@ public class JavaHeaderCompileAction extends SpawnAction {
 
   @Override
   protected String computeKey() {
-    return new Fingerprint()
-        .addString(GUID)
-        .addString(super.computeKey())
-        .addStrings(directCommandLine.arguments())
-        .hexDigestAndReset();
+    Fingerprint f = new Fingerprint().addString(GUID);
+    try {
+      f.addString(super.computeKey());
+      f.addStrings(directCommandLine.arguments());
+    } catch (CommandLineExpansionException e) {
+      throw new AssertionError("JavaHeaderCompileAction command line expansion cannot fail");
+    }
+    return f.hexDigestAndReset();
   }
 
   @Override
@@ -137,7 +142,11 @@ public class JavaHeaderCompileAction extends SpawnAction {
     } catch (ExecException e) {
       // if the direct input spawn failed, try again with transitive inputs to produce better
       // better messages
-      context.exec(getSpawn(actionExecutionContext.getClientEnv()), actionExecutionContext);
+      try {
+        context.exec(getSpawn(actionExecutionContext.getClientEnv()), actionExecutionContext);
+      } catch (CommandLineExpansionException commandLineExpansionException) {
+        throw new UserExecException(commandLineExpansionException);
+      }
       // The compilation should never fail with direct deps but succeed with transitive inputs
       // unless it failed due to a strict deps error, in which case fall back to the transitive
       // classpath may allow it to succeed (Strict Java Deps errors are reported by javac,
@@ -146,17 +155,21 @@ public class JavaHeaderCompileAction extends SpawnAction {
   }
 
   private final Spawn getDirectSpawn() {
-    return new BaseSpawn(
-        ImmutableList.copyOf(directCommandLine.arguments()),
-        ImmutableMap.<String, String>of() /*environment*/,
-        ImmutableMap.<String, String>of() /*executionInfo*/,
-        this,
-        LOCAL_RESOURCES) {
-      @Override
-      public Iterable<? extends ActionInput> getInputFiles() {
-        return directInputs;
-      }
-    };
+    try {
+      return new BaseSpawn(
+          ImmutableList.copyOf(directCommandLine.arguments()),
+          ImmutableMap.<String, String>of() /*environment*/,
+          ImmutableMap.<String, String>of() /*executionInfo*/,
+          this,
+          LOCAL_RESOURCES) {
+        @Override
+        public Iterable<? extends ActionInput> getInputFiles() {
+          return directInputs;
+        }
+      };
+    } catch (CommandLineExpansionException e) {
+      throw new AssertionError("JavaHeaderCompileAction command line expansion cannot fail");
+    }
   }
 
   /** Builder class to construct Java header compilation actions. */
@@ -503,10 +516,10 @@ public class JavaHeaderCompileAction extends SpawnAction {
 
     private CustomCommandLine.Builder getBaseArgs(JavaToolchainProvider javaToolchain) {
       return CustomCommandLine.builder()
-          .add(JavaCommon.getHostJavaExecutable(ruleContext))
+          .addPath(JavaCommon.getHostJavaExecutable(ruleContext))
           .add("-Xverify:none")
-          .add(javaToolchain.getJvmOptions())
-          .add("-jar", javaToolchain.getHeaderCompiler());
+          .addAll(javaToolchain.getJvmOptions())
+          .addExecPath("-jar", javaToolchain.getHeaderCompiler());
     }
 
     /**
@@ -515,40 +528,39 @@ public class JavaHeaderCompileAction extends SpawnAction {
      */
     private CustomCommandLine.Builder baseCommandLine(
         CustomCommandLine.Builder result, NestedSet<Artifact> classpathEntries) {
-      result.add("--output", outputJar);
+      result.addExecPath("--output", outputJar);
 
       if (outputDepsProto != null) {
-        result.add("--output_deps", outputDepsProto);
+        result.addExecPath("--output_deps", outputDepsProto);
       }
 
-      result.add("--temp_dir").add(tempDirectory);
+      result.add("--temp_dir").addPath(tempDirectory);
 
-      result.add("--bootclasspath", bootclasspathEntries);
+      result.addExecPaths("--bootclasspath", bootclasspathEntries);
 
-      result.add("--sources", sourceFiles);
+      result.addExecPaths("--sources", sourceFiles);
 
       if (!sourceJars.isEmpty()) {
-        result.add("--source_jars", ImmutableList.copyOf(sourceJars));
+        result.addExecPaths("--source_jars", ImmutableList.copyOf(sourceJars));
       }
 
-      result.add("--javacopts", javacOpts);
+      result.addAll("--javacopts", javacOpts);
 
       if (ruleKind != null) {
-        result.add("--rule_kind");
-        result.add(ruleKind);
+        result.add("--rule_kind", ruleKind);
       }
       if (targetLabel != null) {
         result.add("--target_label");
         if (targetLabel.getPackageIdentifier().getRepository().isDefault()
             || targetLabel.getPackageIdentifier().getRepository().isMain()) {
-          result.add(targetLabel);
+          result.addLabel(targetLabel);
         } else {
           // @-prefixed strings will be assumed to be params filenames and expanded,
           // so add an extra @ to escape it.
-          result.addWithPrefix("@", targetLabel);
+          result.addPrefixedLabel("@", targetLabel);
         }
       }
-      result.add("--classpath", classpathEntries);
+      result.addExecPaths("--classpath", classpathEntries);
       return result;
     }
 
@@ -557,18 +569,19 @@ public class JavaHeaderCompileAction extends SpawnAction {
       CustomCommandLine.Builder result = CustomCommandLine.builder();
       baseCommandLine(result, classpathEntries);
       if (!processorNames.isEmpty()) {
-        result.add("--processors", ImmutableList.copyOf(processorNames));
+        result.addAll("--processors", ImmutableList.copyOf(processorNames));
       }
       if (!processorFlags.isEmpty()) {
-        result.add("--javacopts", ImmutableList.copyOf(processorFlags));
+        result.addAll("--javacopts", ImmutableList.copyOf(processorFlags));
       }
       if (!processorPath.isEmpty()) {
-        result.add("--processorpath", processorPath);
+        result.addExecPaths("--processorpath", processorPath);
       }
       if (strictJavaDeps != BuildConfiguration.StrictDepsMode.OFF) {
-        result.add(new JavaCompileAction.JarsToTargetsArgv(classpathEntries, directJars));
+        result.addCustomMultiArgv(
+            new JavaCompileAction.JarsToTargetsArgv(classpathEntries, directJars));
         if (!compileTimeDependencyArtifacts.isEmpty()) {
-          result.add("--deps_artifacts", compileTimeDependencyArtifacts);
+          result.addExecPaths("--deps_artifacts", compileTimeDependencyArtifacts);
         }
       }
       return result.build();

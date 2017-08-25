@@ -18,7 +18,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.events.Location;
-import com.google.devtools.build.lib.packages.Info;
+import com.google.devtools.build.lib.packages.NativeInfo;
 import com.google.devtools.build.lib.packages.NativeProvider;
 import com.google.devtools.build.lib.skylarkinterface.SkylarkModule;
 import com.google.devtools.build.lib.skylarkinterface.SkylarkModuleCategory;
@@ -38,7 +38,7 @@ import java.util.Map;
   category = SkylarkModuleCategory.PROVIDER
 )
 @Immutable
-public class ToolchainInfo extends Info {
+public class ToolchainInfo extends NativeInfo {
 
   /** Name used in Skylark for accessing this provider. */
   public static final String SKYLARK_NAME = "ToolchainInfo";
@@ -56,7 +56,7 @@ public class ToolchainInfo extends Info {
           /*types=*/ ImmutableList.<SkylarkType>of(SkylarkType.DICT));
 
   /** Skylark constructor and identifier for this provider. */
-  public static final NativeProvider<ToolchainInfo> SKYLARK_CONSTRUCTOR =
+  public static final NativeProvider<ToolchainInfo> PROVIDER =
       new NativeProvider<ToolchainInfo>(ToolchainInfo.class, SKYLARK_NAME, SIGNATURE) {
         @Override
         protected ToolchainInfo createInstanceFromSkylark(Object[] args, Location loc)
@@ -67,11 +67,8 @@ public class ToolchainInfo extends Info {
         }
       };
 
-  private ToolchainInfo(Map<String, Object> toolchainData, Location loc) {
-    super(
-        SKYLARK_CONSTRUCTOR,
-        ImmutableMap.<String, Object>builder().putAll(toolchainData).build(),
-        loc);
+  protected ToolchainInfo(Map<String, Object> toolchainData, Location loc) {
+    super(PROVIDER, ImmutableMap.copyOf(toolchainData), loc);
   }
 
   public static ToolchainInfo create(Map<String, Object> toolchainData) {

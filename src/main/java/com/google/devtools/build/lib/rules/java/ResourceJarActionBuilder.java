@@ -35,6 +35,8 @@ import java.util.Map;
 
 /** Builds the action to package the resources for a Java rule into a jar. */
 public class ResourceJarActionBuilder {
+  public static final String MNEMONIC = "JavaResourceJar";
+
   private Artifact outputJar;
   private Map<PathFragment, Artifact> resources = ImmutableMap.of();
   private NestedSet<Artifact> resourceJars = NestedSetBuilder.emptySet(Order.STABLE_ORDER);
@@ -104,9 +106,9 @@ public class ResourceJarActionBuilder {
             .add("--normalize")
             .add("--dont_change_compression")
             .add("--exclude_build_data")
-            .add("--output", outputJar);
+            .addExecPath("--output", outputJar);
     if (!resourceJars.isEmpty()) {
-      command.add("--sources", resourceJars);
+      command.addExecPaths("--sources", resourceJars);
     }
     if (!resources.isEmpty() || !messages.isEmpty()) {
       command.add("--resources");
@@ -119,7 +121,7 @@ public class ResourceJarActionBuilder {
       }
     }
     if (!classpathResources.isEmpty()) {
-      command.add("--classpath_resources", classpathResources);
+      command.addExecPaths("--classpath_resources", classpathResources);
     }
     // TODO(b/37444705): remove this logic and always call useParameterFile once the bug is fixed
     // Most resource jar actions are very small and expanding the argument list for
@@ -141,7 +143,7 @@ public class ResourceJarActionBuilder {
             .addInputs(classpathResources)
             .setCommandLine(command.build())
             .setProgressMessage("Building Java resource jar")
-            .setMnemonic("JavaResourceJar")
+            .setMnemonic(MNEMONIC)
             .build(ruleContext));
   }
 

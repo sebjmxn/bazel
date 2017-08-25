@@ -55,7 +55,7 @@ public final class SliceExpression extends Expression {
     boolean endIsDefault =
         (end instanceof Identifier) && ((Identifier) end).getName().equals("None");
     boolean stepIsDefault =
-        (step instanceof IntegerLiteral) && ((IntegerLiteral) step).getValue().equals(1);
+        (step instanceof IntegerLiteral) && ((IntegerLiteral) step).getValue() == 1;
 
     object.prettyPrint(buffer);
     buffer.append('[');
@@ -117,10 +117,5 @@ public final class SliceExpression extends Expression {
   @Override
   public void accept(SyntaxTreeVisitor visitor) {
     visitor.visit(this);
-  }
-
-  @Override
-  void validate(ValidationEnvironment env) throws EvalException {
-    object.validate(env);
   }
 }

@@ -15,32 +15,37 @@
 package com.google.devtools.build.lib.analysis.actions;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Function;
 import com.google.common.base.Joiner;
 import com.google.common.base.Objects;
-import com.google.common.collect.ImmutableCollection;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Interner;
+import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Artifact.ArtifactExpander;
 import com.google.devtools.build.lib.actions.Artifact.TreeFileArtifact;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.concurrent.BlazeInterners;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
+import com.google.devtools.build.lib.util.LazyString;
 import com.google.devtools.build.lib.util.Preconditions;
+import com.google.devtools.build.lib.vfs.PathFragment;
+import com.google.errorprone.annotations.CompileTimeConstant;
+import com.google.errorprone.annotations.FormatMethod;
+import com.google.errorprone.annotations.FormatString;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.Function;
 import javax.annotation.Nullable;
 
-/**
- * A customizable, serializable class for building memory efficient command lines.
- */
+/** A customizable, serializable class for building memory efficient command lines. */
 @Immutable
 public final class CustomCommandLine extends CommandLine {
 
@@ -51,8 +56,8 @@ public final class CustomCommandLine extends CommandLine {
      * @param arguments The command line's argument vector.
      * @param argi The index of the next available argument.
      * @param builder The command line builder to which we should add arguments.
-     * @return The index of the next argument, after the ArgvFragment has consumed its args.
-     *   If the ArgvFragment doesn't have any args, it should return {@code argi} unmodified.
+     * @return The index of the next argument, after the ArgvFragment has consumed its args. If the
+     *     ArgvFragment doesn't have any args, it should return {@code argi} unmodified.
      */
     int eval(List<Object> arguments, int argi, ImmutableList.Builder<String> builder);
   }
@@ -72,25 +77,10 @@ public final class CustomCommandLine extends CommandLine {
     abstract void eval(ImmutableList.Builder<String> builder);
   }
 
-  // TODO(bazel-team): CustomArgv and CustomMultiArgv is  going to be difficult to expose
+  // TODO(bazel-team): CustomMultiArgv is  going to be difficult to expose
   // in Skylark. Maybe we can get rid of them by refactoring JavaCompileAction. It also
   // raises immutability / serialization issues.
-  /** Custom Java code producing a String argument. Usage of this class is discouraged. */
-  public abstract static class CustomArgv extends StandardArgvFragment {
-
-    @Override
-    void eval(ImmutableList.Builder<String> builder) {
-      builder.add(argv());
-    }
-
-    public abstract String argv();
-  }
-
-  /**
-   * Custom Java code producing a List of String arguments.
-   *
-   * <p>Usage of this class is discouraged. Please see {@link CustomArgv}.
-   */
+  /** Custom Java code producing a List of String arguments. */
   public abstract static class CustomMultiArgv extends StandardArgvFragment {
 
     @Override
@@ -104,165 +94,306 @@ public final class CustomCommandLine extends CommandLine {
   /**
    * An ArgvFragment that expands a collection of objects in a user-specified way.
    *
-   * <p>To construct one, use {@link VectorArg#of} with your collection of objects,
-   * and configure the returned object depending on how you want the expansion to
-   * take place. Finally, pass it to {@link CustomCommandLine.Builder#add(VectorArg.Builder}.
+   * <p>Vector args support formatting, interspersing args (adding strings before each value),
+   * joining, and mapping custom types. Please use this whenever you need to transform lists or
+   * nested sets instead of doing it manually, as use of this class is more memory efficient.
+   *
+   * <p>The order of evaluation is:
+   *
+   * <ul>
+   *   <li>Map the type T to a string using a custom map function, if any, or
+   *   <li>Map any non-string type {PathFragment, Artifact} to their path/exec path
+   *   <li>Format the string using the supplied format string, if any
+   *   <li>Add the arguments each prepended by the before string, if any, or
+   *   <li>Join the arguments with the join string, if any, or
+   *   <li>Simply add all arguments
+   * </ul>
+   *
+   * <pre>
+   *   Examples:
+   *
+   *   List<String> values = ImmutableList.of("1", "2", "3");
+   *
+   *   commandBuilder.addAll(VectorArg.format("-l%s").each(values))
+   *   -> ["-l1", "-l2", "-l3"]
+   *
+   *   commandBuilder.addAll(VectorArg.addBefore("-l").each(values))
+   *   -> ["-l", "1", "-l", "2", "-l", "3"]
+   *
+   *   commandBuilder.addAll(VectorArg.join(":").each(values))
+   *   -> ["1:2:3"]
+   * </pre>
    */
-  public static final class VectorArg implements ArgvFragment {
-    private static Interner<VectorArg> interner = BlazeInterners.newStrongInterner();
-
-    private final boolean hasMapEach;
-    private final boolean hasFormatEach;
-    private final boolean hasBeforeEach;
-    private final boolean hasJoinWith;
+  public static class VectorArg<T> {
+    final boolean isNestedSet;
+    final boolean isEmpty;
+    final int count;
+    final String formatEach;
+    final String beforeEach;
+    final String joinWith;
 
     private VectorArg(
-        boolean hasMapEach, boolean hasFormatEach, boolean hasBeforeEach, boolean hasJoinWith) {
-      this.hasMapEach = hasMapEach;
-      this.hasFormatEach = hasFormatEach;
-      this.hasBeforeEach = hasBeforeEach;
-      this.hasJoinWith = hasJoinWith;
+        boolean isNestedSet,
+        boolean isEmpty,
+        int count,
+        String formatEach,
+        String beforeEach,
+        String joinWith) {
+      this.isNestedSet = isNestedSet;
+      this.isEmpty = isEmpty;
+      this.count = count;
+      this.formatEach = formatEach;
+      this.beforeEach = beforeEach;
+      this.joinWith = joinWith;
     }
 
-    private static void push(List<Object> arguments, Builder<?> argv) {
-      VectorArg vectorArg =
-          new VectorArg(
-              argv.mapFn != null,
-              argv.formatEach != null,
-              argv.beforeEach != null,
-              argv.joinWith != null);
-      vectorArg = interner.intern(vectorArg);
-      arguments.add(vectorArg);
-      arguments.add(argv.values);
-      if (vectorArg.hasMapEach) {
-        arguments.add(argv.mapFn);
+    /**
+     * A vector arg that doesn't map its parameters.
+     *
+     * <p>Call {@link SimpleVectorArg#mapped} to produce a vector arg that maps from a given type to
+     * a string.
+     */
+    public static class SimpleVectorArg<T> extends VectorArg<T> {
+      private final Iterable<T> values;
+
+      private SimpleVectorArg(Builder builder, @Nullable Collection<T> values) {
+        super(
+            false /* isNestedSet */,
+            values == null || values.isEmpty(),
+            values != null ? values.size() : 0,
+            builder.formatEach,
+            builder.beforeEach,
+            builder.joinWith);
+        this.values = values;
       }
-      if (vectorArg.hasFormatEach) {
-        arguments.add(argv.formatEach);
+
+      private SimpleVectorArg(Builder builder, @Nullable NestedSet<T> values) {
+        super(
+            true /* isNestedSet */,
+            values == null || values.isEmpty(),
+            -1 /* count */,
+            builder.formatEach,
+            builder.beforeEach,
+            builder.joinWith);
+        this.values = values;
       }
-      if (vectorArg.hasBeforeEach) {
-        arguments.add(argv.beforeEach);
-      }
-      if (vectorArg.hasJoinWith) {
-        arguments.add(argv.joinWith);
+
+      /** Each argument is mapped using the supplied map function */
+      public MappedVectorArg<T> mapped(Function<T, String> mapFn) {
+        return new MappedVectorArg<>(this, mapFn);
       }
     }
 
-    @SuppressWarnings("unchecked")
-    @Override
-    public int eval(List<Object> arguments, int argi, ImmutableList.Builder<String> builder) {
-      Iterable<Object> values = (Iterable<Object>) arguments.get(argi++);
-      List<Object> mutatedValues = Lists.newArrayList(values);
-      int count = mutatedValues.size();
-      if (hasMapEach) {
-        Function<Object, String> mapFn = (Function<Object, String>) arguments.get(argi++);
-        for (int i = 0; i < count; ++i) {
-          mutatedValues.set(i, mapFn.apply(mutatedValues.get(i)));
-        }
+    /** A vector arg that maps some type T to strings. */
+    public static class MappedVectorArg<T> extends VectorArg<String> {
+      private final Iterable<T> values;
+      private final Function<T, String> mapFn;
+
+      private MappedVectorArg(SimpleVectorArg<T> other, Function<T, String> mapFn) {
+        super(
+            other.isNestedSet,
+            other.isEmpty,
+            other.count,
+            other.formatEach,
+            other.beforeEach,
+            other.joinWith);
+        this.values = other.values;
+        this.mapFn = mapFn;
       }
-      for (int i = 0; i < count; ++i) {
-        mutatedValues.set(i, valueToString(mutatedValues.get(i)));
-      }
-      if (hasFormatEach) {
-        String formatStr = (String) arguments.get(argi++);
-        for (int i = 0; i < count; ++i) {
-          mutatedValues.set(i, String.format(formatStr, mutatedValues.get(i)));
-        }
-      }
-      if (hasBeforeEach) {
-        String beforeEach = (String) arguments.get(argi++);
-        for (int i = 0; i < count; ++i) {
-          builder.add(beforeEach);
-          builder.add((String) mutatedValues.get(i));
-        }
-      } else if (hasJoinWith) {
-        String joinWith = (String) arguments.get(argi++);
-        builder.add(Joiner.on(joinWith).join(mutatedValues));
-      } else {
-        for (int i = 0; i < count; ++i) {
-          builder.add((String) mutatedValues.get(i));
-        }
-      }
-      return argi;
     }
 
-    public static <T> Builder<T> of(@Nullable ImmutableCollection<T> values) {
-      return new Builder<>(values);
+    public static <T> SimpleVectorArg<T> of(Collection<T> values) {
+      return new Builder().each(values);
     }
 
-    public static <T> Builder<T> of(@Nullable NestedSet<T> values) {
-      return new Builder<>(values);
+    public static <T> SimpleVectorArg<T> of(NestedSet<T> values) {
+      return new Builder().each(values);
     }
 
-    /** Builder for a VectorArg */
-    public static class Builder<T> {
-      @Nullable private final Iterable<T> values;
-      private final boolean isEmpty;
+    /** Each argument is formatted via {@link String#format}. */
+    public static Builder format(@CompileTimeConstant String formatEach) {
+      return new Builder().format(formatEach);
+    }
+    /** Each argument is prepended by the beforeEach param. */
+    public static Builder addBefore(@CompileTimeConstant String beforeEach) {
+      return new Builder().addBefore(beforeEach);
+    }
+
+    /** Once all arguments have been evaluated, they are joined with this delimiter */
+    public static Builder join(String delimiter) {
+      return new Builder().join(delimiter);
+    }
+
+    /** Builder for {@link VectorArg}. */
+    public static class Builder {
       private String formatEach;
       private String beforeEach;
-      private Function<T, String> mapFn;
       private String joinWith;
 
-      private Builder(@Nullable ImmutableCollection<T> values) {
-        this(values, values == null || values.isEmpty());
-      }
-
-      private Builder(@Nullable NestedSet<T> values) {
-        this(values, values == null || values.isEmpty());
-      }
-
-      private Builder(@Nullable Iterable<T> values, boolean isEmpty) {
-        this.values = values;
-        this.isEmpty = isEmpty;
-      }
-
       /** Each argument is formatted via {@link String#format}. */
-      public Builder<T> formatEach(String formatEach) {
+      public Builder format(@CompileTimeConstant String formatEach) {
         Preconditions.checkNotNull(formatEach);
         this.formatEach = formatEach;
         return this;
       }
 
       /** Each argument is prepended by the beforeEach param. */
-      public Builder<T> beforeEach(String beforeEach) {
+      public Builder addBefore(@CompileTimeConstant String beforeEach) {
         Preconditions.checkNotNull(beforeEach);
         this.beforeEach = beforeEach;
         return this;
       }
 
-      /** Each argument is mapped using the supplied map function */
-      public Builder<T> mapEach(Function<T, String> mapFn) {
-        Preconditions.checkNotNull(mapFn);
-        this.mapFn = mapFn;
-        return this;
-      }
-
       /** Once all arguments have been evaluated, they are joined with this delimiter */
-      public Builder<T> joinWith(String delimiter) {
+      public Builder join(String delimiter) {
         Preconditions.checkNotNull(delimiter);
         this.joinWith = delimiter;
         return this;
       }
+
+      public <T> SimpleVectorArg<T> each(Collection<T> values) {
+        return new SimpleVectorArg<>(this, values);
+      }
+
+      public <T> SimpleVectorArg<T> each(NestedSet<T> values) {
+        return new SimpleVectorArg<>(this, values);
+      }
     }
 
-    @Override
-    public boolean equals(Object o) {
-      if (this == o) {
-        return true;
+    @SuppressWarnings("unchecked")
+    private static void push(List<Object> arguments, VectorArg<?> vectorArg) {
+      final Iterable<?> values;
+      final Function<?, String> mapFn;
+      if (vectorArg instanceof SimpleVectorArg) {
+        values = ((SimpleVectorArg) vectorArg).values;
+        mapFn = null;
+      } else {
+        values = ((MappedVectorArg) vectorArg).values;
+        mapFn = ((MappedVectorArg) vectorArg).mapFn;
       }
-      if (o == null || getClass() != o.getClass()) {
-        return false;
+      VectorArgFragment vectorArgFragment =
+          new VectorArgFragment(
+              vectorArg.isNestedSet,
+              mapFn != null,
+              vectorArg.formatEach != null,
+              vectorArg.beforeEach != null,
+              vectorArg.joinWith != null);
+      if (vectorArgFragment.hasBeforeEach && vectorArgFragment.hasJoinWith) {
+        throw new IllegalArgumentException("Cannot use both 'before' and 'join' in vector arg.");
       }
-      VectorArg vectorArg = (VectorArg) o;
-      return hasMapEach == vectorArg.hasMapEach
-          && hasFormatEach == vectorArg.hasFormatEach
-          && hasBeforeEach == vectorArg.hasBeforeEach
-          && hasJoinWith == vectorArg.hasJoinWith;
+      vectorArgFragment = VectorArgFragment.interner.intern(vectorArgFragment);
+      arguments.add(vectorArgFragment);
+      if (vectorArgFragment.isNestedSet) {
+        arguments.add(values);
+      } else {
+        // Simply expand any ordinary collection into the argv
+        arguments.add(vectorArg.count);
+        Iterables.addAll(arguments, values);
+      }
+      if (vectorArgFragment.hasMapEach) {
+        arguments.add(mapFn);
+      }
+      if (vectorArgFragment.hasFormatEach) {
+        arguments.add(vectorArg.formatEach);
+      }
+      if (vectorArgFragment.hasBeforeEach) {
+        arguments.add(vectorArg.beforeEach);
+      }
+      if (vectorArgFragment.hasJoinWith) {
+        arguments.add(vectorArg.joinWith);
+      }
     }
 
-    @Override
-    public int hashCode() {
-      return Objects.hashCode(hasMapEach, hasFormatEach, hasBeforeEach, hasJoinWith);
+    private static final class VectorArgFragment implements ArgvFragment {
+      private static Interner<VectorArgFragment> interner = BlazeInterners.newStrongInterner();
+
+      private final boolean isNestedSet;
+      private final boolean hasMapEach;
+      private final boolean hasFormatEach;
+      private final boolean hasBeforeEach;
+      private final boolean hasJoinWith;
+
+      private VectorArgFragment(
+          boolean isNestedSet,
+          boolean hasMapEach,
+          boolean hasFormatEach,
+          boolean hasBeforeEach,
+          boolean hasJoinWith) {
+        this.isNestedSet = isNestedSet;
+        this.hasMapEach = hasMapEach;
+        this.hasFormatEach = hasFormatEach;
+        this.hasBeforeEach = hasBeforeEach;
+        this.hasJoinWith = hasJoinWith;
+      }
+
+      @SuppressWarnings("unchecked")
+      @Override
+      public int eval(List<Object> arguments, int argi, ImmutableList.Builder<String> builder) {
+        final List<Object> mutatedValues;
+        final int count;
+        if (isNestedSet) {
+          Iterable<Object> values = (Iterable<Object>) arguments.get(argi++);
+          mutatedValues = Lists.newArrayList(values);
+          count = mutatedValues.size();
+        } else {
+          count = (Integer) arguments.get(argi++);
+          mutatedValues = new ArrayList<>(count);
+          for (int i = 0; i < count; ++i) {
+            mutatedValues.add(arguments.get(argi++));
+          }
+        }
+        if (hasMapEach) {
+          Function<Object, String> mapFn = (Function<Object, String>) arguments.get(argi++);
+          for (int i = 0; i < count; ++i) {
+            mutatedValues.set(i, mapFn.apply(mutatedValues.get(i)));
+          }
+        }
+        for (int i = 0; i < count; ++i) {
+          mutatedValues.set(i, valueToString(mutatedValues.get(i)));
+        }
+        if (hasFormatEach) {
+          String formatStr = (String) arguments.get(argi++);
+          for (int i = 0; i < count; ++i) {
+            mutatedValues.set(i, String.format(formatStr, mutatedValues.get(i)));
+          }
+        }
+        if (hasBeforeEach) {
+          String beforeEach = (String) arguments.get(argi++);
+          for (int i = 0; i < count; ++i) {
+            builder.add(beforeEach);
+            builder.add((String) mutatedValues.get(i));
+          }
+        } else if (hasJoinWith) {
+          String joinWith = (String) arguments.get(argi++);
+          builder.add(Joiner.on(joinWith).join(mutatedValues));
+        } else {
+          for (int i = 0; i < count; ++i) {
+            builder.add((String) mutatedValues.get(i));
+          }
+        }
+        return argi;
+      }
+
+      @Override
+      public boolean equals(Object o) {
+        if (this == o) {
+          return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+          return false;
+        }
+        VectorArgFragment vectorArgFragment = (VectorArgFragment) o;
+        return isNestedSet == vectorArgFragment.isNestedSet
+            && hasMapEach == vectorArgFragment.hasMapEach
+            && hasFormatEach == vectorArgFragment.hasFormatEach
+            && hasBeforeEach == vectorArgFragment.hasBeforeEach
+            && hasJoinWith == vectorArgFragment.hasJoinWith;
+      }
+
+      @Override
+      public int hashCode() {
+        return Objects.hashCode(isNestedSet, hasMapEach, hasFormatEach, hasBeforeEach, hasJoinWith);
+      }
     }
   }
 
@@ -343,8 +474,8 @@ public final class CustomCommandLine extends CommandLine {
     abstract void eval(ImmutableList.Builder<String> builder, ArtifactExpander artifactExpander);
 
     /**
-     * Returns a string that describes this argument fragment. The string can be used as part of
-     * an action key for the command line at analysis time.
+     * Returns a string that describes this argument fragment. The string can be used as part of an
+     * action key for the command line at analysis time.
      */
     abstract String describe();
 
@@ -385,14 +516,13 @@ public final class CustomCommandLine extends CommandLine {
     @Override
     public String describe() {
       return String.format(
-          "ExpandedTreeArtifactExecPathsArg{ treeArtifact: %s}",
-          treeArtifact.getExecPathString());
+          "ExpandedTreeArtifactExecPathsArg{ treeArtifact: %s}", treeArtifact.getExecPathString());
     }
   }
 
   /**
-   * An argument object that evaluates to the exec path of a {@link TreeFileArtifact}, enclosing
-   * the associated {@link TreeFileArtifact}.
+   * An argument object that evaluates to the exec path of a {@link TreeFileArtifact}, enclosing the
+   * associated {@link TreeFileArtifact}.
    */
   private static final class TreeFileArtifactExecPathArg extends TreeFileArtifactArgvFragment {
     private final Artifact placeHolderTreeArtifact;
@@ -413,18 +543,24 @@ public final class CustomCommandLine extends CommandLine {
   /**
    * A Builder class for CustomCommandLine with the appropriate methods.
    *
-   * <p>{@link Iterable} instances passed to {@code add*} methods will be stored internally as
-   * collections that are known to be immutable copies. This means that any {@link Iterable} that is
-   * not a {@link NestedSet} or {@link ImmutableList} may be copied.
+   * <p>{@link Collection} instances passed to {@code add*} methods will copied internally. If you
+   * have a {@link NestedSet}, these should never be flattened to a collection before being passed
+   * to the command line.
    *
-   * <p>{@code addFormatEach*} methods take an {@link Iterable} but use these as arguments to
-   * {@link String#format(String, Object...)} with a certain constant format string. For instance,
-   * if {@code format} is {@code "-I%s"}, then the final arguments may be
-   * {@code -Ifoo -Ibar -Ibaz}
+   * <p>Try to avoid coercing items to strings unnecessarily. Instead, use a more memory-efficient
+   * form that defers the string coercion until the last moment. In particular, avoid flattening
+   * lists and nested sets (see {@link VectorArg}).
    *
-   * <p>{@code addBeforeEach*} methods take an {@link Iterable} but insert a certain {@link String}
-   * once before each element in the string, meaning the total number of elements added is twice the
-   * length of the {@link Iterable}. For instance: {@code -f foo -f bar -f baz}
+   * <p>Three types are given special consideration:
+   *
+   * <ul>
+   *   <li>Any labels added will be added using {@link Label#getCanonicalForm()}
+   *   <li>Path fragments will be added using {@link PathFragment#toString}
+   *   <li>Artifacts will be added using {@link Artifact#getExecPathString()}.
+   * </ul>
+   *
+   * <p>Any other type must be mapped to a string. For collections, please use {@link
+   * VectorArg.SimpleVectorArg#mapped}.
    */
   public static final class Builder {
     // In order to avoid unnecessary wrapping, we keep raw objects here, but these objects are
@@ -432,127 +568,825 @@ public final class CustomCommandLine extends CommandLine {
     // toString() results.
     private final List<Object> arguments = new ArrayList<>();
 
-    /**
-     * Adds a value to the argument list.
-     *
-     * <p>At expansion time, the object is turned into a string by calling {@link Object#toString},
-     * unless it is an {@link Artifact}, in which case the exec path is used.
-     */
-    public Builder add(@Nullable Object value) {
-      if (value != null) {
-        arguments.add(value);
-      }
-      return this;
-    }
-
-    /** Adds the arg and the passed value if the value is non-null. */
-    public Builder add(String arg, @Nullable Object value) {
-      Preconditions.checkNotNull(arg);
-      if (value != null) {
-        arguments.add(arg);
-        add(value);
-      }
-      return this;
-    }
-
-    /** Adds the string representation of the passed values. */
-    public Builder add(@Nullable ImmutableCollection<?> values) {
-      if (values != null) {
-        arguments.add(values);
-      }
-      return this;
-    }
-
-    /** Adds the string representation of the passed values. */
-    public Builder add(@Nullable NestedSet<?> values) {
-      if (values != null) {
-        arguments.add(values);
-      }
-      return this;
+    public boolean isEmpty() {
+      return arguments.isEmpty();
     }
 
     /**
-     * Adds the arg followed by the string representation of the passed values.
+     * Adds a constant-value string.
      *
-     * <p>If values is empty, the arg isn't added.
+     * <p>Prefer this over its dynamic cousin, as using static strings saves memory.
      */
-    public Builder add(String arg, @Nullable ImmutableCollection<?> values) {
-      Preconditions.checkNotNull(arg);
-      if (values != null && !values.isEmpty()) {
-        arguments.add(arg);
-        add(values);
-      }
-      return this;
+    public Builder add(@CompileTimeConstant String value) {
+      return addObjectInternal(value);
     }
 
     /**
-     * Adds the arg followed by the string representation of the passed values.
+     * Adds a dynamically calculated string.
      *
-     * <p>If values is empty, the arg isn't added.
+     * <p>Consider whether using another method could be more efficient. For instance, rather than
+     * calling this method with an Artifact's exec path, just add the artifact itself. It will
+     * lazily get converted to its exec path. Same with labels, path fragments, and many other
+     * objects.
+     *
+     * <p>If you are joining some list into a single argument, consider using {@link VectorArg}.
+     *
+     * <p>If you are formatting a string, consider using {@link Builder#addFormatted(String,
+     * Object...)}.
+     *
+     * <p>There are many other ways you can try to avoid calling this. In general, try to use
+     * constants or objects that are already on the heap elsewhere.
      */
-    public Builder add(String arg, @Nullable NestedSet<?> values) {
-      Preconditions.checkNotNull(arg);
-      if (values != null && !values.isEmpty()) {
-        arguments.add(arg);
-        add(values);
-      }
-      return this;
+    public Builder addDynamicString(@Nullable String value) {
+      return addObjectInternal(value);
     }
 
     /**
-     * Adds the expansion of the passed vector arg.
+     * Adds a label value by calling {@link Label#getCanonicalForm}.
      *
-     * <p>Please see {@link VectorArg} for more information.
+     * <p>Prefer this over manually calling {@link Label#getCanonicalForm}, as it avoids a copy of
+     * the label value.
      */
-    public Builder add(VectorArg.Builder<?> vectorArg) {
-      if (!vectorArg.isEmpty) {
-        VectorArg.push(arguments, vectorArg);
-      }
-      return this;
+    public Builder addLabel(@Nullable Label value) {
+      return addObjectInternal(value);
     }
 
     /**
-     * Adds the arg followed by the expansion of the vector arg.
+     * Adds an artifact by calling {@link PathFragment#getPathString}.
      *
-     * <p>Please see {@link VectorArg} for more information.
-     *
-     * <p>If values is empty, the arg isn't added.
+     * <p>Prefer this over manually calling {@link PathFragment#getPathString}, as it avoids storing
+     * a copy of the path string.
      */
-    public Builder add(String arg, VectorArg.Builder<?> vectorArg) {
-      Preconditions.checkNotNull(arg);
-      if (!vectorArg.isEmpty) {
-        arguments.add(arg);
-        add(vectorArg);
-      }
-      return this;
+    public Builder addPath(@Nullable PathFragment value) {
+      return addObjectInternal(value);
     }
 
-    public Builder add(@Nullable CustomArgv arg) {
-      if (arg != null) {
-        arguments.add(arg);
-      }
-      return this;
+    /**
+     * Adds an artifact by calling {@link Artifact#getExecPath}.
+     *
+     * <p>Prefer this over manually calling {@link Artifact#getExecPath}, as it avoids storing a
+     * copy of the artifact path string.
+     */
+    public Builder addExecPath(@Nullable Artifact value) {
+      return addObjectInternal(value);
     }
 
-    public Builder add(@Nullable CustomMultiArgv arg) {
-      if (arg != null) {
-        arguments.add(arg);
-      }
-      return this;
+    /** Adds a lazily expanded string. */
+    public Builder addLazyString(@Nullable LazyString value) {
+      return addObjectInternal(value);
+    }
+
+    /**
+     * Adds a string argument to the command line.
+     *
+     * <p>If the value is null, neither the arg nor the value is added.
+     */
+    public Builder add(@CompileTimeConstant String arg, @Nullable String value) {
+      return addObjectInternal(arg, value);
+    }
+
+    /**
+     * Adds a label value by calling {@link Label#getCanonicalForm}.
+     *
+     * <p>Prefer this over manually calling {@link Label#getCanonicalForm}, as it avoids storing a
+     * copy of the label value.
+     *
+     * <p>If the value is null, neither the arg nor the value is added.
+     */
+    public Builder addLabel(@CompileTimeConstant String arg, @Nullable Label value) {
+      return addObjectInternal(arg, value);
+    }
+
+    /**
+     * Adds an artifact by calling {@link PathFragment#getPathString}.
+     *
+     * <p>Prefer this over manually calling {@link PathFragment#getPathString}, as it avoids storing
+     * a copy of the path string.
+     *
+     * <p>If the value is null, neither the arg nor the value is added.
+     */
+    public Builder addPath(@CompileTimeConstant String arg, @Nullable PathFragment value) {
+      return addObjectInternal(arg, value);
+    }
+
+    /**
+     * Adds an artifact by calling {@link Artifact#getExecPath}.
+     *
+     * <p>Prefer this over manually calling {@link Artifact#getExecPath}, as it avoids storing a
+     * copy of the artifact path string.
+     *
+     * <p>If the value is null, neither the arg nor the value is added.
+     */
+    public Builder addExecPath(@CompileTimeConstant String arg, @Nullable Artifact value) {
+      return addObjectInternal(arg, value);
+    }
+
+    /** Adds a lazily expanded string. */
+    public Builder addLazyString(@CompileTimeConstant String arg, @Nullable LazyString value) {
+      return addObjectInternal(arg, value);
     }
 
     /** Calls {@link String#format} at command line expansion time. */
-    public Builder addFormatted(String formatStr, Object... args) {
+    @FormatMethod
+    public Builder addFormatted(@FormatString String formatStr, Object... args) {
       Preconditions.checkNotNull(formatStr);
       FormatArg.push(arguments, formatStr, args);
       return this;
     }
 
-    /** Cancatenates the passed prefix string and the object's string representation. */
-    public Builder addWithPrefix(String prefix, @Nullable Object arg) {
-      Preconditions.checkNotNull(prefix);
+    /** Concatenates the passed prefix string and the string. */
+    public Builder addPrefixed(@CompileTimeConstant String prefix, @Nullable String arg) {
+      return addPrefixedInternal(prefix, arg);
+    }
+
+    /** Concatenates the passed prefix string and the label using {@link Label#getCanonicalForm}. */
+    public Builder addPrefixedLabel(@CompileTimeConstant String prefix, @Nullable Label arg) {
+      return addPrefixedInternal(prefix, arg);
+    }
+
+    /** Concatenates the passed prefix string and the path. */
+    public Builder addPrefixedPath(@CompileTimeConstant String prefix, @Nullable PathFragment arg) {
+      return addPrefixedInternal(prefix, arg);
+    }
+
+    /** Concatenates the passed prefix string and the artifact's exec path. */
+    public Builder addPrefixedExecPath(@CompileTimeConstant String prefix, @Nullable Artifact arg) {
+      return addPrefixedInternal(prefix, arg);
+    }
+
+    /**
+     * Concatenates the passed prefix string and the object's string representation.
+     *
+     * <p>Prefer {@link Builder#addPrefixed}, as it will be more memory efficient.
+     */
+    Builder addWithDynamicPrefix(String prefix, @Nullable Object arg) {
+      return addPrefixedInternal(prefix, arg);
+    }
+
+    /**
+     * Adds the passed strings to the command line.
+     *
+     * <p>If you are converting long lists or nested sets of a different type to string lists,
+     * please try to use a different method that supports what you are trying to do directly.
+     */
+    public Builder addAll(@Nullable Collection<String> values) {
+      return addCollectionInternal(values);
+    }
+
+    /** Adds the passed paths to the command line. */
+    public Builder addPaths(@Nullable Collection<PathFragment> values) {
+      return addCollectionInternal(values);
+    }
+
+    /**
+     * Adds the artifacts' exec paths to the command line.
+     *
+     * <p>Do not use this method if the list is derived from a flattened nested set. Instead, figure
+     * out how to avoid flattening the set and use {@link
+     * Builder#addExecPaths(NestedSet<Artifact>)}.
+     */
+    public Builder addExecPaths(@Nullable Collection<Artifact> values) {
+      return addCollectionInternal(values);
+    }
+
+    /**
+     * Adds the passed strings to the command line.
+     *
+     * <p>If you are converting long lists or nested sets of a different type to string lists,
+     * please try to use a different method that supports what you are trying to do directly.
+     */
+    public Builder addAll(@Nullable NestedSet<String> values) {
+      return addNestedSetInternal(values);
+    }
+
+    /** Adds the passed paths to the command line. */
+    public Builder addPaths(@Nullable NestedSet<PathFragment> values) {
+      return addNestedSetInternal(values);
+    }
+
+    /** Adds the artifacts' exec paths to the command line. */
+    public Builder addExecPaths(@Nullable NestedSet<Artifact> values) {
+      return addNestedSetInternal(values);
+    }
+
+    /**
+     * Adds the arg followed by the passed strings.
+     *
+     * <p>If you are converting long lists or nested sets of a different type to string lists,
+     * please try to use a different method that supports what you are trying to do directly.
+     *
+     * <p>If values is empty, the arg isn't added.
+     */
+    public Builder addAll(@CompileTimeConstant String arg, @Nullable Collection<String> values) {
+      return addCollectionInternal(arg, values);
+    }
+
+    /**
+     * Adds the arg followed by the path strings.
+     *
+     * <p>If values is empty, the arg isn't added.
+     */
+    public Builder addPaths(
+        @CompileTimeConstant String arg, @Nullable Collection<PathFragment> values) {
+      return addCollectionInternal(arg, values);
+    }
+
+    /**
+     * Adds the arg followed by the artifacts' exec paths.
+     *
+     * <p>Do not use this method if the list is derived from a flattened nested set. Instead, figure
+     * out how to avoid flattening the set and use {@link Builder#addExecPaths(String,
+     * NestedSet<Artifact>)}.
+     *
+     * <p>If values is empty, the arg isn't added.
+     */
+    public Builder addExecPaths(
+        @CompileTimeConstant String arg, @Nullable Collection<Artifact> values) {
+      return addCollectionInternal(arg, values);
+    }
+
+    /**
+     * Adds the arg followed by the passed strings.
+     *
+     * <p>If values is empty, the arg isn't added.
+     */
+    public Builder addAll(@CompileTimeConstant String arg, @Nullable NestedSet<String> values) {
+      return addNestedSetInternal(arg, values);
+    }
+
+    /**
+     * Adds the arg followed by the path fragments.
+     *
+     * <p>If values is empty, the arg isn't added.
+     */
+    public Builder addPaths(
+        @CompileTimeConstant String arg, @Nullable NestedSet<PathFragment> values) {
+      return addNestedSetInternal(arg, values);
+    }
+
+    /**
+     * Adds the arg followed by the artifacts' exec paths.
+     *
+     * <p>If values is empty, the arg isn't added.
+     */
+    public Builder addExecPaths(
+        @CompileTimeConstant String arg, @Nullable NestedSet<Artifact> values) {
+      return addNestedSetInternal(arg, values);
+    }
+
+    /** Adds the passed vector arg. See {@link VectorArg}. */
+    public Builder addAll(VectorArg<String> vectorArg) {
+      return addVectorArgInternal(vectorArg);
+    }
+
+    /** Adds the passed vector arg. See {@link VectorArg}. */
+    public Builder addPaths(VectorArg<PathFragment> vectorArg) {
+      return addVectorArgInternal(vectorArg);
+    }
+
+    /** Adds the passed vector arg. See {@link VectorArg}. */
+    public Builder addExecPaths(VectorArg<Artifact> vectorArg) {
+      return addVectorArgInternal(vectorArg);
+    }
+
+    /**
+     * Adds the arg followed by the passed vector arg. See {@link VectorArg}.
+     *
+     * <p>If values is empty, the arg isn't added.
+     */
+    public Builder addAll(@CompileTimeConstant String arg, VectorArg<String> vectorArg) {
+      return addVectorArgInternal(arg, vectorArg);
+    }
+
+    /**
+     * Adds the arg followed by the passed vector arg. See {@link VectorArg}.
+     *
+     * <p>If values is empty, the arg isn't added.
+     */
+    public Builder addPaths(@CompileTimeConstant String arg, VectorArg<PathFragment> vectorArg) {
+      return addVectorArgInternal(arg, vectorArg);
+    }
+
+    /**
+     * Adds the arg followed by the passed vector arg. See {@link VectorArg}.
+     *
+     * <p>If values is empty, the arg isn't added.
+     */
+    public Builder addExecPaths(@CompileTimeConstant String arg, VectorArg<Artifact> vectorArg) {
+      return addVectorArgInternal(arg, vectorArg);
+    }
+
+    /** Adds the passed mapped values to the command line. */
+    public <T> Builder addAll(@Nullable NestedSet<T> values, Function<T, String> mapFn) {
+      return addAll(VectorArg.of(values).mapped(mapFn));
+    }
+
+    /** Adds the passed mapped values to the command line. */
+    public <T> Builder addAll(@Nullable Collection<T> values, Function<T, String> mapFn) {
+      return addAll(VectorArg.of(values).mapped(mapFn));
+    }
+
+    /**
+     * Adds the arg followed by the passed mapped values.
+     *
+     * <p>If values is empty, the arg isn't added.
+     */
+    public <T> Builder addAll(
+        @CompileTimeConstant String arg,
+        @Nullable Collection<T> values,
+        Function<T, String> mapFn) {
+      return addAll(arg, VectorArg.of(values).mapped(mapFn));
+    }
+
+    /**
+     * Adds the arg followed by the mapped values.
+     *
+     * <p>If values is empty, the arg isn't added.
+     */
+    public <T> Builder addAll(
+        @CompileTimeConstant String arg, @Nullable NestedSet<T> values, Function<T, String> mapFn) {
+      return addAll(arg, VectorArg.of(values).mapped(mapFn));
+    }
+
+    /** Adds the values joined with the supplied string. */
+    public Builder addJoined(String delimiter, Collection<String> values) {
+      return addAll(VectorArg.join(delimiter).each(values));
+    }
+
+    /** Adds the path strings joined with the supplied string. */
+    public Builder addJoinedPaths(String delimiter, Collection<PathFragment> values) {
+      return addPaths(VectorArg.join(delimiter).each(values));
+    }
+
+    /** Adds the exec path strings joined with the supplied string. */
+    public Builder addJoinedExecPaths(String delimiter, Collection<Artifact> values) {
+      return addExecPaths(VectorArg.join(delimiter).each(values));
+    }
+
+    /** Adds the mapped values joined with the supplied string. */
+    public <T> Builder addJoined(
+        String delimiter, Collection<T> values, Function<T, String> mapFn) {
+      return addAll(VectorArg.join(delimiter).each(values).mapped(mapFn));
+    }
+
+    /** Adds the values joined with the supplied string. */
+    public Builder addJoined(String delimiter, NestedSet<String> values) {
+      return addAll(VectorArg.join(delimiter).each(values));
+    }
+
+    /** Adds the path strings joined with the supplied string. */
+    public Builder addJoinedPaths(String delimiter, NestedSet<PathFragment> values) {
+      return addPaths(VectorArg.join(delimiter).each(values));
+    }
+
+    /** Adds the exec path strings joined with the supplied string. */
+    public Builder addJoinedExecPaths(String delimiter, NestedSet<Artifact> values) {
+      return addExecPaths(VectorArg.join(delimiter).each(values));
+    }
+
+    /** Adds the mapped values joined with the supplied string. */
+    public <T> Builder addJoined(String delimiter, NestedSet<T> values, Function<T, String> mapFn) {
+      return addAll(VectorArg.join(delimiter).each(values).mapped(mapFn));
+    }
+
+    /** Adds the values joined with the supplied string. */
+    public Builder addJoined(
+        @CompileTimeConstant String arg, String delimiter, Collection<String> values) {
+      return addAll(arg, VectorArg.join(delimiter).each(values));
+    }
+
+    /** Adds the path strings joined with the supplied string. */
+    public Builder addJoinedPaths(
+        @CompileTimeConstant String arg, String delimiter, Collection<PathFragment> values) {
+      return addPaths(arg, VectorArg.join(delimiter).each(values));
+    }
+
+    /** Adds the exec path strings joined with the supplied string. */
+    public Builder addJoinedExecPaths(
+        @CompileTimeConstant String arg, String delimiter, Collection<Artifact> values) {
+      return addExecPaths(arg, VectorArg.join(delimiter).each(values));
+    }
+
+    /** Adds the mapped values joined with the supplied string. */
+    public <T> Builder addJoined(
+        @CompileTimeConstant String arg,
+        String delimiter,
+        Collection<T> values,
+        Function<T, String> mapFn) {
+      return addAll(arg, VectorArg.join(delimiter).each(values).mapped(mapFn));
+    }
+
+    /** Adds the values joined with the supplied string. */
+    public Builder addJoined(
+        @CompileTimeConstant String arg, String delimiter, NestedSet<String> values) {
+      return addAll(arg, VectorArg.join(delimiter).each(values));
+    }
+
+    /** Adds the path strings joined with the supplied string. */
+    public Builder addJoinedPaths(
+        @CompileTimeConstant String arg, String delimiter, NestedSet<PathFragment> values) {
+      return addPaths(arg, VectorArg.join(delimiter).each(values));
+    }
+
+    /** Adds the exec path strings joined with the supplied string. */
+    public Builder addJoinedExecPaths(
+        @CompileTimeConstant String arg, String delimiter, NestedSet<Artifact> values) {
+      return addExecPaths(arg, VectorArg.join(delimiter).each(values));
+    }
+
+    /** Adds the mapped values joined with the supplied string. */
+    public <T> Builder addJoined(
+        @CompileTimeConstant String arg,
+        String delimiter,
+        NestedSet<T> values,
+        Function<T, String> mapFn) {
+      return addAll(arg, VectorArg.join(delimiter).each(values).mapped(mapFn));
+    }
+
+    /** Adds the values with each value formatted by the supplied format string. */
+    public Builder addFormatEach(@CompileTimeConstant String formatStr, Collection<String> values) {
+      return addAll(VectorArg.format(formatStr).each(values));
+    }
+
+    /** Adds the path strings with each path formatted by the supplied format string. */
+    public Builder addFormatEachPath(
+        @CompileTimeConstant String formatStr, Collection<PathFragment> values) {
+      return addPaths(VectorArg.format(formatStr).each(values));
+    }
+
+    /** Adds the exec path strings with each path formatted by the supplied format string. */
+    public Builder addFormatEachExecPath(
+        @CompileTimeConstant String formatStr, Collection<Artifact> values) {
+      return addExecPaths(VectorArg.format(formatStr).each(values));
+    }
+
+    /** Adds the mapped values with each value formatted by the supplied format string. */
+    public <T> Builder addFormatEach(
+        @CompileTimeConstant String formatStr, Collection<T> values, Function<T, String> mapFn) {
+      return addAll(VectorArg.format(formatStr).each(values).mapped(mapFn));
+    }
+
+    /** Adds the values with each value formatted by the supplied format string. */
+    public Builder addFormatEach(@CompileTimeConstant String formatStr, NestedSet<String> values) {
+      return addAll(VectorArg.format(formatStr).each(values));
+    }
+
+    /** Adds the path strings with each path formatted by the supplied format string. */
+    public Builder addFormatEachPath(
+        @CompileTimeConstant String formatStr, NestedSet<PathFragment> values) {
+      return addPaths(VectorArg.format(formatStr).each(values));
+    }
+
+    /** Adds the exec path strings with each path formatted by the supplied format string. */
+    public Builder addFormatEachExecPath(
+        @CompileTimeConstant String formatStr, NestedSet<Artifact> values) {
+      return addExecPaths(VectorArg.format(formatStr).each(values));
+    }
+
+    /** Adds the mapped values with each value formatted by the supplied format string. */
+    public <T> Builder addFormatEach(
+        @CompileTimeConstant String formatStr, NestedSet<T> values, Function<T, String> mapFn) {
+      return addAll(VectorArg.format(formatStr).each(values).mapped(mapFn));
+    }
+
+    /** Adds the values with each value formatted by the supplied format string. */
+    public Builder addFormatEach(
+        @CompileTimeConstant String arg,
+        @CompileTimeConstant String formatStr,
+        Collection<String> values) {
+      return addAll(arg, VectorArg.format(formatStr).each(values));
+    }
+
+    /** Adds the path strings with each path formatted by the supplied format string. */
+    public Builder addFormatEachPath(
+        @CompileTimeConstant String arg,
+        @CompileTimeConstant String formatStr,
+        Collection<PathFragment> values) {
+      return addPaths(arg, VectorArg.format(formatStr).each(values));
+    }
+
+    /** Adds the exec path strings with each path formatted by the supplied format string. */
+    public Builder addFormatEachExecPath(
+        @CompileTimeConstant String arg,
+        @CompileTimeConstant String formatStr,
+        Collection<Artifact> values) {
+      return addExecPaths(arg, VectorArg.format(formatStr).each(values));
+    }
+
+    /** Adds the mapped values with each value formatted by the supplied format string. */
+    public <T> Builder addFormatEach(
+        @CompileTimeConstant String arg,
+        @CompileTimeConstant String formatStr,
+        Collection<T> values,
+        Function<T, String> mapFn) {
+      return addAll(arg, VectorArg.format(formatStr).each(values).mapped(mapFn));
+    }
+
+    /** Adds the values with each value formatted by the supplied format string. */
+    public Builder addFormatEach(
+        @CompileTimeConstant String arg,
+        @CompileTimeConstant String formatStr,
+        NestedSet<String> values) {
+      return addAll(arg, VectorArg.format(formatStr).each(values));
+    }
+
+    /** Adds the path strings with each path formatted by the supplied format string. */
+    public Builder addFormatEachPath(
+        @CompileTimeConstant String arg,
+        @CompileTimeConstant String formatStr,
+        NestedSet<PathFragment> values) {
+      return addPaths(arg, VectorArg.format(formatStr).each(values));
+    }
+
+    /** Adds the exec path strings with each path formatted by the supplied format string. */
+    public Builder addFormatEachExecPath(
+        @CompileTimeConstant String arg,
+        @CompileTimeConstant String formatStr,
+        NestedSet<Artifact> values) {
+      return addExecPaths(arg, VectorArg.format(formatStr).each(values));
+    }
+
+    /** Adds the mapped values with each value formatted by the supplied format string. */
+    public <T> Builder addFormatEach(
+        @CompileTimeConstant String arg,
+        @CompileTimeConstant String formatStr,
+        NestedSet<T> values,
+        Function<T, String> mapFn) {
+      return addAll(arg, VectorArg.format(formatStr).each(values).mapped(mapFn));
+    }
+
+    /** Adds the values with each value formatted by the supplied format string, then joined. */
+    public Builder addFormatEachJoined(
+        @CompileTimeConstant String formatStr, String delimiter, Collection<String> values) {
+      return addAll(VectorArg.format(formatStr).join(delimiter).each(values));
+    }
+
+    /**
+     * Adds the path strings with each path formatted by the supplied format string, then joined.
+     */
+    public Builder addFormatEachPathJoined(
+        @CompileTimeConstant String formatStr, String delimiter, Collection<PathFragment> values) {
+      return addPaths(VectorArg.format(formatStr).join(delimiter).each(values));
+    }
+
+    /**
+     * Adds the exec path strings with each path formatted by the supplied format string, then
+     * joined.
+     */
+    public Builder addFormatEachExecPathJoined(
+        @CompileTimeConstant String formatStr, String delimiter, Collection<Artifact> values) {
+      return addExecPaths(VectorArg.format(formatStr).join(delimiter).each(values));
+    }
+
+    /**
+     * Adds the mapped values with each value formatted by the supplied format string, then joined.
+     */
+    public <T> Builder addFormatEachJoined(
+        @CompileTimeConstant String formatStr,
+        String delimiter,
+        Collection<T> values,
+        Function<T, String> mapFn) {
+      return addAll(VectorArg.format(formatStr).join(delimiter).each(values).mapped(mapFn));
+    }
+
+    /** Adds the values with each value formatted by the supplied format string, then joined. */
+    public Builder addFormatEachJoined(
+        @CompileTimeConstant String formatStr, String delimiter, NestedSet<String> values) {
+      return addAll(VectorArg.format(formatStr).join(delimiter).each(values));
+    }
+
+    /**
+     * Adds the path strings with each path formatted by the supplied format string, then joined.
+     */
+    public Builder addFormatEachPathJoined(
+        @CompileTimeConstant String formatStr, String delimiter, NestedSet<PathFragment> values) {
+      return addPaths(VectorArg.format(formatStr).join(delimiter).each(values));
+    }
+
+    /**
+     * Adds the exec path strings with each path formatted by the supplied format string, then
+     * joined.
+     */
+    public Builder addFormatEachExecPathJoined(
+        @CompileTimeConstant String formatStr, String delimiter, NestedSet<Artifact> values) {
+      return addExecPaths(VectorArg.format(formatStr).join(delimiter).each(values));
+    }
+
+    /**
+     * Adds the mapped values with each value formatted by the supplied format string, then joined.
+     */
+    public <T> Builder addFormatEachJoined(
+        @CompileTimeConstant String formatStr,
+        String delimiter,
+        NestedSet<T> values,
+        Function<T, String> mapFn) {
+      return addAll(VectorArg.format(formatStr).join(delimiter).each(values).mapped(mapFn));
+    }
+
+    /** Adds the values with each value formatted by the supplied format string, then joined. */
+    public Builder addFormatEachJoined(
+        @CompileTimeConstant String arg,
+        @CompileTimeConstant String formatStr,
+        String delimiter,
+        Collection<String> values) {
+      return addAll(arg, VectorArg.format(formatStr).join(delimiter).each(values));
+    }
+
+    /**
+     * Adds the path strings with each path formatted by the supplied format string, then joined.
+     */
+    public Builder addFormatEachPathJoined(
+        @CompileTimeConstant String arg,
+        @CompileTimeConstant String formatStr,
+        String delimiter,
+        Collection<PathFragment> values) {
+      return addPaths(arg, VectorArg.format(formatStr).join(delimiter).each(values));
+    }
+
+    /**
+     * Adds the exec path strings with each path formatted by the supplied format string, then
+     * joined.
+     */
+    public Builder addFormatEachExecPathJoined(
+        @CompileTimeConstant String arg,
+        @CompileTimeConstant String formatStr,
+        String delimiter,
+        Collection<Artifact> values) {
+      return addExecPaths(arg, VectorArg.format(formatStr).join(delimiter).each(values));
+    }
+
+    /**
+     * Adds the mapped values with each value formatted by the supplied format string, then joined.
+     */
+    public <T> Builder addFormatEachJoined(
+        @CompileTimeConstant String arg,
+        @CompileTimeConstant String formatStr,
+        String delimiter,
+        Collection<T> values,
+        Function<T, String> mapFn) {
+      return addAll(arg, VectorArg.format(formatStr).join(delimiter).each(values).mapped(mapFn));
+    }
+
+    /** Adds the values with each value formatted by the supplied format string, then joined. */
+    public Builder addFormatEachJoined(
+        @CompileTimeConstant String arg,
+        @CompileTimeConstant String formatStr,
+        String delimiter,
+        NestedSet<String> values) {
+      return addAll(arg, VectorArg.format(formatStr).join(delimiter).each(values));
+    }
+
+    /**
+     * Adds the path strings with each path formatted by the supplied format string, then joined.
+     */
+    public Builder addFormatEachPathJoined(
+        @CompileTimeConstant String arg,
+        @CompileTimeConstant String formatStr,
+        String delimiter,
+        NestedSet<PathFragment> values) {
+      return addPaths(arg, VectorArg.format(formatStr).join(delimiter).each(values));
+    }
+
+    /**
+     * Adds the exec path strings with each path formatted by the supplied format string, then
+     * joined.
+     */
+    public Builder addFormatEachExecPathJoined(
+        @CompileTimeConstant String arg,
+        @CompileTimeConstant String formatStr,
+        String delimiter,
+        NestedSet<Artifact> values) {
+      return addExecPaths(arg, VectorArg.format(formatStr).join(delimiter).each(values));
+    }
+
+    /**
+     * Adds the mapped values with each value formatted by the supplied format string, then joined.
+     */
+    public <T> Builder addFormatEachJoined(
+        @CompileTimeConstant String arg,
+        @CompileTimeConstant String formatStr,
+        String delimiter,
+        NestedSet<T> values,
+        Function<T, String> mapFn) {
+      return addAll(arg, VectorArg.format(formatStr).join(delimiter).each(values).mapped(mapFn));
+    }
+
+    /** Adds the beforeEach string and the values interspersed. */
+    public Builder addBeforeEach(
+        @CompileTimeConstant String beforeEach, Collection<String> values) {
+      return addAll(VectorArg.addBefore(beforeEach).each(values));
+    }
+
+    /** Adds the beforeEach string and the path strings interspersed. */
+    public Builder addBeforeEachPath(
+        @CompileTimeConstant String beforeEach, Collection<PathFragment> values) {
+      return addPaths(VectorArg.addBefore(beforeEach).each(values));
+    }
+
+    /** Adds the beforeEach string and the exec path strings interspersed. */
+    public Builder addBeforeEachExecPath(
+        @CompileTimeConstant String beforeEach, Collection<Artifact> values) {
+      return addExecPaths(VectorArg.addBefore(beforeEach).each(values));
+    }
+
+    /** Adds the beforeEach string and the mapped values interspersed. */
+    public <T> Builder addBeforeEach(
+        @CompileTimeConstant String beforeEach, Collection<T> values, Function<T, String> mapFn) {
+      return addAll(VectorArg.addBefore(beforeEach).each(values).mapped(mapFn));
+    }
+
+    /** Adds the beforeEach string and the values interspersed. */
+    public Builder addBeforeEach(@CompileTimeConstant String beforeEach, NestedSet<String> values) {
+      return addAll(VectorArg.addBefore(beforeEach).each(values));
+    }
+
+    /** Adds the beforeEach string and the path strings interspersed. */
+    public Builder addBeforeEachPath(
+        @CompileTimeConstant String beforeEach, NestedSet<PathFragment> values) {
+      return addPaths(VectorArg.addBefore(beforeEach).each(values));
+    }
+
+    /** Adds the beforeEach string and the exec path strings interspersed. */
+    public Builder addBeforeEachExecPath(
+        @CompileTimeConstant String beforeEach, NestedSet<Artifact> values) {
+      return addExecPaths(VectorArg.addBefore(beforeEach).each(values));
+    }
+
+    /** Adds the beforeEach string and the values interspersed. */
+    public <T> Builder addBeforeEach(
+        @CompileTimeConstant String beforeEach, NestedSet<T> values, Function<T, String> mapFn) {
+      return addAll(VectorArg.addBefore(beforeEach).each(values).mapped(mapFn));
+    }
+
+    /** Adds the beforeEach string and the values interspersed. */
+    public Builder addBeforeEachFormatted(
+        @CompileTimeConstant String beforeEach,
+        @CompileTimeConstant String formatStr,
+        Collection<String> values) {
+      return addAll(VectorArg.addBefore(beforeEach).format(formatStr).each(values));
+    }
+
+    /** Adds the beforeEach string and the path strings interspersed. */
+    public Builder addBeforeEachPathFormatted(
+        @CompileTimeConstant String beforeEach,
+        @CompileTimeConstant String formatStr,
+        Collection<PathFragment> values) {
+      return addPaths(VectorArg.addBefore(beforeEach).format(formatStr).each(values));
+    }
+
+    /** Adds the beforeEach string and the exec path strings interspersed. */
+    public Builder addBeforeEachExecPathFormatted(
+        @CompileTimeConstant String beforeEach,
+        @CompileTimeConstant String formatStr,
+        Collection<Artifact> values) {
+      return addExecPaths(VectorArg.addBefore(beforeEach).format(formatStr).each(values));
+    }
+
+    /** Adds the beforeEach string and the mapped values interspersed. */
+    public <T> Builder addBeforeEachFormatted(
+        @CompileTimeConstant String beforeEach,
+        @CompileTimeConstant String formatStr,
+        Collection<T> values,
+        Function<T, String> mapFn) {
+      return addAll(VectorArg.addBefore(beforeEach).format(formatStr).each(values).mapped(mapFn));
+    }
+
+    /** Adds the beforeEach string and the values interspersed. */
+    public Builder addBeforeEachFormatted(
+        @CompileTimeConstant String beforeEach,
+        @CompileTimeConstant String formatStr,
+        NestedSet<String> values) {
+      return addAll(VectorArg.addBefore(beforeEach).format(formatStr).each(values));
+    }
+
+    /** Adds the beforeEach string and the path strings interspersed. */
+    public Builder addBeforeEachPathFormatted(
+        @CompileTimeConstant String beforeEach,
+        @CompileTimeConstant String formatStr,
+        NestedSet<PathFragment> values) {
+      return addPaths(VectorArg.addBefore(beforeEach).format(formatStr).each(values));
+    }
+
+    /** Adds the beforeEach string and the exec path strings interspersed. */
+    public Builder addBeforeEachExecPathFormatted(
+        @CompileTimeConstant String beforeEach,
+        @CompileTimeConstant String formatStr,
+        NestedSet<Artifact> values) {
+      return addExecPaths(VectorArg.addBefore(beforeEach).format(formatStr).each(values));
+    }
+
+    /** Adds the beforeEach string and the mapped values interspersed. */
+    public <T> Builder addBeforeEachFormatted(
+        @CompileTimeConstant String beforeEach,
+        @CompileTimeConstant String formatStr,
+        NestedSet<T> values,
+        Function<T, String> mapFn) {
+      return addAll(VectorArg.addBefore(beforeEach).format(formatStr).each(values).mapped(mapFn));
+    }
+
+    public Builder addCustomMultiArgv(@Nullable CustomMultiArgv arg) {
       if (arg != null) {
-        PrefixArg.push(arguments, prefix, arg);
+        arguments.add(arg);
       }
       return this;
     }
@@ -606,8 +1440,79 @@ public final class CustomCommandLine extends CommandLine {
       return new CustomCommandLine(arguments);
     }
 
-    public boolean isEmpty() {
-      return arguments.isEmpty();
+    private Builder addObjectInternal(@Nullable Object value) {
+      if (value != null) {
+        arguments.add(value);
+      }
+      return this;
+    }
+
+    /** Adds the arg and the passed value if the value is non-null. */
+    private Builder addObjectInternal(@CompileTimeConstant String arg, @Nullable Object value) {
+      Preconditions.checkNotNull(arg);
+      if (value != null) {
+        arguments.add(arg);
+        addObjectInternal(value);
+      }
+      return this;
+    }
+
+    private Builder addPrefixedInternal(String prefix, @Nullable Object arg) {
+      Preconditions.checkNotNull(prefix);
+      if (arg != null) {
+        PrefixArg.push(arguments, prefix, arg);
+      }
+      return this;
+    }
+
+    private Builder addCollectionInternal(@Nullable Collection<?> values) {
+      if (values != null) {
+        addVectorArgInternal(VectorArg.of(values));
+      }
+      return this;
+    }
+
+    private Builder addCollectionInternal(
+        @CompileTimeConstant String arg, @Nullable Collection<?> values) {
+      Preconditions.checkNotNull(arg);
+      if (values != null && !values.isEmpty()) {
+        arguments.add(arg);
+        addCollectionInternal(values);
+      }
+      return this;
+    }
+
+    private Builder addNestedSetInternal(@Nullable NestedSet<?> values) {
+      if (values != null) {
+        arguments.add(values);
+      }
+      return this;
+    }
+
+    private Builder addNestedSetInternal(
+        @CompileTimeConstant String arg, @Nullable NestedSet<?> values) {
+      Preconditions.checkNotNull(arg);
+      if (values != null && !values.isEmpty()) {
+        arguments.add(arg);
+        addNestedSetInternal(values);
+      }
+      return this;
+    }
+
+    private Builder addVectorArgInternal(VectorArg<?> vectorArg) {
+      if (!vectorArg.isEmpty) {
+        VectorArg.push(arguments, vectorArg);
+      }
+      return this;
+    }
+
+    private Builder addVectorArgInternal(@CompileTimeConstant String arg, VectorArg<?> vectorArg) {
+      Preconditions.checkNotNull(arg);
+      if (!vectorArg.isEmpty) {
+        arguments.add(arg);
+        addVectorArgInternal(vectorArg);
+      }
+      return this;
     }
   }
 
@@ -645,8 +1550,8 @@ public final class CustomCommandLine extends CommandLine {
 
   /**
    * Given the list of {@link TreeFileArtifact}s, returns another CustomCommandLine that replaces
-   * their parent TreeArtifacts with the TreeFileArtifacts in all
-   * {@link TreeFileArtifactArgvFragment} argument objects.
+   * their parent TreeArtifacts with the TreeFileArtifacts in all {@link
+   * TreeFileArtifactArgvFragment} argument objects.
    */
   @VisibleForTesting
   public CustomCommandLine evaluateTreeFileArtifacts(Iterable<TreeFileArtifact> treeFileArtifacts) {

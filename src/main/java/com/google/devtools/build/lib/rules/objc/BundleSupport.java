@@ -267,18 +267,16 @@ final class BundleSupport {
       Artifact storyboardInput) {
     CustomCommandLine.Builder commandLine =
         CustomCommandLine.builder()
-            .add(zipOutput.getExecPath())
-            .add(archiveRoot)
-            .add("--minimum-deployment-target")
-            .add(bundling.getMinimumOsVersion().toString())
-            .add("--module")
-            .add(ruleContext.getLabel().getName());
+            .addPath(zipOutput.getExecPath())
+            .addDynamicString(archiveRoot)
+            .add("--minimum-deployment-target", bundling.getMinimumOsVersion().toString())
+            .add("--module", ruleContext.getLabel().getName());
 
     for (TargetDeviceFamily targetDeviceFamily : targetDeviceFamiliesForResources()) {
-      commandLine.add("--target-device").add(targetDeviceFamily.name().toLowerCase(Locale.US));
+      commandLine.add("--target-device", targetDeviceFamily.name().toLowerCase(Locale.US));
     }
 
-    return commandLine.add(storyboardInput.getExecPath()).build();
+    return commandLine.addPath(storyboardInput.getExecPath()).build();
   }
 
   private void registerMomczipActions(ObjcProvider objcProvider) {
@@ -294,17 +292,18 @@ final class BundleSupport {
               .addInputs(datamodel.getInputs())
               .setCommandLine(
                   CustomCommandLine.builder()
-                      .add(outputZip.getExecPath())
-                      .add(datamodel.archiveRootForMomczip())
-                      .add("-XD_MOMC_SDKROOT=" + AppleToolchain.sdkDir())
-                      .add("-XD_MOMC_IOS_TARGET_VERSION=" + bundling.getMinimumOsVersion())
+                      .addExecPath(outputZip)
+                      .addDynamicString(datamodel.archiveRootForMomczip())
+                      .addDynamicString("-XD_MOMC_SDKROOT=" + AppleToolchain.sdkDir())
+                      .addDynamicString(
+                          "-XD_MOMC_IOS_TARGET_VERSION=" + bundling.getMinimumOsVersion())
                       .add("-MOMC_PLATFORMS")
-                      .add(
+                      .addDynamicString(
                           appleConfiguration
                               .getMultiArchPlatform(PlatformType.IOS)
                               .getLowerCaseNameInPlist())
                       .add("-XD_MOMC_TARGET_VERSION=10.6")
-                      .add(datamodel.getContainer().getSafePathString())
+                      .addPath(datamodel.getContainer())
                       .build())
               .build(ruleContext));
     }
@@ -340,9 +339,9 @@ final class BundleSupport {
                   CustomCommandLine.builder()
                       .add("-convert")
                       .add("binary1")
-                      .add("-o", bundled)
+                      .addExecPath("-o", bundled)
                       .add("--")
-                      .add(strings.getExecPath())
+                      .addPath(strings.getExecPath())
                       .build())
               .addInput(strings)
               .addInput(CompilationSupport.xcrunwrapper(ruleContext).getExecutable())
@@ -375,10 +374,13 @@ final class BundleSupport {
         new SpawnAction.Builder()
             .setMnemonic("MergeInfoPlistFiles")
             .setExecutable(attributes.plmerge())
-            .addArgument("--control")
-            .addInputArgument(plMergeControlArtifact)
             .addTransitiveInputs(mergingContentArtifacts)
             .addOutput(bundling.getIntermediateArtifacts().mergedInfoplist())
+            .addInput(plMergeControlArtifact)
+            .setCommandLine(
+                CustomCommandLine.builder()
+                    .addExecPath("--control", plMergeControlArtifact)
+                    .build())
             .build(ruleContext));
   }
 
@@ -436,20 +438,20 @@ final class BundleSupport {
     }
     CustomCommandLine.Builder commandLine =
         CustomCommandLine.builder()
-            .add(zipOutput.getExecPath())
-            .add("--platform")
-            .add(appleConfiguration.getMultiArchPlatform(platformType).getLowerCaseNameInPlist())
-            .add("--output-partial-info-plist", partialInfoPlist)
-            .add("--minimum-deployment-target")
-            .add(bundling.getMinimumOsVersion().toString());
+            .addPath(zipOutput.getExecPath())
+            .add(
+                "--platform",
+                appleConfiguration.getMultiArchPlatform(platformType).getLowerCaseNameInPlist())
+            .addExecPath("--output-partial-info-plist", partialInfoPlist)
+            .add("--minimum-deployment-target", bundling.getMinimumOsVersion().toString());
 
     for (TargetDeviceFamily targetDeviceFamily : targetDeviceFamiliesForResources()) {
-      commandLine.add("--target-device").add(targetDeviceFamily.name().toLowerCase(Locale.US));
+      commandLine.add("--target-device", targetDeviceFamily.name().toLowerCase(Locale.US));
     }
 
     return commandLine
-        .add(ImmutableList.copyOf(PathFragment.safePathStrings(provider.get(XCASSETS_DIR))))
-        .add(ImmutableList.copyOf(extraActoolArgs))
+        .addAll(ImmutableList.copyOf(PathFragment.safePathStrings(provider.get(XCASSETS_DIR))))
+        .addAll(ImmutableList.copyOf(extraActoolArgs))
         .build();
   }
 

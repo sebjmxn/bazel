@@ -31,7 +31,7 @@ import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.Runfiles;
 import com.google.devtools.build.lib.analysis.RunfilesProvider;
 import com.google.devtools.build.lib.analysis.RunfilesSupport;
-import com.google.devtools.build.lib.analysis.test.ExecutionInfoProvider;
+import com.google.devtools.build.lib.analysis.test.ExecutionInfo;
 import com.google.devtools.build.lib.analysis.test.InstrumentedFilesProvider;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
@@ -78,9 +78,8 @@ public final class IosTest implements RuleConfiguredTargetFactory {
    *
    * <p>Creates a target, including registering actions, just as {@link #create(RuleContext)} does.
    * The difference between {@link #create(RuleContext)} and this method is that this method does
-   * only what is needed to support tests on the environment besides generate the Xcodeproj file and
-   * build the app and test {@code .ipa}s. The {@link #create(RuleContext)} method delegates to this
-   * method.
+   * only what is needed to support tests on the environment besides build the app and test {@code
+   * .ipa}s. The {@link #create(RuleContext)} method delegates to this method.
    */
   @Override
   public final ConfiguredTarget create(RuleContext ruleContext)
@@ -229,7 +228,7 @@ public final class IosTest implements RuleConfiguredTargetFactory {
     return new RuleConfiguredTargetBuilder(ruleContext)
         .setFilesToBuild(filesToBuildBuilder.build())
         .addProvider(RunfilesProvider.simple(runfiles))
-        .addNativeDeclaredProvider(new ExecutionInfoProvider(execInfoMapBuilder.build()))
+        .addNativeDeclaredProvider(new ExecutionInfo(execInfoMapBuilder.build()))
         .addNativeDeclaredProviders(testSupport.getExtraProviders())
         .addProvider(InstrumentedFilesProvider.class, instrumentedFilesProvider)
         .setRunfilesSupport(runfilesSupport, executable)

@@ -26,7 +26,7 @@ import com.google.devtools.build.lib.actions.CompositeRunfilesSupplier;
 import com.google.devtools.build.lib.actions.RunfilesSupplier;
 import com.google.devtools.build.lib.actions.util.ActionsTestUtil;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
-import com.google.devtools.build.lib.analysis.DefaultProvider;
+import com.google.devtools.build.lib.analysis.DefaultInfo;
 import com.google.devtools.build.lib.analysis.FilesToRunProvider;
 import com.google.devtools.build.lib.analysis.Runfiles;
 import com.google.devtools.build.lib.analysis.actions.FileWriteAction;
@@ -553,7 +553,12 @@ public class SkylarkRuleImplementationFunctionsTest extends SkylarkTestCase {
         "   tools=ruleContext.attr.tools)");
     @SuppressWarnings("unchecked")
     List<Artifact> inputs = (List<Artifact>) (List<?>) (MutableList) lookup("inputs");
-    assertArtifactFilenames(inputs, "mytool.sh", "mytool", "foo_Smytool-runfiles", "t.exe");
+    assertArtifactFilenames(
+        inputs,
+        "mytool.sh",
+        "mytool",
+        "foo_Smytool" + OsUtils.executableExtension() + "-runfiles",
+        "t.exe");
     @SuppressWarnings("unchecked")
     CompositeRunfilesSupplier runfilesSupplier =
         new CompositeRunfilesSupplier((List<RunfilesSupplier>) lookup("input_manifests"));
@@ -905,9 +910,9 @@ public class SkylarkRuleImplementationFunctionsTest extends SkylarkTestCase {
     assertThat((Boolean) configuredTarget.get("is_provided")).isTrue();
 
     Object provider = configuredTarget.get("provider");
-    assertThat(provider).isInstanceOf(DefaultProvider.class);
+    assertThat(provider).isInstanceOf(DefaultInfo.class);
     assertThat(((Info) provider).getProvider().getKey())
-        .isEqualTo(DefaultProvider.SKYLARK_CONSTRUCTOR.getKey());
+        .isEqualTo(DefaultInfo.PROVIDER.getKey());
 
     assertThat(configuredTarget.get("dir"))
         .isEqualTo(
@@ -982,9 +987,9 @@ public class SkylarkRuleImplementationFunctionsTest extends SkylarkTestCase {
     assertThat((Boolean) configuredTarget.get("is_provided")).isTrue();
 
     Object provider = configuredTarget.get("provider");
-    assertThat(provider).isInstanceOf(DefaultProvider.class);
+    assertThat(provider).isInstanceOf(DefaultInfo.class);
     assertThat(((Info) provider).getProvider().getKey())
-        .isEqualTo(DefaultProvider.SKYLARK_CONSTRUCTOR.getKey());
+        .isEqualTo(DefaultInfo.PROVIDER.getKey());
 
     assertThat(configuredTarget.get("dir"))
         .isEqualTo(
@@ -1075,9 +1080,9 @@ public class SkylarkRuleImplementationFunctionsTest extends SkylarkTestCase {
     assertThat((Boolean) configuredTarget.get("is_provided")).isTrue();
 
     Object provider = configuredTarget.get("provider");
-    assertThat(provider).isInstanceOf(DefaultProvider.class);
+    assertThat(provider).isInstanceOf(DefaultInfo.class);
     assertThat(((Info) provider).getProvider().getKey())
-        .isEqualTo(DefaultProvider.SKYLARK_CONSTRUCTOR.getKey());
+        .isEqualTo(DefaultInfo.PROVIDER.getKey());
 
     assertThat(configuredTarget.get("dir"))
         .isEqualTo(
@@ -1138,9 +1143,9 @@ public class SkylarkRuleImplementationFunctionsTest extends SkylarkTestCase {
         "bar_rule(name = 'my_rule', deps = [':dep_rule'])");
     ConfiguredTarget configuredTarget = getConfiguredTarget("//test:my_rule");
     Object provider = configuredTarget.get("default");
-    assertThat(provider).isInstanceOf(DefaultProvider.class);
+    assertThat(provider).isInstanceOf(DefaultInfo.class);
     assertThat(((Info) provider).getProvider().getKey())
-        .isEqualTo(DefaultProvider.SKYLARK_CONSTRUCTOR.getKey());
+        .isEqualTo(DefaultInfo.PROVIDER.getKey());
   }
 
   @Test

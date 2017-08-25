@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.packages;
 
+import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.events.Location;
 import com.google.devtools.build.lib.syntax.EvalException;
@@ -31,7 +32,7 @@ import javax.annotation.Nullable;
  * <p>Typical implementation of a non-constructable from Skylark declared provider is as follows:
  *
  * <pre>
- *     public static final Provider CC_LINK_PARAMS =
+ *     public static final Provider PROVIDER =
  *       new NativeProvider("link_params") { };
  * </pre>
  *
@@ -78,15 +79,15 @@ public abstract class NativeProvider<VALUE extends Info> extends Provider {
     protected Info createInstanceFromSkylark(Object[] args, Location loc) {
       @SuppressWarnings("unchecked")
       Map<String, Object> kwargs = (Map<String, Object>) args[0];
-      return new Info(this, kwargs, loc);
+      return new SkylarkInfo(this, kwargs, loc);
     }
 
     public Info create(Map<String, Object> values, String message) {
-      return new Info(this, values, message);
+      return new SkylarkInfo(this, values, message);
     }
 
     public Info create(Location loc) {
-      return new Info(this, loc);
+      return new SkylarkInfo(this, ImmutableMap.of(), loc);
     }
   }
 

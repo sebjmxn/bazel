@@ -54,6 +54,7 @@ import com.google.devtools.build.lib.packages.TriState;
 import com.google.devtools.build.lib.rules.android.AndroidConfiguration.AndroidAaptVersion;
 import com.google.devtools.build.lib.rules.android.AndroidConfiguration.AndroidManifestMerger;
 import com.google.devtools.build.lib.rules.android.AndroidConfiguration.ConfigurationDistinguisher;
+import com.google.devtools.build.lib.rules.config.ConfigFeatureFlag;
 import com.google.devtools.build.lib.rules.config.ConfigFeatureFlagProvider;
 import com.google.devtools.build.lib.rules.cpp.CppOptions;
 import com.google.devtools.build.lib.rules.java.JavaCompilationArgsProvider;
@@ -84,6 +85,10 @@ public final class AndroidRuleClasses {
       JavaSemantics.JAVA_LIBRARY_CLASS_JAR;
   public static final SafeImplicitOutputsFunction ANDROID_LIBRARY_AAR =
       fromTemplates("%{name}.aar");
+  // TODO(b/30307842): Remove this once it is no longer needed for resources migration.
+  public static final SafeImplicitOutputsFunction ANDROID_LIBRARY_APK =
+      fromTemplates("%{name}_files/library.ap_");
+
   /**
    * Source Jar for {@link #ANDROID_RESOURCES_CLASS_JAR}, which should be the same as
    * {@link #ANDROID_JAVA_SOURCE_JAR}.
@@ -316,9 +321,10 @@ public final class AndroidRuleClasses {
       "cc_library",
       "java_import",
       "java_library",
+      "java_lite_proto_library",
   };
 
-  public static final boolean hasProguardSpecs(AttributeMap rule) {
+  public static boolean hasProguardSpecs(AttributeMap rule) {
     // The below is a hack to support configurable attributes (proguard_specs seems like
     // too valuable an attribute to make nonconfigurable, and we don't currently
     // have the ability to know the configuration when determining implicit outputs).
@@ -919,6 +925,7 @@ public final class AndroidRuleClasses {
                   .nonconfigurable("defines an aspect of configuration")
                   .mandatoryProviders(
                       ImmutableList.of(ConfigFeatureFlagProvider.id())))
+          .add(ConfigFeatureFlag.getWhitelistAttribute(env))
           // The resource extractor is used at the binary level to extract java resources from the
           // deploy jar so that they can be added to the APK.
           .add(
@@ -943,7 +950,7 @@ public final class AndroidRuleClasses {
   /**
    * Semantic options for the dexer's multidex behavior.
    */
-  public static enum MultidexMode {
+  public enum MultidexMode {
     // Build dexes with multidex, assuming native platform support for multidex.
     NATIVE,
     // Build dexes with multidex and implement support at the application level.

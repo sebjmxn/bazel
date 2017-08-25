@@ -463,11 +463,11 @@ public final class JavaCompilationHelper {
                     javaToolchain.getJvmOptions())
                 .setCommandLine(
                     CustomCommandLine.builder()
-                        .add("--manifest_proto", manifestProto)
-                        .add("--class_jar", classJar)
-                        .add("--output_jar", genClassJar)
+                        .addExecPath("--manifest_proto", manifestProto)
+                        .addExecPath("--class_jar", classJar)
+                        .addExecPath("--output_jar", genClassJar)
                         .add("--temp_dir")
-                        .add(tempDir(genClassJar))
+                        .addPath(tempDir(genClassJar))
                         .build())
                 .setProgressMessage("Building genclass jar %s", genClassJar.prettyPrint())
                 .setMnemonic("JavaSourceJar")
@@ -681,7 +681,7 @@ public final class JavaCompilationHelper {
       List<JavaCompilationArgsProvider> compilationArgsProviders = new LinkedList<>();
       for (TransitiveInfoCollection dep : deps) {
         JavaCompilationArgsProvider provider =
-            JavaProvider.getProvider(JavaCompilationArgsProvider.class, dep);
+            JavaInfo.getProvider(JavaCompilationArgsProvider.class, dep);
         if (provider != null) {
           compilationArgsProviders.add(provider);
         }
@@ -805,10 +805,13 @@ public final class JavaCompilationHelper {
               // Use default shell environment so that those can be found.
               // TODO(dslomov): revisit this. If ijar is not msys-dependent, this is not needed.
               .useDefaultShellEnvironment()
-              .addArgument(inputJar.getExecPathString())
-              .addArgument(interfaceJar.getExecPathString())
               .setProgressMessage("Extracting interface %s", ruleContext.getLabel())
               .setMnemonic("JavaIjar")
+              .setCommandLine(
+                  CustomCommandLine.builder()
+                      .addExecPath(inputJar)
+                      .addExecPath(interfaceJar)
+                      .build())
               .build(ruleContext));
     }
     return interfaceJar;

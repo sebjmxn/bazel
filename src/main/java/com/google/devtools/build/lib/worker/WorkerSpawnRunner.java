@@ -51,6 +51,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.SortedMap;
 import java.util.regex.Pattern;
 
 /**
@@ -94,7 +95,7 @@ final class WorkerSpawnRunner implements SpawnRunner {
     if (!spawn.getExecutionInfo().containsKey(ExecutionRequirements.SUPPORTS_WORKERS)
         || !spawn.getExecutionInfo().get(ExecutionRequirements.SUPPORTS_WORKERS).equals("1")) {
       // TODO(ulfjack): Don't circumvent SpawnExecutionPolicy. Either drop the warning here, or
-      // provide a mechanism in SpawnExectionPolicy to report warnings.
+      // provide a mechanism in SpawnExecutionPolicy to report warnings.
       reporter.handle(
           Event.warn(
               String.format(ERROR_MESSAGE_PREFIX + REASON_NO_EXECUTION_INFO, spawn.getMnemonic())));
@@ -127,8 +128,12 @@ final class WorkerSpawnRunner implements SpawnRunner {
 
     ActionInputFileCache inputFileCache = policy.getActionInputFileCache();
 
-    HashCode workerFilesHash =
-        WorkerFilesHash.getWorkerFilesHash(spawn.getToolFiles(), inputFileCache);
+    SortedMap<PathFragment, HashCode> workerFiles =
+        WorkerFilesHash.getWorkerFilesWithHashes(
+            spawn, policy.getArtifactExpander(), policy.getActionInputFileCache());
+
+    HashCode workerFilesCombinedHash = WorkerFilesHash.getCombinedHash(workerFiles);
+
     Map<PathFragment, Path> inputFiles = SandboxHelpers.getInputFiles(spawn, policy, execRoot);
     Set<PathFragment> outputFiles = SandboxHelpers.getOutputFiles(spawn);
 
@@ -138,7 +143,8 @@ final class WorkerSpawnRunner implements SpawnRunner {
             env,
             execRoot,
             spawn.getMnemonic(),
-            workerFilesHash,
+            workerFilesCombinedHash,
+            workerFiles,
             inputFiles,
             outputFiles,
             policy.speculating());
@@ -196,7 +202,7 @@ final class WorkerSpawnRunner implements SpawnRunner {
       throws IOException {
     WorkRequest.Builder requestBuilder = WorkRequest.newBuilder();
     for (String flagfile : flagfiles) {
-      expandArgument(requestBuilder, flagfile);
+      expandArgument(execRoot, flagfile, requestBuilder);
     }
 
     List<ActionInput> inputs =
@@ -225,17 +231,18 @@ final class WorkerSpawnRunner implements SpawnRunner {
    * files. The @ itself can be escaped with @@. This deliberately does not expand --flagfile= style
    * arguments, because we want to get rid of the expansion entirely at some point in time.
    *
-   * @param requestBuilder the WorkRequest.Builder that the arguments should be added to.
+   * @param execRoot the current execroot of the build (relative paths will be assumed to be
+   *     relative to this directory).
    * @param arg the argument to expand.
+   * @param requestBuilder the WorkRequest to whose arguments the expanded arguments will be added.
    * @throws java.io.IOException if one of the files containing options cannot be read.
    */
-  private void expandArgument(WorkRequest.Builder requestBuilder, String arg) throws IOException {
+  static void expandArgument(Path execRoot, String arg, WorkRequest.Builder requestBuilder)
+      throws IOException {
     if (arg.startsWith("@") && !arg.startsWith("@@")) {
       for (String line : Files.readAllLines(
           Paths.get(execRoot.getRelative(arg.substring(1)).getPathString()), UTF_8)) {
-        if (line.length() > 0) {
-          expandArgument(requestBuilder, line);
-        }
+        expandArgument(execRoot, line, requestBuilder);
       }
     } else {
       requestBuilder.addArguments(arg);

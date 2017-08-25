@@ -18,6 +18,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.actions.CommandLineExpansionException;
 import com.google.devtools.build.lib.actions.ParameterFile;
 import com.google.devtools.build.lib.analysis.AnalysisEnvironment;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
@@ -87,8 +88,9 @@ public final class ParamFileHelper {
   public static CommandLine createWithParamsFile(
       ImmutableList<String> executableArgs, ParamFileInfo paramFileInfo, Artifact parameterFile) {
     return CustomCommandLine.builder()
-        .add(executableArgs)
-        .addWithPrefix(paramFileInfo.getFlag(), parameterFile)
+        .addAll(executableArgs)
+        // This is actually a constant, but there is no way to suppress the warning
+        .addWithDynamicPrefix(paramFileInfo.getFlag(), parameterFile)
         .build();
   }
 
@@ -129,8 +131,15 @@ public final class ParamFileHelper {
 
   /** Estimates the params file size for the given arguments. */
   private static int getParamFileSize(List<String> executableArgs, CommandLine commandLine) {
-    Iterable<String> actualArguments = commandLine.arguments();
-    return getParamFileSize(executableArgs) + getParamFileSize(actualArguments);
+    try {
+      Iterable<String> actualArguments = commandLine.arguments();
+      return getParamFileSize(executableArgs) + getParamFileSize(actualArguments);
+    } catch (CommandLineExpansionException e) {
+      // CommandLineExpansionException is thrown deterministically. We can ignore
+      // it here and pretend that a params file is not necessary at this stage,
+      // and an error will be thrown later at execution time.
+      return 0;
+    }
   }
 
   private static int getParamFileSize(Iterable<String> args) {

@@ -88,12 +88,12 @@ import com.google.devtools.build.lib.rules.android.DexArchiveAspect;
 import com.google.devtools.build.lib.rules.apple.AppleCommandLineOptions;
 import com.google.devtools.build.lib.rules.apple.AppleConfiguration;
 import com.google.devtools.build.lib.rules.apple.AppleToolchain;
+import com.google.devtools.build.lib.rules.apple.XcodeConfigAlias.XcodeConfigAliasRule;
 import com.google.devtools.build.lib.rules.apple.XcodeConfigRule;
 import com.google.devtools.build.lib.rules.apple.XcodeVersionRule;
 import com.google.devtools.build.lib.rules.apple.cpp.AppleCcToolchainRule;
 import com.google.devtools.build.lib.rules.apple.swift.SwiftCommandLineOptions;
 import com.google.devtools.build.lib.rules.apple.swift.SwiftConfiguration;
-import com.google.devtools.build.lib.rules.config.ConfigFeatureFlag;
 import com.google.devtools.build.lib.rules.config.ConfigFeatureFlagConfiguration;
 import com.google.devtools.build.lib.rules.config.ConfigRuleClasses;
 import com.google.devtools.build.lib.rules.config.ConfigSkylarkCommon;
@@ -209,7 +209,6 @@ public class BazelRuleClassProvider {
         public void init(Builder builder) {
           builder
               .setProductName("bazel")
-              .setConfigurationCollectionFactory(new BazelConfigurationCollection())
               .setPrelude("//tools/build_rules:prelude_bazel")
               .setNativeLauncherLabel("//tools/launcher:launcher")
               .setRunfilesPrefix(Label.DEFAULT_REPOSITORY_DIRECTORY)
@@ -226,9 +225,6 @@ public class BazelRuleClassProvider {
           return ImmutableList.of();
         }
       };
-
-  public static final ImmutableSet<String> FEATURE_POLICY_FEATURES =
-      ImmutableSet.of(ConfigFeatureFlag.POLICY_NAME);
 
   public static final RuleSet PLATFORM_RULES =
       new RuleSet() {
@@ -597,6 +593,7 @@ public class BazelRuleClassProvider {
           builder.addRuleDefinition(new ObjcRuleClasses.WatchApplicationBundleRule());
           builder.addRuleDefinition(new ObjcRuleClasses.CrosstoolRule());
           builder.addRuleDefinition(new XcodeConfigRule());
+          builder.addRuleDefinition(new XcodeConfigAliasRule());
           builder.addRuleDefinition(new XcodeVersionRule());
         }
 

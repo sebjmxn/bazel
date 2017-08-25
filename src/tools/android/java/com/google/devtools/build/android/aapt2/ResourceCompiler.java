@@ -16,15 +16,12 @@ package com.google.devtools.build.android.aapt2;
 
 import com.android.builder.core.VariantType;
 import com.android.repository.Revision;
-import com.google.common.base.Joiner;
-import com.google.common.io.CharStreams;
+import com.google.common.base.Preconditions;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListeningExecutorService;
 import com.google.devtools.build.android.AaptCommandBuilder;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -34,9 +31,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
+import java.util.logging.Logger;
 
 /** Invokes aapt2 to compile resources. */
 public class ResourceCompiler {
+  private static final Logger logger = Logger.getLogger(ResourceCompiler.class.getName());
 
   private final CompilingVisitor compilingVisitor;
 
@@ -57,35 +56,38 @@ public class ResourceCompiler {
 
     @Override
     public Path call() throws Exception {
-      List<String> processLog = new ArrayList<>();
-      AaptCommandBuilder commandBuilder =
-          new AaptCommandBuilder(aapt2)
-              .forBuildToolsVersion(buildToolsVersion)
-              .forVariantType(VariantType.LIBRARY)
-              .add("compile")
-              .add("-v")
-              .add("--legacy")
-              .add("-o", compiledResourcesOut.toString())
-              .add(file.toString());
-      final Process process =
-          new ProcessBuilder().command(commandBuilder.build()).redirectErrorStream(true).start();
-      processLog.add("Command:");
-      processLog.add(commandBuilder.build().toString());
-      final InputStreamReader stdout =
-          new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8);
-      while (process.isAlive()) {
-        processLog.add(CharStreams.toString(stdout));
-      }
-      if (process.exitValue() != 0) {
-        throw new RuntimeException(
-            "Error compiling " + file + "\n" + Joiner.on("\n").join(processLog));
-      }
+        logger.fine(
+            new AaptCommandBuilder(aapt2)
+                .forBuildToolsVersion(buildToolsVersion)
+                .forVariantType(VariantType.LIBRARY)
+                .add("compile")
+                .add("-v")
+                .add("--legacy")
+                .add("-o", compiledResourcesOut.toString())
+                .add(file.toString())
+                .execute("Compiling " + file));
+
+
       String type = file.getParent().getFileName().toString();
       String filename = file.getFileName().toString();
       if (type.startsWith("values")) {
-        filename = filename.substring(0, filename.indexOf('.')) + ".arsc";
+        filename =
+            (filename.indexOf('.') != -1 ? filename.substring(0, filename.indexOf('.')) : filename)
+                + ".arsc";
       }
-      return compiledResourcesOut.resolve(type + "_" + filename + ".flat");
+
+      final Path compiledResourcePath =
+          compiledResourcesOut.resolve(type + "_" + filename + ".flat");
+      Preconditions.checkArgument(
+          Files.exists(compiledResourcePath),
+          "%s does not exists after aapt2 ran.",
+          compiledResourcePath);
+      return compiledResourcePath;
+    }
+
+    @Override
+    public String toString() {
+      return "ResourceCompiler.CompileTask(" + file + ")";
     }
   }
 
@@ -110,7 +112,8 @@ public class ResourceCompiler {
 
     @Override
     public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-      if (!Files.isDirectory(file)) {
+      // Ignore directories and "hidden" files that start with .
+      if (!Files.isDirectory(file) && !file.getFileName().toString().startsWith(".")) {
         tasks.add(
             executorService.submit(
                 new CompileTask(

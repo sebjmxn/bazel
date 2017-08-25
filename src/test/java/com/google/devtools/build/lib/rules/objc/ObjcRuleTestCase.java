@@ -19,7 +19,6 @@ import static com.google.common.truth.Truth.assertWithMessage;
 import static com.google.devtools.build.lib.actions.util.ActionsTestUtil.baseArtifactNames;
 import static com.google.devtools.build.lib.actions.util.ActionsTestUtil.getFirstArtifactEndingWith;
 import static com.google.devtools.build.lib.rules.objc.LegacyCompilationSupport.AUTOMATIC_SDK_FRAMEWORKS;
-import static com.google.devtools.build.lib.rules.objc.ObjcProvider.GENERAL_RESOURCE_FILE;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.HEADER;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.INCLUDE;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.MODULE_MAP;
@@ -68,7 +67,6 @@ import com.google.devtools.build.lib.analysis.RunfilesSupport;
 import com.google.devtools.build.lib.analysis.actions.BinaryFileWriteAction;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine.Builder;
-import com.google.devtools.build.lib.analysis.actions.CustomCommandLine.VectorArg;
 import com.google.devtools.build.lib.analysis.actions.FileWriteAction;
 import com.google.devtools.build.lib.analysis.actions.ParameterFileWriteAction;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
@@ -543,8 +541,8 @@ public abstract class ObjcRuleTestCase extends BuildViewTestCase {
    * @param objlistName the path suffix of the filelist artifact
    * @param inputArchives path suffixes of the expected contents of the filelist
    */
-  protected void verifyObjlist(Action originalAction, String objlistName,
-      String... inputArchives) {
+  protected void verifyObjlist(Action originalAction, String objlistName, String... inputArchives)
+      throws Exception {
     Artifact filelistArtifact =
         getFirstArtifactEndingWith(originalAction.getInputs(), objlistName);
 
@@ -569,9 +567,14 @@ public abstract class ObjcRuleTestCase extends BuildViewTestCase {
    * @param importedFrameworks custom framework path fragments
    * @param extraLinkArgs extra link arguments expected on the link action
    */
-  protected void verifyLinkAction(Artifact binArtifact, Artifact filelistArtifact, String arch,
-      List<String> inputArchives, List<PathFragment> importedFrameworks,
-      ExtraLinkArgs extraLinkArgs) {
+  protected void verifyLinkAction(
+      Artifact binArtifact,
+      Artifact filelistArtifact,
+      String arch,
+      List<String> inputArchives,
+      List<PathFragment> importedFrameworks,
+      ExtraLinkArgs extraLinkArgs)
+      throws Exception {
     final CommandAction binAction = (CommandAction) getGeneratingAction(binArtifact);
 
     for (String inputArchive : inputArchives) {
@@ -1491,7 +1494,7 @@ public abstract class ObjcRuleTestCase extends BuildViewTestCase {
         .doesNotContain(protoHeaderB);
   }
 
-  private void assertCoptsAndDefinesForBundlingTarget(ConfiguredTarget topTarget) {
+  private void assertCoptsAndDefinesForBundlingTarget(ConfiguredTarget topTarget) throws Exception {
     Artifact protoObject =
         getBinArtifact("_objs/x/x/_generated_protos/x/protos/DataA.pbobjc.o", topTarget);
     CommandAction protoObjectAction = (CommandAction) getGeneratingAction(protoObject);
@@ -2123,8 +2126,6 @@ public abstract class ObjcRuleTestCase extends BuildViewTestCase {
         getSourceArtifact("x/subdir_for_no_reason/en.lproj/loc.storyboard"),
         getSourceArtifact("x/ja.lproj/loc.storyboard"));
 
-    assertThat(provider.get(GENERAL_RESOURCE_FILE))
-        .containsExactlyElementsIn(storyboardInputs);
     assertThat(provider.get(STORYBOARD))
         .containsExactlyElementsIn(storyboardInputs);
   }
@@ -2145,9 +2146,8 @@ public abstract class ObjcRuleTestCase extends BuildViewTestCase {
   }
 
   private void checkRegistersStoryboardCompileActions(
-      ConfiguredTarget target,
-      DottedVersion minimumOsVersion,
-      ImmutableList<String> targetDevices) {
+      ConfiguredTarget target, DottedVersion minimumOsVersion, ImmutableList<String> targetDevices)
+      throws Exception {
     Artifact storyboardZip = getBinArtifact("x/1.storyboard.zip", target);
     CommandAction compileAction = (CommandAction) getGeneratingAction(storyboardZip);
     assertThat(compileAction.getInputs()).containsExactly(
@@ -2160,13 +2160,12 @@ public abstract class ObjcRuleTestCase extends BuildViewTestCase {
         .containsExactlyElementsIn(
             new Builder()
                 .add(MOCK_IBTOOLWRAPPER_PATH)
-                .add(storyboardZip.getExecPathString())
-                .add(archiveRoot) // archive root
-                .add("--minimum-deployment-target")
-                .add(minimumOsVersion.toString())
+                .addExecPath(storyboardZip)
+                .addDynamicString(archiveRoot) // archive root
+                .add("--minimum-deployment-target", minimumOsVersion.toString())
                 .add("--module")
                 .add("x")
-                .add(VectorArg.of(targetDevices).beforeEach("--target-device"))
+                .addBeforeEach("--target-device", targetDevices)
                 .add("x/1.storyboard")
                 .build()
                 .arguments())
@@ -2184,13 +2183,12 @@ public abstract class ObjcRuleTestCase extends BuildViewTestCase {
         .containsExactlyElementsIn(
             new Builder()
                 .add(MOCK_IBTOOLWRAPPER_PATH)
-                .add(storyboardZip.getExecPathString())
-                .add(archiveRoot) // archive root
-                .add("--minimum-deployment-target")
-                .add(minimumOsVersion.toString())
+                .addExecPath(storyboardZip)
+                .addDynamicString(archiveRoot) // archive root
+                .add("--minimum-deployment-target", minimumOsVersion.toString())
                 .add("--module")
                 .add("x")
-                .add(VectorArg.of(targetDevices).beforeEach("--target-device"))
+                .addBeforeEach("--target-device", targetDevices)
                 .add("x/ja.lproj/loc.storyboard")
                 .build()
                 .arguments())
@@ -2218,18 +2216,14 @@ public abstract class ObjcRuleTestCase extends BuildViewTestCase {
         CustomCommandLine.builder().add(MOCK_SWIFTSTDLIBTOOLWRAPPER_PATH);
 
     if (toolchain != null) {
-      expectedCommandLine.add("--toolchain").add(toolchain);
+      expectedCommandLine.add("--toolchain", toolchain);
     }
 
     expectedCommandLine
-        .add("--output_zip_path")
-        .add(swiftLibsZip.getExecPathString())
-        .add("--bundle_path")
-        .add(bundlePath)
-        .add("--platform")
-        .add(platformName)
-        .add("--scan-executable")
-        .add(binary.getExecPathString());
+        .addExecPath("--output_zip_path", swiftLibsZip)
+        .add("--bundle_path", bundlePath)
+        .add("--platform", platformName)
+        .addExecPath("--scan-executable", binary);
 
     assertThat(toolAction.getArguments()).isEqualTo(expectedCommandLine.build().arguments());
   }
@@ -3879,7 +3873,7 @@ public abstract class ObjcRuleTestCase extends BuildViewTestCase {
         .isEqualTo(
             new CustomCommandLine.Builder()
                 .add(MOCK_IBTOOLWRAPPER_PATH)
-                .add(storyboardZip.getExecPathString())
+                .addExecPath(storyboardZip)
                 .add("launch.storyboardc")
                 .add("--minimum-deployment-target")
                 .add("8.1")

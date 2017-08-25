@@ -21,10 +21,11 @@ import com.google.common.base.Functions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
-import com.google.devtools.build.lib.analysis.MakeVariableProvider;
+import com.google.devtools.build.lib.analysis.MakeVariableInfo;
 import com.google.devtools.build.lib.analysis.config.CompilationMode;
 import com.google.devtools.build.lib.analysis.config.ConfigurationEnvironment;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
+import com.google.devtools.build.lib.analysis.platform.ToolchainInfo;
 import com.google.devtools.build.lib.analysis.util.AnalysisTestCase;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
@@ -161,7 +162,8 @@ public class CrosstoolConfigurationLoaderTest extends AnalysisTestCase {
 
   private CcToolchainProvider getCcToolchainProvider(CppConfiguration cppConfiguration)
       throws Exception {
-    return getCcToolchainTarget(cppConfiguration).get(CcToolchainProvider.SKYLARK_CONSTRUCTOR);
+    return (CcToolchainProvider)
+        getCcToolchainTarget(cppConfiguration).get(ToolchainInfo.PROVIDER);
   }
 
   /**
@@ -488,8 +490,9 @@ public class CrosstoolConfigurationLoaderTest extends AnalysisTestCase {
     CppConfiguration toolchainA =
         create(loader, "--cpu=piii", "--host_cpu=piii", "--android_cpu=", "--fat_apk_cpu=");
     ConfiguredTarget ccToolchainA = getCcToolchainTarget(toolchainA);
-    CcToolchainProvider ccProviderA = ccToolchainA.get(CcToolchainProvider.SKYLARK_CONSTRUCTOR);
-    MakeVariableProvider makeProviderA = ccToolchainA.get(MakeVariableProvider.SKYLARK_CONSTRUCTOR);
+    CcToolchainProvider ccProviderA =
+        (CcToolchainProvider) ccToolchainA.get(ToolchainInfo.PROVIDER);
+    MakeVariableInfo makeProviderA = ccToolchainA.get(MakeVariableInfo.PROVIDER);
     assertThat(toolchainA.getToolchainIdentifier()).isEqualTo("toolchain-identifier-A");
     assertThat(toolchainA.getHostSystemName()).isEqualTo("host-system-name-A");
     assertThat(toolchainA.getTargetGnuSystemName()).isEqualTo("target-system-name-A");

@@ -14,6 +14,9 @@
 
 package com.google.devtools.build.lib.rules.apple;
 
+import static com.google.devtools.build.lib.skyframe.serialization.SerializationCommonUtils.deserializeNullable;
+import static com.google.devtools.build.lib.skyframe.serialization.SerializationCommonUtils.serializeNullable;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
 import com.google.common.base.Strings;
@@ -31,13 +34,20 @@ import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.rules.apple.AppleCommandLineOptions.AppleBitcodeMode;
 import com.google.devtools.build.lib.rules.apple.ApplePlatform.PlatformType;
+import com.google.devtools.build.lib.skyframe.serialization.EnumCodec;
+import com.google.devtools.build.lib.skyframe.serialization.FastStringCodec;
+import com.google.devtools.build.lib.skyframe.serialization.SerializationException;
 import com.google.devtools.build.lib.skylarkinterface.SkylarkCallable;
 import com.google.devtools.build.lib.skylarkinterface.SkylarkModule;
 import com.google.devtools.build.lib.skylarkinterface.SkylarkModuleCategory;
 import com.google.devtools.build.lib.util.Preconditions;
+import com.google.protobuf.CodedInputStream;
+import com.google.protobuf.CodedOutputStream;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import javax.annotation.Nullable;
 
 /** A configuration containing flags required for Apple platforms and tools. */
@@ -99,10 +109,11 @@ public class AppleConfiguration extends BuildConfiguration.Fragment {
   @Nullable private final Label defaultProvisioningProfileLabel;
   private final boolean mandatoryMinimumVersion;
 
+  @VisibleForTesting
   AppleConfiguration(
       AppleCommandLineOptions options,
-      String cpu,
-      XcodeVersionProperties xcodeVersionProperties,
+      String iosCpu,
+      @Nullable DottedVersion xcodeVersion,
       DottedVersion iosSdkVersion,
       DottedVersion iosMinimumOs,
       DottedVersion watchosSdkVersion,
@@ -126,8 +137,8 @@ public class AppleConfiguration extends BuildConfiguration.Fragment {
         Preconditions.checkNotNull(macosSdkVersion, "macOsSdkVersion");
     this.macosMinimumOs = Preconditions.checkNotNull(macosMinimumOs, "macOsMinimumOs");
 
-    this.xcodeVersion = xcodeVersionProperties.getXcodeVersion().orNull();
-    this.iosCpu = iosCpuFromCpu(cpu);
+    this.xcodeVersion = xcodeVersion;
+    this.iosCpu = iosCpu;
     this.appleSplitCpu = Preconditions.checkNotNull(options.appleSplitCpu, "appleSplitCpu");
     this.applePlatformType =
         Preconditions.checkNotNull(options.applePlatformType, "applePlatformType");
@@ -450,7 +461,7 @@ public class AppleConfiguration extends BuildConfiguration.Fragment {
     name = "single_arch_platform",
     doc = "The platform of the current configuration. This should only be invoked in a context "
         + "where only a single architecture may be supported; consider "
-        + "<a href='#multi_arch_platform'>mutli_arch_platform</a> for other cases.",
+        + "<a href='#multi_arch_platform'>multi_arch_platform</a> for other cases.",
     structField = true
   )
   public ApplePlatform getSingleArchPlatform() {
@@ -670,6 +681,135 @@ public class AppleConfiguration extends BuildConfiguration.Fragment {
         .build();
   }
 
+  @Override
+  public boolean equals(Object obj) {
+    if (this == obj) {
+      return true;
+    }
+    if (!(obj instanceof AppleConfiguration)) {
+      return false;
+    }
+    AppleConfiguration that = (AppleConfiguration) obj;
+    return this.options.equals(that.options)
+        && Objects.equals(this.xcodeVersion, that.xcodeVersion)
+        && this.iosSdkVersion.equals(that.iosSdkVersion)
+        && this.iosMinimumOs.equals(that.iosMinimumOs)
+        && this.watchosSdkVersion.equals(that.watchosSdkVersion)
+        && this.watchosMinimumOs.equals(that.watchosMinimumOs)
+        && this.tvosSdkVersion.equals(that.tvosSdkVersion)
+        && this.tvosMinimumOs.equals(that.tvosMinimumOs)
+        && this.macosSdkVersion.equals(that.macosSdkVersion)
+        && this.macosMinimumOs.equals(that.macosMinimumOs);
+  }
+
+  @Override
+  public int hashCode() {
+    return Objects.hash(
+        options,
+        xcodeVersion,
+        iosSdkVersion,
+        iosMinimumOs,
+        watchosSdkVersion,
+        watchosMinimumOs,
+        tvosSdkVersion,
+        tvosMinimumOs,
+        macosSdkVersion,
+        macosMinimumOs);
+  }
+
+  void serialize(CodedOutputStream out) throws IOException, SerializationException {
+    options.serialize(out);
+    out.writeStringNoTag(iosCpu);
+    serializeNullable(xcodeVersion, out, DottedVersion.CODEC);
+    DottedVersion.CODEC.serialize(iosSdkVersion, out);
+    DottedVersion.CODEC.serialize(iosMinimumOs, out);
+    DottedVersion.CODEC.serialize(watchosSdkVersion, out);
+    DottedVersion.CODEC.serialize(watchosMinimumOs, out);
+    DottedVersion.CODEC.serialize(tvosSdkVersion, out);
+    DottedVersion.CODEC.serialize(tvosMinimumOs, out);
+    DottedVersion.CODEC.serialize(macosSdkVersion, out);
+    DottedVersion.CODEC.serialize(macosMinimumOs, out);
+  }
+
+  static AppleConfiguration deserialize(CodedInputStream in)
+      throws IOException, SerializationException {
+    AppleCommandLineOptions options = AppleCommandLineOptions.deserialize(in);
+    String iosCpu = FastStringCodec.INSTANCE.deserialize(in);
+    DottedVersion xcodeVersion = deserializeNullable(in, DottedVersion.CODEC);
+    return new AppleConfiguration(
+        options,
+        iosCpu,
+        xcodeVersion,
+        DottedVersion.CODEC.deserialize(in),
+        DottedVersion.CODEC.deserialize(in),
+        DottedVersion.CODEC.deserialize(in),
+        DottedVersion.CODEC.deserialize(in),
+        DottedVersion.CODEC.deserialize(in),
+        DottedVersion.CODEC.deserialize(in),
+        DottedVersion.CODEC.deserialize(in),
+        DottedVersion.CODEC.deserialize(in));
+  }
+
+  @VisibleForTesting
+  static AppleConfiguration create(
+      AppleCommandLineOptions appleOptions,
+      String cpu,
+      XcodeVersionProperties xcodeVersionProperties)
+      throws InvalidConfigurationException {
+    DottedVersion iosSdkVersion =
+        (appleOptions.iosSdkVersion != null)
+            ? appleOptions.iosSdkVersion
+            : xcodeVersionProperties.getDefaultIosSdkVersion();
+    DottedVersion iosMinimumOsVersion =
+        (appleOptions.iosMinimumOs != null) ? appleOptions.iosMinimumOs : iosSdkVersion;
+    DottedVersion watchosSdkVersion =
+        (appleOptions.watchOsSdkVersion != null)
+            ? appleOptions.watchOsSdkVersion
+            : xcodeVersionProperties.getDefaultWatchosSdkVersion();
+    DottedVersion watchosMinimumOsVersion =
+        (appleOptions.watchosMinimumOs != null) ? appleOptions.watchosMinimumOs : watchosSdkVersion;
+    DottedVersion tvosSdkVersion =
+        (appleOptions.tvOsSdkVersion != null)
+            ? appleOptions.tvOsSdkVersion
+            : xcodeVersionProperties.getDefaultTvosSdkVersion();
+    DottedVersion tvosMinimumOsVersion =
+        (appleOptions.tvosMinimumOs != null) ? appleOptions.tvosMinimumOs : tvosSdkVersion;
+    DottedVersion macosSdkVersion =
+        (appleOptions.macOsSdkVersion != null)
+            ? appleOptions.macOsSdkVersion
+            : xcodeVersionProperties.getDefaultMacosSdkVersion();
+    DottedVersion macosMinimumOsVersion =
+        (appleOptions.macosMinimumOs != null) ? appleOptions.macosMinimumOs : macosSdkVersion;
+    AppleConfiguration configuration =
+        new AppleConfiguration(
+            appleOptions,
+            iosCpuFromCpu(cpu),
+            xcodeVersionProperties.getXcodeVersion().orNull(),
+            iosSdkVersion,
+            iosMinimumOsVersion,
+            watchosSdkVersion,
+            watchosMinimumOsVersion,
+            tvosSdkVersion,
+            tvosMinimumOsVersion,
+            macosSdkVersion,
+            macosMinimumOsVersion);
+
+    validate(configuration);
+    return configuration;
+  }
+
+  private static void validate(AppleConfiguration config) throws InvalidConfigurationException {
+    DottedVersion xcodeVersion = config.getXcodeVersion();
+    if (config.getBitcodeMode() != AppleBitcodeMode.NONE
+        && xcodeVersion != null
+        && xcodeVersion.compareTo(MINIMUM_BITCODE_XCODE_VERSION) < 0) {
+      throw new InvalidConfigurationException(
+          String.format(
+              "apple_bitcode mode '%s' is unsupported for xcode version '%s'",
+              config.getBitcodeMode(), xcodeVersion));
+    }
+  }
+
   /**
    * Loads {@link AppleConfiguration} from build options.
    */
@@ -681,51 +821,7 @@ public class AppleConfiguration extends BuildConfiguration.Fragment {
       String cpu = buildOptions.get(BuildConfiguration.Options.class).cpu;
       XcodeVersionProperties xcodeVersionProperties = XcodeConfig.
           getXcodeVersionProperties(env, appleOptions);
-
-      DottedVersion iosSdkVersion = (appleOptions.iosSdkVersion != null)
-          ? appleOptions.iosSdkVersion : xcodeVersionProperties.getDefaultIosSdkVersion();
-      DottedVersion iosMinimumOsVersion = (appleOptions.iosMinimumOs != null)
-          ? appleOptions.iosMinimumOs : iosSdkVersion;
-      DottedVersion watchosSdkVersion = (appleOptions.watchOsSdkVersion != null)
-          ? appleOptions.watchOsSdkVersion : xcodeVersionProperties.getDefaultWatchosSdkVersion();
-      DottedVersion watchosMinimumOsVersion = (appleOptions.watchosMinimumOs != null)
-          ? appleOptions.watchosMinimumOs : watchosSdkVersion;
-      DottedVersion tvosSdkVersion = (appleOptions.tvOsSdkVersion != null)
-          ? appleOptions.tvOsSdkVersion : xcodeVersionProperties.getDefaultTvosSdkVersion();
-      DottedVersion tvosMinimumOsVersion = (appleOptions.tvosMinimumOs != null)
-          ? appleOptions.tvosMinimumOs : tvosSdkVersion;
-      DottedVersion macosSdkVersion = (appleOptions.macOsSdkVersion != null)
-          ? appleOptions.macOsSdkVersion : xcodeVersionProperties.getDefaultMacosSdkVersion();
-      DottedVersion macosMinimumOsVersion = (appleOptions.macosMinimumOs != null)
-          ? appleOptions.macosMinimumOs : macosSdkVersion;
-      AppleConfiguration configuration =
-          new AppleConfiguration(
-              appleOptions,
-              cpu,
-              xcodeVersionProperties,
-              iosSdkVersion,
-              iosMinimumOsVersion,
-              watchosSdkVersion,
-              watchosMinimumOsVersion,
-              tvosSdkVersion,
-              tvosMinimumOsVersion,
-              macosSdkVersion,
-              macosMinimumOsVersion);
-
-      validate(configuration);
-      return configuration;
-    }
-
-    private void validate(AppleConfiguration config)
-        throws InvalidConfigurationException {
-      DottedVersion xcodeVersion = config.getXcodeVersion();
-      if (config.getBitcodeMode() != AppleBitcodeMode.NONE
-          && xcodeVersion != null
-          && xcodeVersion.compareTo(MINIMUM_BITCODE_XCODE_VERSION) < 0) {
-        throw new InvalidConfigurationException(
-            String.format("apple_bitcode mode '%s' is unsupported for xcode version '%s'",
-                config.getBitcodeMode(), xcodeVersion));
-      }
+      return AppleConfiguration.create(appleOptions, cpu, xcodeVersionProperties);
     }
 
     @Override
@@ -781,5 +877,8 @@ public class AppleConfiguration extends BuildConfiguration.Fragment {
     public String getFileSystemName() {
       return fileSystemName;
     }
+
+    static final EnumCodec<ConfigurationDistinguisher> CODEC =
+        new EnumCodec<>(ConfigurationDistinguisher.class);
   }
 }

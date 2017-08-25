@@ -34,7 +34,6 @@ import static java.nio.charset.StandardCharsets.ISO_8859_1;
 import static java.util.stream.Collectors.toCollection;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Joiner;
 import com.google.common.base.Optional;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
@@ -56,7 +55,6 @@ import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.actions.CommandLine;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
-import com.google.devtools.build.lib.analysis.actions.CustomCommandLine.VectorArg;
 import com.google.devtools.build.lib.analysis.actions.ParameterFileWriteAction;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
@@ -883,7 +881,7 @@ public abstract class CompilationSupport {
         treeObjFiles.add(objFile);
         objFilesToLinkParam.addExpandedTreeArtifactExecPaths(objFile);
       } else {
-        objFilesToLinkParam.add(objFile.getExecPath());
+        objFilesToLinkParam.addPath(objFile.getExecPath());
       }
     }
 
@@ -1075,19 +1073,16 @@ public abstract class CompilationSupport {
 
       CustomCommandLine commandLine =
           CustomCommandLine.builder()
-              .add("--input_archive", j2objcArchive)
-              .add("--output_archive", prunedJ2ObjcArchive)
-              .add("--dummy_archive", dummyArchive)
-              .add("--xcrunwrapper", xcrunwrapper(ruleContext).getExecutable())
-              .add(
-                  "--dependency_mapping_files",
-                  VectorArg.of(j2ObjcDependencyMappingFiles).joinWith(","))
-              .add("--header_mapping_files", VectorArg.of(j2ObjcHeaderMappingFiles).joinWith(","))
-              .add(
-                  "--archive_source_mapping_files",
-                  VectorArg.of(j2ObjcArchiveSourceMappingFiles).joinWith(","))
+              .addExecPath("--input_archive", j2objcArchive)
+              .addExecPath("--output_archive", prunedJ2ObjcArchive)
+              .addExecPath("--dummy_archive", dummyArchive)
+              .addExecPath("--xcrunwrapper", xcrunwrapper(ruleContext).getExecutable())
+              .addJoinedExecPaths("--dependency_mapping_files", ",", j2ObjcDependencyMappingFiles)
+              .addJoinedExecPaths("--header_mapping_files", ",", j2ObjcHeaderMappingFiles)
+              .addJoinedExecPaths(
+                  "--archive_source_mapping_files", ",", j2ObjcArchiveSourceMappingFiles)
               .add("--entry_classes")
-              .add(Joiner.on(",").join(entryClasses))
+              .addJoined(",", entryClasses)
               .build();
 
       ruleContext.registerAction(
@@ -1168,9 +1163,9 @@ public abstract class CompilationSupport {
       ImmutableList<String> extraFlags, Artifact unstrippedArtifact, Artifact strippedArtifact) {
     return CustomCommandLine.builder()
         .add(STRIP)
-        .add(extraFlags)
-        .add("-o", strippedArtifact)
-        .add(unstrippedArtifact.getExecPath())
+        .addAll(extraFlags)
+        .addExecPath("-o", strippedArtifact)
+        .addPath(unstrippedArtifact.getExecPath())
         .build();
   }
 
@@ -1385,28 +1380,25 @@ public abstract class CompilationSupport {
                     .list());
     CustomCommandLine.Builder cmdLine =
         CustomCommandLine.builder()
-            .add("--arch")
-            .add(appleConfiguration.getSingleArchitecture().toLowerCase())
-            .add("--platform")
-            .add(appleConfiguration.getSingleArchPlatform().getLowerCaseNameInPlist())
-            .add("--sdk_version")
-            .add(XcodeConfig.getSdkVersionForPlatform(
-                ruleContext, appleConfiguration.getSingleArchPlatform())
+            .add("--arch", appleConfiguration.getSingleArchitecture().toLowerCase())
+            .add("--platform", appleConfiguration.getSingleArchPlatform().getLowerCaseNameInPlist())
+            .add(
+                "--sdk_version",
+                XcodeConfig.getSdkVersionForPlatform(
+                        ruleContext, appleConfiguration.getSingleArchPlatform())
                     .toStringWithMinimumComponents(2))
-            .add("--xcode_version")
-            .add(XcodeConfig.getXcodeVersion(ruleContext).toStringWithMinimumComponents(2))
+            .add(
+                "--xcode_version",
+                XcodeConfig.getXcodeVersion(ruleContext).toStringWithMinimumComponents(2))
             .add("--");
     for (ObjcHeaderThinningInfo info : infos) {
-      cmdLine.add(
-          VectorArg.of(
-                  ImmutableList.of(
-                      info.sourceFile.getExecPath(), info.headersListFile.getExecPath()))
-              .joinWith(":"));
+      cmdLine.addFormatted(
+          "%s:%s", info.sourceFile.getExecPath(), info.headersListFile.getExecPath());
       builder.addInput(info.sourceFile).addOutput(info.headersListFile);
     }
     ruleContext.registerAction(
         builder
-            .setCommandLine(cmdLine.add("--").add(args).build())
+            .setCommandLine(cmdLine.add("--").addAll(args).build())
             .addInputs(compilationArtifacts.getPrivateHdrs())
             .addTransitiveInputs(attributes.hdrs())
             .addTransitiveInputs(objcProvider.get(ObjcProvider.HEADER))

@@ -62,7 +62,8 @@ public final class FunctionDefStatement extends Statement {
     env.update(
         identifier.getName(),
         new UserDefinedFunction(
-            identifier,
+            identifier.getName(),
+            identifier.getLocation(),
             FunctionSignature.WithValues.create(sig, defaultValues, /*types=*/null),
             statements,
             env.getGlobals()));
@@ -108,37 +109,5 @@ public final class FunctionDefStatement extends Statement {
   @Override
   public void accept(SyntaxTreeVisitor visitor) {
     visitor.visit(this);
-  }
-
-  @Override
-  void validate(final ValidationEnvironment env) throws EvalException {
-    ValidationEnvironment localEnv = new ValidationEnvironment(env);
-    FunctionSignature sig = signature.getSignature();
-    FunctionSignature.Shape shape = sig.getShape();
-    ImmutableList<String> names = sig.getNames();
-    List<Expression> defaultExpressions = signature.getDefaultValues();
-
-    int positionals = shape.getPositionals();
-    int mandatoryPositionals = shape.getMandatoryPositionals();
-    int namedOnly = shape.getNamedOnly();
-    int mandatoryNamedOnly = shape.getMandatoryNamedOnly();
-    boolean starArg = shape.hasStarArg();
-    boolean kwArg = shape.hasKwArg();
-    int named = positionals + namedOnly;
-    int args = named + (starArg ? 1 : 0) + (kwArg ? 1 : 0);
-    int startOptionals = mandatoryPositionals;
-    int endOptionals = named - mandatoryNamedOnly;
-
-    int j = 0; // index for the defaultExpressions
-    for (int i = 0; i < args; i++) {
-      String name = names.get(i);
-      if (startOptionals <= i && i < endOptionals) {
-        defaultExpressions.get(j++).validate(env);
-      }
-      localEnv.declare(name, getLocation());
-    }
-    for (Statement stmts : statements) {
-      stmts.validate(localEnv);
-    }
   }
 }

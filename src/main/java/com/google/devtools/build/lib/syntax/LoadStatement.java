@@ -24,7 +24,6 @@ import java.util.Map;
 public final class LoadStatement extends Statement {
 
   private final ImmutableMap<Identifier, String> symbolMap;
-  private final ImmutableList<Identifier> cachedSymbols; // to save time
   private final StringLiteral imp;
 
   /**
@@ -37,7 +36,6 @@ public final class LoadStatement extends Statement {
   public LoadStatement(StringLiteral imp, Map<Identifier, String> symbolMap) {
     this.imp = imp;
     this.symbolMap = ImmutableMap.copyOf(symbolMap);
-    this.cachedSymbols = ImmutableList.copyOf(symbolMap.keySet());
   }
 
   public ImmutableMap<Identifier, String> getSymbolMap() {
@@ -45,7 +43,7 @@ public final class LoadStatement extends Statement {
   }
 
   public ImmutableList<Identifier> getSymbols() {
-    return cachedSymbols;
+    return ImmutableList.copyOf(symbolMap.keySet());
   }
 
   public StringLiteral getImport() {
@@ -57,7 +55,7 @@ public final class LoadStatement extends Statement {
     printIndent(buffer, indentLevel);
     buffer.append("load(");
     imp.prettyPrint(buffer);
-    for (Identifier symbol : cachedSymbols) {
+    for (Identifier symbol : symbolMap.keySet()) {
       buffer.append(", ");
       String origName = symbolMap.get(symbol);
       if (origName.equals(symbol.getName())) {
@@ -108,12 +106,5 @@ public final class LoadStatement extends Statement {
   @Override
   public void accept(SyntaxTreeVisitor visitor) {
     visitor.visit(this);
-  }
-
-  @Override
-  void validate(ValidationEnvironment env) throws EvalException {
-    for (Identifier symbol : cachedSymbols) {
-      env.declare(symbol.getName(), getLocation());
-    }
   }
 }

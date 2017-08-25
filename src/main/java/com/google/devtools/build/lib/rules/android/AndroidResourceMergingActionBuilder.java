@@ -133,15 +133,15 @@ public class AndroidResourceMergingActionBuilder {
     // Use a FluentIterable to avoid flattening the NestedSets
     NestedSetBuilder<Artifact> inputs = NestedSetBuilder.naiveLinkOrder();
 
-    builder.add("--androidJar", sdk.getAndroidJar());
+    builder.addExecPath("--androidJar", sdk.getAndroidJar());
     inputs.add(sdk.getAndroidJar());
 
     Preconditions.checkNotNull(primary);
-    builder.add("--primaryData").add(RESOURCE_CONTAINER_TO_ARG.apply(primary));
+    builder.add("--primaryData", RESOURCE_CONTAINER_TO_ARG.apply(primary));
     inputs.addTransitive(RESOURCE_CONTAINER_TO_ARTIFACTS.apply(primary));
 
     Preconditions.checkNotNull(primary.getManifest());
-    builder.add("--primaryManifest", primary.getManifest());
+    builder.addExecPath("--primaryManifest", primary.getManifest());
     inputs.add(primary.getManifest());
 
     ResourceContainerConverter.convertDependencies(
@@ -149,32 +149,32 @@ public class AndroidResourceMergingActionBuilder {
 
     List<Artifact> outs = new ArrayList<>();
     if (classJarOut != null) {
-      builder.add("--classJarOutput", classJarOut);
+      builder.addExecPath("--classJarOutput", classJarOut);
       outs.add(classJarOut);
     }
 
     if (mergedResourcesOut != null) {
-      builder.add("--resourcesOutput", mergedResourcesOut);
+      builder.addExecPath("--resourcesOutput", mergedResourcesOut);
       outs.add(mergedResourcesOut);
     }
 
     // For now, do manifest processing to remove placeholders that aren't handled by the legacy
     // manifest merger. Remove this once enough users migrate over to the new manifest merger.
     if (manifestOut != null) {
-      builder.add("--manifestOutput", manifestOut);
+      builder.addExecPath("--manifestOutput", manifestOut);
       outs.add(manifestOut);
     }
 
     if (!Strings.isNullOrEmpty(customJavaPackage)) {
       // Sets an alternative java package for the generated R.java
       // this allows android rules to generate resources outside of the java{,tests} tree.
-      builder.add("--packageForR").add(customJavaPackage);
+      builder.add("--packageForR", customJavaPackage);
     }
 
     // TODO(corysmith): Move the data binding parsing out of the merging pass to enable faster
     // aapt2 builds.
     if (dataBindingInfoZip != null) {
-      builder.add("--dataBindingInfoOut", dataBindingInfoZip);
+      builder.addExecPath("--dataBindingInfoOut", dataBindingInfoZip);
       outs.add(dataBindingInfoZip);
     }
 

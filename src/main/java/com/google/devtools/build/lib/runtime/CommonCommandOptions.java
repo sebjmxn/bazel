@@ -190,9 +190,10 @@ public class CommonCommandOptions extends OptionsBase {
   public boolean announceRcOptions;
 
   /**
-   * These are the actual default overrides. Each value is a pair of (command name, value).
+   * These are the actual default overrides. Each value is a tuple of (bazelrc index, command name,
+   * value). The blazerc index is a number used to find the blazerc in --rc_source's values.
    *
-   * <p>For example: "--default_override=build=--cpu=piii"
+   * <p>For example: "--default_override=rc:build=--cpu=piii"
    */
   @Option(
     name = "default_override",
@@ -284,6 +285,17 @@ public class CommonCommandOptions extends OptionsBase {
     help = "Deprecated."
   )
   public boolean gcWatchdog;
+
+  @Option(
+    name = "experimental_oom_more_eagerly_threshold",
+    defaultValue = "100",
+    documentationCategory = OptionDocumentationCategory.EXECUTION_STRATEGY,
+    effectTags = {OptionEffectTag.HOST_MACHINE_RESOURCE_OPTIMIZATIONS},
+    help =
+        "If this flag is set to a value less than 100, Blaze will OOM if, after two full GC's, more"
+            + "than this percentage of the (old gen) heap is still occupied."
+  )
+  public int oomMoreEagerlyThreshold;
 
   @Option(
     name = "startup_time",

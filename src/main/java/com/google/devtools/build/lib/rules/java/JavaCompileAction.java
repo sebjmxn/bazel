@@ -32,6 +32,7 @@ import com.google.devtools.build.lib.actions.ActionEnvironment;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ArtifactOwner;
+import com.google.devtools.build.lib.actions.CommandLineExpansionException;
 import com.google.devtools.build.lib.actions.EmptyRunfilesSupplier;
 import com.google.devtools.build.lib.actions.ParameterFile;
 import com.google.devtools.build.lib.actions.ResourceSet;
@@ -43,7 +44,6 @@ import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.actions.CommandLine;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine.CustomMultiArgv;
-import com.google.devtools.build.lib.analysis.actions.CustomCommandLine.VectorArg;
 import com.google.devtools.build.lib.analysis.actions.ParameterFileWriteAction;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
@@ -321,28 +321,38 @@ public final class JavaCompileAction extends SpawnAction {
   }
 
   /**
-   * Constructs a command line that can be used to invoke the
-   * JavaBuilder.
+   * Constructs a command line that can be used to invoke the JavaBuilder.
    *
-   * <p>Do not use this method, except for testing (and for the in-process
-   * strategy).
+   * <p>Do not use this method, except for testing (and for the in-process strategy).
    */
   @VisibleForTesting
   public Iterable<String> buildCommandLine() {
-    return javaCompileCommandLine.arguments();
+    try {
+      return javaCompileCommandLine.arguments();
+    } catch (CommandLineExpansionException e) {
+      throw new AssertionError("JavaCompileAction command line expansion cannot fail");
+    }
   }
 
   /** Returns the command and arguments for a java compile action. */
   public List<String> getCommand() {
-    return ImmutableList.copyOf(commandLine.arguments());
+    try {
+      return ImmutableList.copyOf(commandLine.arguments());
+    } catch (CommandLineExpansionException e) {
+      throw new AssertionError("JavaCompileAction command line expansion cannot fail");
+    }
   }
 
   @Override
   public String toString() {
-    StringBuilder result = new StringBuilder();
-    result.append("JavaBuilder ");
-    Joiner.on(' ').appendTo(result, commandLine.arguments());
-    return result.toString();
+    try {
+      StringBuilder result = new StringBuilder();
+      result.append("JavaBuilder ");
+      Joiner.on(' ').appendTo(result, commandLine.arguments());
+      return result.toString();
+    } catch (CommandLineExpansionException e) {
+      return "Error expanding command line";
+    }
   }
 
   @Override
@@ -357,8 +367,11 @@ public final class JavaCompileAction extends SpawnAction {
     info.addAllProcessorpath(Artifact.toExecPaths(getProcessorpath()));
     info.setOutputjar(getOutputJar().getExecPathString());
 
-    return super.getExtraActionInfo()
-        .setExtension(JavaCompileInfo.javaCompileInfo, info.build());
+    try {
+      return super.getExtraActionInfo().setExtension(JavaCompileInfo.javaCompileInfo, info.build());
+    } catch (CommandLineExpansionException e) {
+      throw new AssertionError("JavaCompileAction command line expansion cannot fail");
+    }
   }
 
   /**
@@ -425,21 +438,20 @@ public final class JavaCompileAction extends SpawnAction {
         checkNotNull(javaBuilderJar);
 
         CustomCommandLine.Builder builder =
-            CustomCommandLine.builder().add(javaExecutable).add(javaBuilderJvmFlags);
+            CustomCommandLine.builder().addPath(javaExecutable).addAll(javaBuilderJvmFlags);
         if (!instrumentationJars.isEmpty()) {
           builder
-              .add(
+              .addJoinedExecPaths(
                   "-cp",
-                  VectorArg.of(
-                          ImmutableList.builder()
-                              .addAll(instrumentationJars)
-                              .add(javaBuilderJar)
-                              .build())
-                      .joinWith(pathDelimiter))
-              .add(javaBuilderMainClass);
+                  pathDelimiter,
+                  ImmutableList.<Artifact>builder()
+                      .addAll(instrumentationJars)
+                      .add(javaBuilderJar)
+                      .build())
+              .addDynamicString(javaBuilderMainClass);
         } else {
           // If there are no instrumentation jars, use simpler '-jar' option to launch JavaBuilder.
-          builder.add("-jar", javaBuilderJar);
+          builder.addExecPath("-jar", javaBuilderJar);
         }
         return builder.build().arguments();
       }
@@ -606,7 +618,7 @@ public final class JavaCompileAction extends SpawnAction {
       // The actual params-file-based command line executed for a compile action.
       CommandLine javaBuilderCommandLine =
           CustomCommandLine.builder()
-              .add(spawnCommandLineBase)
+              .addCustomMultiArgv(spawnCommandLineBase)
               .addFormatted("@%s", paramFile.getExecPath())
               .build();
 
@@ -664,66 +676,65 @@ public final class JavaCompileAction extends SpawnAction {
 
       CustomCommandLine.Builder result = CustomCommandLine.builder();
 
-      result.add("--classdir").add(classDirectory);
-      result.add("--tempdir").add(tempDirectory);
+      result.add("--classdir").addPath(classDirectory);
+      result.add("--tempdir").addPath(tempDirectory);
       if (outputJar != null) {
-        result.add("--output", outputJar);
+        result.addExecPath("--output", outputJar);
       }
       if (sourceGenDirectory != null) {
-        result.add("--sourcegendir").add(sourceGenDirectory);
+        result.add("--sourcegendir").addPath(sourceGenDirectory);
       }
       if (gensrcOutputJar != null) {
-        result.add("--generated_sources_output", gensrcOutputJar);
+        result.addExecPath("--generated_sources_output", gensrcOutputJar);
       }
       if (manifestProtoOutput != null) {
-        result.add("--output_manifest_proto", manifestProtoOutput);
+        result.addExecPath("--output_manifest_proto", manifestProtoOutput);
       }
       if (compressJar) {
         result.add("--compress_jar");
       }
       if (outputDepsProto != null) {
-        result.add("--output_deps_proto", outputDepsProto);
+        result.addExecPath("--output_deps_proto", outputDepsProto);
       }
       if (!extdirInputs.isEmpty()) {
-        result.add("--extclasspath", extdirInputs);
+        result.addExecPaths("--extclasspath", extdirInputs);
       }
       if (!bootclasspathEntries.isEmpty()) {
-        result.add("--bootclasspath", bootclasspathEntries);
+        result.addExecPaths("--bootclasspath", bootclasspathEntries);
       }
       if (!sourcePathEntries.isEmpty()) {
-        result.add("--sourcepath", sourcePathEntries);
+        result.addExecPaths("--sourcepath", sourcePathEntries);
       }
       if (!processorPath.isEmpty()) {
-        result.add("--processorpath", processorPath);
+        result.addExecPaths("--processorpath", processorPath);
       }
       if (!processorNames.isEmpty()) {
-        result.add("--processors", ImmutableList.copyOf(processorNames));
+        result.addAll("--processors", ImmutableList.copyOf(processorNames));
       }
       if (!processorFlags.isEmpty()) {
-        result.add("--javacopts", ImmutableList.copyOf(processorFlags));
+        result.addAll("--javacopts", ImmutableList.copyOf(processorFlags));
       }
       if (!sourceJars.isEmpty()) {
-        result.add("--source_jars", ImmutableList.copyOf(sourceJars));
+        result.addExecPaths("--source_jars", ImmutableList.copyOf(sourceJars));
       }
       if (!sourceFiles.isEmpty()) {
-        result.add("--sources", sourceFiles);
+        result.addExecPaths("--sources", sourceFiles);
       }
       if (!javacOpts.isEmpty()) {
-        result.add("--javacopts", ImmutableList.copyOf(javacOpts));
+        result.addAll("--javacopts", ImmutableList.copyOf(javacOpts));
       }
       if (ruleKind != null) {
-        result.add("--rule_kind");
-        result.add(ruleKind);
+        result.add("--rule_kind", ruleKind);
       }
       if (targetLabel != null) {
         result.add("--target_label");
         if (targetLabel.getPackageIdentifier().getRepository().isDefault()
             || targetLabel.getPackageIdentifier().getRepository().isMain()) {
-          result.add(targetLabel);
+          result.addLabel(targetLabel);
         } else {
           // @-prefixed strings will be assumed to be filenames and expanded by
           // {@link JavaLibraryBuildRequest}, so add an extra &at; to escape it.
-          result.addWithPrefix("@", targetLabel);
+          result.addPrefixedLabel("@", targetLabel);
         }
       }
       if (testOnly) {
@@ -731,29 +742,28 @@ public final class JavaCompileAction extends SpawnAction {
       }
 
       if (!classpathEntries.isEmpty()) {
-        result.add("--classpath", classpathEntries);
+        result.addExecPaths("--classpath", classpathEntries);
       }
 
       // strict_java_deps controls whether the mapping from jars to targets is
       // written out and whether we try to minimize the compile-time classpath.
       if (strictJavaDeps != BuildConfiguration.StrictDepsMode.OFF) {
-        result.add("--strict_java_deps");
-        result.add(strictJavaDeps.toString());
-        result.add(new JarsToTargetsArgv(classpathEntries, directJars));
+        result.add("--strict_java_deps", strictJavaDeps.toString());
+        result.addCustomMultiArgv(new JarsToTargetsArgv(classpathEntries, directJars));
 
         if (configuration.getFragment(JavaConfiguration.class).getReduceJavaClasspath()
             == JavaClasspathMode.JAVABUILDER) {
           result.add("--reduce_classpath");
 
           if (!compileTimeDependencyArtifacts.isEmpty()) {
-            result.add("--deps_artifacts", compileTimeDependencyArtifacts);
+            result.addExecPaths("--deps_artifacts", compileTimeDependencyArtifacts);
           }
         }
       }
       if (metadata != null) {
         result.add("--post_processor");
-        result.add(JACOCO_INSTRUMENTATION_PROCESSOR, metadata);
-        result.add(
+        result.addExecPath(JACOCO_INSTRUMENTATION_PROCESSOR, metadata);
+        result.addPath(
             configuration
                 .getCoverageMetadataDirectory(targetLabel.getPackageIdentifier().getRepository())
                 .getExecPath());

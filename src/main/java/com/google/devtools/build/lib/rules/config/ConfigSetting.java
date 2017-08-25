@@ -39,7 +39,6 @@ import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationOptionDetails;
 import com.google.devtools.build.lib.analysis.config.ConfigMatchingProvider;
 import com.google.devtools.build.lib.analysis.config.TransitiveOptionDetails;
-import com.google.devtools.build.lib.analysis.featurecontrol.FeaturePolicyConfiguration;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.packages.AttributeMap;
 import com.google.devtools.build.lib.packages.BuildType;
@@ -52,7 +51,6 @@ import com.google.devtools.common.options.OptionsBase;
 import com.google.devtools.common.options.OptionsParser;
 import com.google.devtools.common.options.OptionsParsingException;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -89,11 +87,14 @@ public class ConfigSetting implements RuleConfiguredTargetFactory {
                 ConfigSettingRule.FLAG_SETTINGS_ATTRIBUTE,
                 BuildType.LABEL_KEYED_STRING_DICT);
 
-    if (!userDefinedFlagSettings.isEmpty()) {
-      FeaturePolicyConfiguration.checkAvailable(
-          ruleContext,
-          ConfigFeatureFlag.POLICY_NAME,
-          "the " + ConfigSettingRule.FLAG_SETTINGS_ATTRIBUTE + " attribute");
+    if (!userDefinedFlagSettings.isEmpty() && !ConfigFeatureFlag.isAvailable(ruleContext)) {
+      ruleContext.attributeError(
+          ConfigSettingRule.FLAG_SETTINGS_ATTRIBUTE,
+          String.format(
+              "the %s attribute is not available in package '%s'",
+              ConfigSettingRule.FLAG_SETTINGS_ATTRIBUTE,
+              ruleContext.getLabel().getPackageIdentifier()));
+      throw new RuleErrorException();
     }
 
     List<? extends TransitiveInfoCollection> flagValues =
@@ -161,9 +162,6 @@ public class ConfigSetting implements RuleConfiguredTargetFactory {
     // make sure to examine only the value we just parsed: not the entire list.
     Multiset<String> optionsCount = HashMultiset.create();
 
-    // Since OptionsParser instantiation involves reflection, let's try to minimize that happening.
-    Map<Class<? extends OptionsBase>, OptionsParser> parserCache = new HashMap<>();
-
     for (Map.Entry<String, String> setting : expectedSettings) {
       String optionName = setting.getKey();
       String expectedRawValue = setting.getValue();
@@ -178,10 +176,9 @@ public class ConfigSetting implements RuleConfiguredTargetFactory {
         continue;
       }
 
-      OptionsParser parser =
-          parserCache.computeIfAbsent(optionClass, OptionsParser::newOptionsParser);
-
+      OptionsParser parser;
       try {
+        parser = OptionsParser.newOptionsParser(optionClass);
         parser.parse("--" + optionName + "=" + expectedRawValue);
       } catch (OptionsParsingException ex) {
         errors.attributeError(

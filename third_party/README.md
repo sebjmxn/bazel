@@ -97,9 +97,13 @@ a minimal set of extra dependencies.
 
 ## [Error Prone](https://github.com/google/error-prone)
 
-* Version: 2.0.20-SNAPSHOT
+* Version: 2.1.0
 * License: Apache License 2.0
 
+## [Hungarian Algorithm](https://github.com/KevinStern/software-and-algorithms)
+
+* Version 1.0
+* License: MIT
 
 ## [JCIP Annotations](https://github.com/stephenc/jcip-annotations/)
 
@@ -166,7 +170,7 @@ a minimal set of extra dependencies.
 
 ## [javac](https://github.com/google/error-prone-javac)
 
-* Version: 9-dev-r4023-2 (javac-9-dev-r4023-2.jar)
+* Version: 9-dev-r4023-3 (javac-9-dev-r4023-3.jar)
 * License: GNU GPL v2 with Classpath exception (plus other licenses, see third_party/java/jdk/langtools/LICENSE file).
 
 ## [jarjar](https://code.google.com/p/jarjar/)

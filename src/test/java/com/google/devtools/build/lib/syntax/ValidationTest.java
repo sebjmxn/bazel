@@ -39,6 +39,11 @@ public class ValidationTest extends EvaluationTestCase {
   }
 
   @Test
+  public void testAugmentedAssignmentWithMultipleLValues() {
+    checkError("cannot perform augmented assignment on a list or tuple expression", "a, b += 2, 3");
+  }
+
+  @Test
   public void testReturnOutsideFunction() throws Exception {
     checkError("Return statements must be inside a function", "return 2\n");
   }
@@ -172,73 +177,6 @@ public class ValidationTest extends EvaluationTestCase {
   @Test
   public void testEmptyLiteralGenericIsSetInLaterConcatWorks() {
     parse("def func():", "  s = {}", "  s['a'] = 'b'\n");
-  }
-
-  @Test
-  public void testReadOnlyWorksForSimpleBranching() {
-    parse("if 1:", "  v = 'a'", "else:", "  v = 'b'");
-  }
-
-  @Test
-  public void testReadOnlyWorksForNestedBranching() {
-    parse(
-        "if 1:",
-        "  if 0:",
-        "    v = 'a'",
-        "  else:",
-        "    v = 'b'",
-        "else:",
-        "  if 0:",
-        "    v = 'c'",
-        "  else:",
-        "    v = 'd'\n");
-  }
-
-  @Test
-  public void testReadOnlyWorksForDifferentLevelBranches() {
-    checkError("Variable v is read only", "if 1:", "  if 1:", "    v = 'a'", "  v = 'b'\n");
-  }
-
-  @Test
-  public void testReadOnlyWorksWithinSimpleBranch() {
-    checkError(
-        "Variable v is read only", "if 1:", "  v = 'a'", "else:", "  v = 'b'", "  v = 'c'\n");
-  }
-
-  @Test
-  public void testReadOnlyWorksWithinNestedBranch() {
-    checkError(
-        "Variable v is read only",
-        "if 1:",
-        "  v = 'a'",
-        "else:",
-        "  if 1:",
-        "    v = 'b'",
-        "  else:",
-        "    v = 'c'",
-        "    v = 'd'\n");
-  }
-
-  @Test
-  public void testReadOnlyWorksAfterSimpleBranch() {
-    checkError("Variable v is read only", "if 1:", "  v = 'a'", "else:", "  w = 'a'", "v = 'b'");
-  }
-
-  @Test
-  public void testReadOnlyWorksAfterNestedBranch() {
-    checkError("Variable v is read only", "if 1:", "  if 1:", "    v = 'a'", "v = 'b'");
-  }
-
-  @Test
-  public void testReadOnlyWorksAfterNestedBranch2() {
-    checkError(
-        "Variable v is read only",
-        "if 1:",
-        "  v = 'a'",
-        "else:",
-        "  if 0:",
-        "    w = 1",
-        "v = 'b'\n");
   }
 
   @Test

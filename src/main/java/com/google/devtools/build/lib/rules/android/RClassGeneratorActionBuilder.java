@@ -23,7 +23,6 @@ import com.google.devtools.build.lib.actions.ParameterFile.ParameterFileType;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
-import com.google.devtools.build.lib.analysis.actions.CustomCommandLine.VectorArg;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
@@ -89,25 +88,23 @@ public class RClassGeneratorActionBuilder {
 
     List<Artifact> outs = new ArrayList<>();
     if (primary.getRTxt() != null) {
-      builder.add("--primaryRTxt", primary.getRTxt());
+      builder.addExecPath("--primaryRTxt", primary.getRTxt());
       inputs.add(primary.getRTxt());
     }
     if (primary.getManifest() != null) {
-      builder.add("--primaryManifest", primary.getManifest());
+      builder.addExecPath("--primaryManifest", primary.getManifest());
       inputs.add(primary.getManifest());
     }
     if (!Strings.isNullOrEmpty(primary.getJavaPackage())) {
-      builder.add("--packageForR").add(primary.getJavaPackage());
+      builder.add("--packageForR", primary.getJavaPackage());
     }
     if (dependencies != null) {
       // TODO(corysmith): Remove NestedSet as we are already flattening it.
       Iterable<ResourceContainer> depResources = dependencies.getResources();
       if (!Iterables.isEmpty(depResources)) {
-        builder.add(
-            VectorArg.of(
-                    ImmutableList.copyOf(
-                        Iterables.transform(depResources, chooseDepsToArg(version))))
-                .beforeEach("--library"));
+        builder.addBeforeEach(
+            "--library",
+            ImmutableList.copyOf(Iterables.transform(depResources, chooseDepsToArg(version))));
         inputs.addTransitive(
             NestedSetBuilder.wrap(
                 Order.NAIVE_LINK_ORDER,
@@ -115,7 +112,7 @@ public class RClassGeneratorActionBuilder {
                     .transformAndConcat(chooseDepsToArtifacts(version))));
       }
     }
-    builder.add("--classJarOutput", classJarOut);
+    builder.addExecPath("--classJarOutput", classJarOut);
     outs.add(classJarOut);
 
     // Create the spawn action.

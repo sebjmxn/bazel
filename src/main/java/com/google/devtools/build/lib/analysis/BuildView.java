@@ -872,20 +872,10 @@ public class BuildView {
     LinkedHashSet<TargetAndConfiguration> nodes = new LinkedHashSet<>(targets.size());
     for (BuildConfiguration config : configurations.getTargetConfigurations()) {
       for (Target target : targets) {
-        nodes.add(new TargetAndConfiguration(target,
-            config.useDynamicConfigurations()
-                // Dynamic configurations apply top-level transitions through a different code path:
-                // BuildConfiguration#topLevelConfigurationHook. That path has the advantages of a)
-                // not requiring a global transitions table and b) making its choices outside core
-                // Bazel code.
-                ? (target.isConfigurable() ? config : null)
-                : BuildConfigurationCollection.configureTopLevelTarget(config, target)));
+        nodes.add(new TargetAndConfiguration(target, target.isConfigurable() ? config : null));
       }
     }
-    return ImmutableList.copyOf(
-        configurations.useDynamicConfigurations()
-            ? getDynamicConfigurations(nodes, eventHandler)
-            : nodes);
+    return ImmutableList.copyOf(getDynamicConfigurations(nodes, eventHandler));
   }
 
   /**
@@ -967,7 +957,6 @@ public class BuildView {
       DynamicTransitionMapper dynamicTransitionMapper) {
     Target target = targetAndConfig.getTarget();
     BuildConfiguration fromConfig = targetAndConfig.getConfiguration();
-    Preconditions.checkArgument(fromConfig.useDynamicConfigurations());
 
     // Top-level transitions (chosen by configuration fragments):
     Transition topLevelTransition = fromConfig.topLevelConfigurationHook(target);
@@ -1072,6 +1061,10 @@ public class BuildView {
     }
 
     class SilentDependencyResolver extends DependencyResolver {
+      private SilentDependencyResolver() {
+        super(ruleClassProvider.getDynamicTransitionMapper());
+      }
+
       @Override
       protected void invalidVisibilityReferenceHook(TargetAndConfiguration node, Label label) {
         throw new RuntimeException("bad visibility on " + label + " during testing unexpected");

@@ -16,13 +16,10 @@ package com.google.devtools.build.lib.rules.java;
 
 import static com.google.devtools.build.lib.util.Preconditions.checkNotNull;
 
-import com.google.common.base.Joiner;
-import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ParameterFile.ParameterFileType;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
-import com.google.devtools.build.lib.analysis.actions.CustomCommandLine.CustomMultiArgv;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
@@ -89,12 +86,13 @@ public final class OneVersionCheckActionBuilder {
 
     CustomCommandLine.Builder oneVersionArgsBuilder =
         CustomCommandLine.builder()
-            .add("--output", outputArtifact)
-            .add("--whitelist", oneVersionWhitelist);
+            .addExecPath("--output", outputArtifact)
+            .addExecPath("--whitelist", oneVersionWhitelist);
     if (enforcementLevel == OneVersionEnforcementLevel.WARNING) {
       oneVersionArgsBuilder.add("--succeed_on_found_violations");
     }
-    oneVersionArgsBuilder.add(new OneVersionJarMapArgv(jarsToCheck));
+    oneVersionArgsBuilder.addAll(
+        "--inputs", jarsToCheck, OneVersionCheckActionBuilder::jarAndTargetArg);
     CustomCommandLine oneVersionArgs = oneVersionArgsBuilder.build();
     ruleContext.registerAction(
         new SpawnAction.Builder()
@@ -110,35 +108,17 @@ public final class OneVersionCheckActionBuilder {
     return outputArtifact;
   }
 
-  private static class OneVersionJarMapArgv extends CustomMultiArgv {
+  private static String jarAndTargetArg(Artifact jar) {
+    return jar.getExecPathString() + "," + getArtifactOwnerGeneralizedLabel(jar);
+  }
 
-    private static final Joiner COMMA_JOINER = Joiner.on(',');
-    private final Iterable<Artifact> classPathJars;
-
-    private OneVersionJarMapArgv(Iterable<Artifact> classPathJars) {
-      this.classPathJars = classPathJars;
-    }
-
-    @Override
-    public Iterable<String> argv() {
-      ImmutableList.Builder<String> args = ImmutableList.builder();
-      args.add("--inputs");
-      for (Artifact classPathJar : classPathJars) {
-        args.add(
-            COMMA_JOINER.join(
-                classPathJar.getExecPathString(), getArtifactOwnerGeneralizedLabel(classPathJar)));
-      }
-      return args.build();
-    }
-
-    private static String getArtifactOwnerGeneralizedLabel(Artifact artifact) {
-      Label label = checkNotNull(artifact.getArtifactOwner(), artifact).getLabel();
-      return
-          label.getPackageIdentifier().getRepository().isDefault()
-                  || label.getPackageIdentifier().getRepository().isMain()
-              ? label.toString()
-              // Escape '@' prefix for .params file.
-              : "@" + label;
-    }
+  private static String getArtifactOwnerGeneralizedLabel(Artifact artifact) {
+    Label label = checkNotNull(artifact.getArtifactOwner(), artifact).getLabel();
+    return
+        label.getPackageIdentifier().getRepository().isDefault()
+            || label.getPackageIdentifier().getRepository().isMain()
+            ? label.toString()
+            // Escape '@' prefix for .params file.
+            : "@" + label;
   }
 }

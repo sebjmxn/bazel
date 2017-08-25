@@ -29,10 +29,10 @@ import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
-import com.google.devtools.build.lib.packages.Info;
+import com.google.devtools.build.lib.packages.NativeInfo;
 import com.google.devtools.build.lib.packages.NativeProvider;
 import com.google.devtools.build.lib.packages.NativeProvider.WithLegacySkylarkName;
-import com.google.devtools.build.lib.rules.cpp.CcLinkParamsProvider;
+import com.google.devtools.build.lib.rules.cpp.CcLinkParamsInfo;
 import com.google.devtools.build.lib.rules.cpp.CppModuleMap;
 import com.google.devtools.build.lib.rules.cpp.LinkerInputs;
 import com.google.devtools.build.lib.rules.cpp.LinkerInputs.LibraryToLink;
@@ -55,7 +55,7 @@ import java.util.Map;
   category = SkylarkModuleCategory.PROVIDER,
   doc = "A provider for compilation and linking of objc."
 )
-public final class ObjcProvider extends Info {
+public final class ObjcProvider extends NativeInfo {
 
   /** Skylark name for the ObjcProvider. */
   public static final String SKYLARK_NAME = "objc";
@@ -167,30 +167,8 @@ public final class ObjcProvider extends Info {
       new Key<>(STABLE_ORDER, "asset_catalog", Artifact.class);
 
   /**
-   * Added to {@link TargetControl#getGeneralResourceFileList()} when running Xcodegen.
-   */
-  public static final Key<Artifact> GENERAL_RESOURCE_FILE =
-      new Key<>(STABLE_ORDER, "general_resource_file", Artifact.class);
-
-  /**
-   * Resource directories added to {@link TargetControl#getGeneralResourceFileList()} when running
-   * Xcodegen. When copying files inside resource directories to the app bundle, XCode will preserve
-   * the directory structures of the copied files.
-   */
-  public static final Key<PathFragment> GENERAL_RESOURCE_DIR =
-      new Key<>(STABLE_ORDER, "general_resource_dir", PathFragment.class);
-
-  /**
-   * Exec paths of {@code .bundle} directories corresponding to imported bundles to link.
-   * These are passed to Xcodegen.
-   */
-  public static final Key<PathFragment> BUNDLE_IMPORT_DIR =
-      new Key<>(STABLE_ORDER, "bundle_import_dir", PathFragment.class);
-
-  /**
-   * Files that are plopped into the final bundle at some arbitrary bundle path. Note that these are
-   * not passed to Xcodegen, and these don't include information about where the file originated
-   * from.
+   * Files that are plopped into the final bundle at some arbitrary bundle path. Do not include
+   * information about where the file originated from.
    */
   public static final Key<BundleableFile> BUNDLE_FILE =
       new Key<>(STABLE_ORDER, "bundle_file", BundleableFile.class);
@@ -371,6 +349,12 @@ public final class ObjcProvider extends Info {
      */
     USES_CPP,
 
+    /**
+     * Indicates that Objective-C (or Objective-C++) is used in any source file. This affects how
+     * the linker is invoked.
+     */
+    USES_OBJC,
+
     /** Indicates that Swift dependencies are present. This affects bundling actions. */
     USES_SWIFT,
 
@@ -396,7 +380,6 @@ public final class ObjcProvider extends Info {
       ImmutableList.<Key<?>>of(
           ASSET_CATALOG,
           BUNDLE_FILE,
-          BUNDLE_IMPORT_DIR,
           DEFINE,
           DYNAMIC_FRAMEWORK_DIR,
           DYNAMIC_FRAMEWORK_FILE,
@@ -405,8 +388,6 @@ public final class ObjcProvider extends Info {
           EXPORTED_DEBUG_ARTIFACTS,
           FRAMEWORK_SEARCH_PATH_ONLY,
           FORCE_LOAD_LIBRARY,
-          GENERAL_RESOURCE_DIR,
-          GENERAL_RESOURCE_FILE,
           HEADER,
           IMPORTED_LIBRARY,
           INCLUDE,
@@ -478,6 +459,7 @@ public final class ObjcProvider extends Info {
           INCLUDE_SYSTEM,
           IQUOTE,
           LINKOPT,
+          LINK_INPUTS,
           SDK_DYLIB,
           SDK_FRAMEWORK,
           WEAK_SDK_FRAMEWORK);
@@ -510,11 +492,6 @@ public final class ObjcProvider extends Info {
     this.items = Preconditions.checkNotNull(items);
     this.nonPropagatedItems = Preconditions.checkNotNull(nonPropagatedItems);
     this.strictDependencyItems = Preconditions.checkNotNull(strictDependencyItems);
-  }
-
-  @Override
-  public Concatter getConcatter() {
-    return null;
   }
 
   /**
@@ -611,16 +588,16 @@ public final class ObjcProvider extends Info {
   // TODO(b/19795062): Investigate subtraction generalized to NestedSet.
   @SuppressWarnings("unchecked") // Due to depending on Key types, when the keys map erases type.
   public ObjcProvider subtractSubtrees(Iterable<ObjcProvider> avoidObjcProviders,
-      Iterable<CcLinkParamsProvider> avoidCcProviders) {
+      Iterable<CcLinkParamsInfo> avoidCcProviders) {
     // LIBRARY and CC_LIBRARY need to be special cased for objc-cc interop.
     // A library which is a dependency of a cc_library may be present in all or any of
     // three possible locations (and may be duplicated!):
     // 1. ObjcProvider.LIBRARY
     // 2. ObjcProvider.CC_LIBRARY
-    // 3. CcLinkParamsProvider->LibraryToLink->getArtifact()
+    // 3. CcLinkParamsInfo->LibraryToLink->getArtifact()
     // TODO(cpeyser): Clean up objc-cc interop.
     HashSet<PathFragment> avoidLibrariesSet = new HashSet<>();
-    for (CcLinkParamsProvider linkProvider : avoidCcProviders) {
+    for (CcLinkParamsInfo linkProvider : avoidCcProviders) {
       NestedSet<LibraryToLink> librariesToLink =
           linkProvider.getCcLinkParams(true, false).getLibraries();
       for (LibraryToLink libraryToLink : librariesToLink.toList()) {

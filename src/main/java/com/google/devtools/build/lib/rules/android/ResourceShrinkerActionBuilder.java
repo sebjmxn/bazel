@@ -20,7 +20,6 @@ import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
-import com.google.devtools.build.lib.analysis.actions.CustomCommandLine.VectorArg;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
 import com.google.devtools.build.lib.analysis.config.CompilationMode;
 import com.google.devtools.build.lib.packages.RuleClass.ConfiguredTargetFactory.RuleErrorException;
@@ -162,28 +161,25 @@ public class ResourceShrinkerActionBuilder {
             .getRunfilesSupport()
             .getRunfilesArtifactsWithoutMiddlemen());
 
-    commandLine.add("--aapt", sdk.getAapt().getExecutable());
+    commandLine.addExecPath("--aapt", sdk.getAapt().getExecutable());
 
-    commandLine.add("--annotationJar", sdk.getAnnotationsJar());
+    commandLine.addExecPath("--annotationJar", sdk.getAnnotationsJar());
     inputs.add(sdk.getAnnotationsJar());
 
-    commandLine.add("--androidJar", sdk.getAndroidJar());
+    commandLine.addExecPath("--androidJar", sdk.getAndroidJar());
     inputs.add(sdk.getAndroidJar());
 
     if (!uncompressedExtensions.isEmpty()) {
-      commandLine.add(
-          "--uncompressedExtensions",
-          VectorArg.of(ImmutableList.copyOf(uncompressedExtensions)).joinWith(","));
+      commandLine.addJoined("--uncompressedExtensions", ",", uncompressedExtensions);
     }
     if (!assetsToIgnore.isEmpty()) {
-      commandLine.add(
-          "--assetsToIgnore", VectorArg.of(ImmutableList.copyOf(assetsToIgnore)).joinWith(","));
+      commandLine.addJoined("--assetsToIgnore", ",", assetsToIgnore);
     }
     if (ruleContext.getConfiguration().getCompilationMode() != CompilationMode.OPT) {
       commandLine.add("--debug");
     }
     if (resourceFilter.hasConfigurationFilters()) {
-      commandLine.add("--resourceConfigs").add(resourceFilter.getConfigurationFilterString());
+      commandLine.add("--resourceConfigs", resourceFilter.getConfigurationFilterString());
     }
 
     checkNotNull(resourceFilesZip);
@@ -194,38 +190,38 @@ public class ResourceShrinkerActionBuilder {
     checkNotNull(primaryResources.getManifest());
     checkNotNull(resourceApkOut);
 
-    commandLine.add("--resources", resourceFilesZip);
+    commandLine.addExecPath("--resources", resourceFilesZip);
     inputs.add(resourceFilesZip);
 
-    commandLine.add("--shrunkJar", shrunkJar);
+    commandLine.addExecPath("--shrunkJar", shrunkJar);
     inputs.add(shrunkJar);
 
-    commandLine.add("--proguardMapping", proguardMapping);
+    commandLine.addExecPath("--proguardMapping", proguardMapping);
     inputs.add(proguardMapping);
 
-    commandLine.add("--rTxt", primaryResources.getRTxt());
+    commandLine.addExecPath("--rTxt", primaryResources.getRTxt());
     inputs.add(primaryResources.getRTxt());
 
-    commandLine.add("--primaryManifest", primaryResources.getManifest());
+    commandLine.addExecPath("--primaryManifest", primaryResources.getManifest());
     inputs.add(primaryResources.getManifest());
 
     ImmutableList<Artifact> dependencyManifests = getManifests(dependencyResources);
     if (!dependencyManifests.isEmpty()) {
-      commandLine.add("--dependencyManifest", dependencyManifests);
+      commandLine.addExecPaths("--dependencyManifest", dependencyManifests);
       inputs.addAll(dependencyManifests);
     }
 
     ImmutableList<String> resourcePackages =
         getResourcePackages(primaryResources, dependencyResources);
-    commandLine.add("--resourcePackages", VectorArg.of(resourcePackages).joinWith(","));
+    commandLine.addJoined("--resourcePackages", ",", resourcePackages);
 
-    commandLine.add("--shrunkResourceApk", resourceApkOut);
+    commandLine.addExecPath("--shrunkResourceApk", resourceApkOut);
     outputs.add(resourceApkOut);
 
-    commandLine.add("--shrunkResources", shrunkResourcesOut);
+    commandLine.addExecPath("--shrunkResources", shrunkResourcesOut);
     outputs.add(shrunkResourcesOut);
 
-    commandLine.add("--log", logOut);
+    commandLine.addExecPath("--log", logOut);
     outputs.add(logOut);
 
     ruleContext.registerAction(

@@ -20,6 +20,12 @@ java_library(
 
 java_library(
     name = "options",
+    exported_plugins = ["//src/main/java/com/google/devtools/common/options/processor:options_preprocessor"],
+    exports = [":options_internal"],
+)
+
+java_library(
+    name = "options_internal",
     srcs = glob(
         ["*.java"],
         exclude = [
@@ -36,5 +42,8 @@ java_library(
 filegroup(
     name = "srcs",
     testonly = 0,  # All srcs should be not test only, overwrite package default.
-    srcs = glob(["**"]) + ["//src/main/java/com/google/devtools/common/options/testing:srcs"],
+    srcs = glob(["**"]) + [
+        "//src/main/java/com/google/devtools/common/options/testing:srcs",
+        "//src/main/java/com/google/devtools/common/options/processor:srcs",
+    ],
 )

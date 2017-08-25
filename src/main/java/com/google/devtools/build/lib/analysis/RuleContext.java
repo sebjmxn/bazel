@@ -1079,20 +1079,20 @@ public final class RuleContext extends TargetContext
   }
 
   public ImmutableMap<String, String> getMakeVariables(Iterable<String> attributeNames) {
-    ArrayList<MakeVariableProvider> makeVariableProviders = new ArrayList<>();
+    ArrayList<MakeVariableInfo> makeVariableInfos = new ArrayList<>();
 
     for (String attributeName : attributeNames) {
       // TODO(b/37567440): Remove this continue statement.
       if (!attributes().has(attributeName)) {
         continue;
       }
-      Iterables.addAll(makeVariableProviders,
-          getPrerequisites(attributeName, Mode.TARGET, MakeVariableProvider.SKYLARK_CONSTRUCTOR));
+      Iterables.addAll(makeVariableInfos, getPrerequisites(
+          attributeName, Mode.DONT_CHECK, MakeVariableInfo.PROVIDER));
     }
 
     LinkedHashMap<String, String> makeVariables = new LinkedHashMap<>();
-    for (MakeVariableProvider makeVariableProvider : makeVariableProviders) {
-      makeVariables.putAll(makeVariableProvider.getMakeVariables());
+    for (MakeVariableInfo makeVariableInfo : makeVariableInfos) {
+      makeVariables.putAll(makeVariableInfo.getMakeVariables());
     }
 
     return ImmutableMap.copyOf(makeVariables);
@@ -1514,32 +1514,6 @@ public final class RuleContext extends TargetContext
    */
   public boolean isTestTarget() {
     return TargetUtils.isTestRule(getTarget());
-  }
-
-  /**
-   * Returns true if runfiles support should create the runfiles tree, or
-   * false if it should just create the manifest.
-   */
-  public boolean shouldCreateRunfilesSymlinks() {
-    // TODO(bazel-team): Ideally we wouldn't need such logic, and we'd
-    // always use the BuildConfiguration#buildRunfiles() to determine
-    // whether to build the runfiles. The problem is that certain build
-    // steps actually consume their runfiles. These include:
-    //  a. par files consumes the runfiles directory
-    //     We should modify autopar to take a list of files instead.
-    //     of the runfiles directory.
-    //  b. host tools could potentially use data files, but currently don't
-    //     (they're run from the execution root, not a runfiles tree).
-    //     Currently hostConfiguration.buildRunfiles() returns true.
-    if (isTestTarget()) {
-      // Tests are only executed during testing (duh),
-      // and their runfiles are generated lazily on local
-      // execution (see LocalTestStrategy). Therefore, it
-      // is safe not to build their runfiles.
-      return getConfiguration().buildRunfiles();
-    } else {
-      return true;
-    }
   }
 
   /**

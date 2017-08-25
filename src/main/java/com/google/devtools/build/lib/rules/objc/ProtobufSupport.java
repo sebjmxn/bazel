@@ -28,7 +28,6 @@ import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine.Builder;
-import com.google.devtools.build.lib.analysis.actions.CustomCommandLine.VectorArg;
 import com.google.devtools.build.lib.analysis.actions.FileWriteAction;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
@@ -470,15 +469,15 @@ final class ProtobufSupport {
   private CustomCommandLine getGenerationCommandLine(Artifact protoInputsFile) {
     return new Builder()
         .add("--input-file-list")
-        .add(protoInputsFile.getExecPathString())
+        .addExecPath(protoInputsFile)
         .add("--output-dir")
-        .add(getWorkspaceRelativeOutputDir().getSafePathString())
+        .addDynamicString(getWorkspaceRelativeOutputDir().getSafePathString())
         .add("--force")
         .add("--proto-root-dir")
-        .add(getGenfilesPathString())
+        .addDynamicString(getGenfilesPathString())
         .add("--proto-root-dir")
         .add(".")
-        .add(VectorArg.of(portableProtoFilters).beforeEach("--config"))
+        .addBeforeEachExecPath("--config", portableProtoFilters)
         .build();
   }
 

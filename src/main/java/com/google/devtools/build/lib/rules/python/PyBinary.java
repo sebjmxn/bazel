@@ -26,7 +26,7 @@ import com.google.devtools.build.lib.analysis.RunfilesSupport;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.rules.cpp.CcCommon.CcFlagsSupplier;
 import com.google.devtools.build.lib.rules.cpp.CcLinkParams;
-import com.google.devtools.build.lib.rules.cpp.CcLinkParamsProvider;
+import com.google.devtools.build.lib.rules.cpp.CcLinkParamsInfo;
 import com.google.devtools.build.lib.rules.cpp.CcLinkParamsStore;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import java.util.ArrayList;
@@ -92,7 +92,6 @@ public abstract class PyBinary implements RuleConfiguredTargetFactory {
             ruleContext,
             defaultRunfiles,
             common.getExecutable(),
-            ruleContext.shouldCreateRunfilesSymlinks(),
             ImmutableList.of(new CcFlagsSupplier(ruleContext)));
 
     if (ruleContext.hasErrors()) {
@@ -119,7 +118,7 @@ public abstract class PyBinary implements RuleConfiguredTargetFactory {
         .setFilesToBuild(common.getFilesToBuild())
         .add(RunfilesProvider.class, runfilesProvider)
         .setRunfilesSupport(runfilesSupport, realExecutable)
-        .addNativeDeclaredProvider(new CcLinkParamsProvider(ccLinkParamsStore))
+        .addNativeDeclaredProvider(new CcLinkParamsInfo(ccLinkParamsStore))
         .add(PythonImportsProvider.class, new PythonImportsProvider(imports));
   }
 
@@ -128,9 +127,6 @@ public abstract class PyBinary implements RuleConfiguredTargetFactory {
     Runfiles.Builder builder = new Runfiles.Builder(
         ruleContext.getWorkspaceName(), ruleContext.getConfiguration().legacyExternalRunfiles());
     builder.addArtifact(common.getExecutable());
-    if (common.getExecutableWrapper() != null) {
-      builder.addArtifact(common.getExecutableWrapper());
-    }
     if (common.getConvertedFiles() != null) {
       builder.addSymlinks(common.getConvertedFiles());
     } else {
@@ -150,7 +146,7 @@ public abstract class PyBinary implements RuleConfiguredTargetFactory {
                              boolean linkShared) {
         builder.addTransitiveTargets(ruleContext.getPrerequisites("deps", Mode.TARGET),
             PyCcLinkParamsProvider.TO_LINK_PARAMS,
-            CcLinkParamsProvider.TO_LINK_PARAMS);
+            CcLinkParamsInfo.TO_LINK_PARAMS);
       }
     };
   }
