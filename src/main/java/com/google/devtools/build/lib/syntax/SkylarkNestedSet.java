@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.syntax;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
@@ -23,7 +24,6 @@ import com.google.devtools.build.lib.skylarkinterface.SkylarkModule;
 import com.google.devtools.build.lib.skylarkinterface.SkylarkModuleCategory;
 import com.google.devtools.build.lib.skylarkinterface.SkylarkPrinter;
 import com.google.devtools.build.lib.skylarkinterface.SkylarkValue;
-import com.google.devtools.build.lib.util.Preconditions;
 import java.util.Collection;
 import java.util.List;
 import javax.annotation.Nullable;
@@ -334,6 +334,69 @@ public final class SkylarkNestedSet implements SkylarkValue, SkylarkQueryable {
 
   @Override
   public final boolean containsKey(Object key, Location loc) throws EvalException {
-    return (set.toSet().contains(key));
+    return (set.toList().contains(key));
+  }
+
+  /**
+   * Create a {@link Builder} with specified order.
+   *
+   * <p>The {@code Builder} will use {@code location} to report errors.
+   */
+  public static Builder builder(Order order, Location location) {
+    return new Builder(order, location);
+  }
+
+  /**
+   * Builder for {@link SkylarkNestedSet}.
+   *
+   * <p>Use this to construct typesafe Skylark nested sets (depsets).
+   * Encapsulates content type checking logic.
+   */
+  public static final class Builder {
+
+    private final Order order;
+    private final NestedSetBuilder<Object> builder;
+    /** Location for error messages */
+    private final Location location;
+    private SkylarkType contentType = SkylarkType.TOP;
+
+    private Builder(Order order, Location location) {
+      this.order = order;
+      this.location = location;
+      this.builder = new NestedSetBuilder<>(order);
+    }
+
+    /**
+     * Add a direct element, checking its type to be compatible to already added
+     * elements and transitive sets.
+     */
+    public Builder addDirect(Object direct) throws EvalException {
+      contentType = getTypeAfterInsert(contentType, SkylarkType.of(direct.getClass()), location);
+      builder.add(direct);
+      return this;
+    }
+
+    /**
+     * Add a transitive set, checking its content type to be compatible to already added
+     * elements and transitive sets.
+     */
+    public Builder addTransitive(SkylarkNestedSet transitive) throws EvalException {
+      if (transitive.isEmpty()) {
+        return this;
+      }
+
+      contentType = getTypeAfterInsert(contentType, transitive.getContentType(), this.location);
+      if (!order.isCompatible(transitive.getOrder())) {
+        throw new EvalException(location,
+            String.format("Order '%s' is incompatible with order '%s'",
+                          order.getSkylarkName(), transitive.getOrder().getSkylarkName()));
+      }
+      builder.addTransitive(transitive.getSet(Object.class));
+      return this;
+    }
+
+    public SkylarkNestedSet build() {
+      return new SkylarkNestedSet(contentType, builder.build());
+    }
   }
 }

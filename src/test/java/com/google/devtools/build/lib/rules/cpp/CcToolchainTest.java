@@ -15,8 +15,11 @@
 package com.google.devtools.build.lib.rules.cpp;
 
 import static com.google.common.truth.Truth.assertThat;
+import static org.junit.Assert.fail;
 
+import com.google.devtools.build.lib.actions.util.ActionsTestUtil;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
+import com.google.devtools.build.lib.analysis.platform.ToolchainInfo;
 import com.google.devtools.build.lib.analysis.util.BuildViewTestCase;
 import com.google.devtools.build.lib.view.config.crosstool.CrosstoolConfig;
 import org.junit.Test;
@@ -28,6 +31,31 @@ import org.junit.runners.JUnit4;
  */
 @RunWith(JUnit4.class)
 public class CcToolchainTest extends BuildViewTestCase {
+  @Test
+  public void testFilesToBuild() throws Exception {
+    scratch.file("a/BUILD",
+        "filegroup(",
+        "   name='empty')",
+        "filegroup(",
+        "    name = 'banana',",
+        "    srcs = ['banana1', 'banana2'])",
+        "cc_toolchain(",
+        "    name = 'b',",
+        "    cpu = 'banana',",
+        "    all_files = ':banana',",
+        "    compiler_files = ':empty',",
+        "    dwp_files = ':empty',",
+        "    linker_files = ':empty',",
+        "    strip_files = ':empty',",
+        "    objcopy_files = ':empty',",
+        "    dynamic_runtime_libs = [':empty'],",
+        "    static_runtime_libs = [':empty'])");
+
+    ConfiguredTarget b = getConfiguredTarget("//a:b");
+    assertThat(ActionsTestUtil.baseArtifactNames(getFilesToBuild(b)))
+        .containsExactly("banana1", "banana2");
+  }
+
   @Test
   public void testBadDynamicRuntimeLib() throws Exception {
     scratch.file("a/BUILD",
@@ -55,6 +83,57 @@ public class CcToolchainTest extends BuildViewTestCase {
     useConfiguration();
 
     getConfiguredTarget("//a:a");
+  }
+
+  public void assertInvalidIncludeDirectoryMessage(String entry, String messageRegex)
+      throws Exception {
+    try {
+      scratch.overwriteFile(
+          "a/BUILD",
+          "filegroup(",
+          "   name='empty')",
+          "cc_toolchain(",
+          "    name = 'b',",
+          "    cpu = 'k8',",
+          "    all_files = ':banana',",
+          "    compiler_files = ':empty',",
+          "    dwp_files = ':empty',",
+          "    linker_files = ':empty',",
+          "    strip_files = ':empty',",
+          "    objcopy_files = ':empty',",
+          "    dynamic_runtime_libs = [':empty'],",
+          "    static_runtime_libs = [':empty'])");
+
+      getAnalysisMock()
+          .ccSupport()
+          .setupCrosstool(
+              mockToolsConfig,
+              CrosstoolConfig.CToolchain.newBuilder()
+                  .addCxxBuiltinIncludeDirectory(entry)
+                  .buildPartial());
+
+      useConfiguration();
+
+      ConfiguredTarget target = getConfiguredTarget("//a:b");
+      CcToolchainProvider toolchainProvider =
+          (CcToolchainProvider) target.get(ToolchainInfo.PROVIDER);
+      // Must call this function to actually see if there's an error with the directories.
+      toolchainProvider.getBuiltInIncludeDirectories();
+
+      fail("C++ configuration creation succeeded unexpectedly");
+    } catch (AssertionError e) {
+      assertThat(e).hasMessageThat().containsMatch(messageRegex);
+    }
+  }
+
+  @Test
+  public void testInvalidIncludeDirectory() throws Exception {
+    assertInvalidIncludeDirectoryMessage("%package(//a", "has an unrecognized %prefix%");
+    assertInvalidIncludeDirectoryMessage("%package(//a@@a)%", "The package '//a@@a' is not valid");
+    assertInvalidIncludeDirectoryMessage(
+        "%package(//a)%foo", "The path in the package.*is not valid");
+    assertInvalidIncludeDirectoryMessage(
+        "%package(//a)%/../bar", "The include path.*is not normalized");
   }
 
   @Test
@@ -114,6 +193,6 @@ public class CcToolchainTest extends BuildViewTestCase {
   public void testToolchainAlias() throws Exception {
     ConfiguredTarget reference = scratchConfiguredTarget("a", "ref",
         "cc_toolchain_alias(name='ref')");
-    assertThat(reference.get(CcToolchainProvider.PROVIDER.getKey())).isNotNull();
+    assertThat(reference.get(ToolchainInfo.PROVIDER.getKey())).isNotNull();
   }
 }

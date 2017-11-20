@@ -71,6 +71,7 @@ public class EvaluationTestCase {
   public Environment newBuildEnvironment() {
     Environment env =
         Environment.builder(mutability)
+            .useDefaultSemantics()
             .setGlobals(BazelLibrary.GLOBALS)
             .setEventHandler(getEventHandler())
             .setPhase(Phase.LOADING)
@@ -85,6 +86,7 @@ public class EvaluationTestCase {
    */
   public Environment newSkylarkEnvironment() {
     return Environment.builder(mutability)
+        .useDefaultSemantics()
         .setGlobals(BazelLibrary.GLOBALS)
         .setEventHandler(getEventHandler())
         .build();
@@ -140,7 +142,7 @@ public class EvaluationTestCase {
   }
 
   protected BuildFileAST parseBuildFileASTWithoutValidation(String... input) {
-    return BuildFileAST.parseSkylarkString(getEventHandler(), input);
+    return BuildFileAST.parseString(getEventHandler(), input);
   }
 
   protected BuildFileAST parseBuildFileAST(String... input) {
@@ -160,18 +162,6 @@ public class EvaluationTestCase {
   /** Parses a statement, possibly followed by newlines. */
   protected Statement parseStatement(Parser.ParsingLevel parsingLevel, String... input) {
     return Parser.parseStatement(makeParserInputSource(input), getEventHandler(), parsingLevel);
-  }
-
-  /** Parses a top-level statement, possibly followed by newlines. */
-  protected Statement parseTopLevelStatement(String... input) {
-    return Parser.parseStatement(
-        makeParserInputSource(input), getEventHandler(), Parser.ParsingLevel.TOP_LEVEL);
-  }
-
-  /** Parses a local statement, possibly followed by newlines. */
-  protected Statement parseLocalLevelStatement(String... input) {
-    return Parser.parseStatement(
-        makeParserInputSource(input), getEventHandler(), Parser.ParsingLevel.LOCAL_LEVEL);
   }
 
   /** Parses an expression, possibly followed by newlines. */
@@ -210,6 +200,14 @@ public class EvaluationTestCase {
       fail("Expected error containing '" + msg + "' but got no error");
     } catch (EvalException | FailFastException e) {
       assertThat(e).hasMessageThat().contains(msg);
+    }
+  }
+
+  public void checkEvalErrorDoesNotContain(String msg, String... input) throws Exception {
+    try {
+      eval(input);
+    } catch (EvalException | FailFastException e) {
+      assertThat(e).hasMessageThat().doesNotContain(msg);
     }
   }
 
@@ -550,21 +548,25 @@ public class EvaluationTestCase {
    * A class that executes each separate test in both modes (Build and Skylark)
    */
   protected class BothModesTest extends ModalTestCase {
-    public BothModesTest() {}
+    private final String[] skylarkOptions;
+
+    public BothModesTest(String... skylarkOptions) {
+      this.skylarkOptions = skylarkOptions;
+    }
 
     /**
      * Executes the given Testable in both Build and Skylark mode
      */
     @Override
     protected void run(Testable testable) throws Exception {
-      enableSkylarkMode();
+      enableSkylarkMode(skylarkOptions);
       try {
         testable.run();
       } catch (Exception e) {
         throw new Exception("While in Skylark mode", e);
       }
 
-      enableBuildMode();
+      enableBuildMode(skylarkOptions);
       try {
         testable.run();
       } catch (Exception e) {

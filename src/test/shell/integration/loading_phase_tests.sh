@@ -162,12 +162,6 @@ EOF
   expect_log "//cycle:foo.h.*self-edge"
 }
 
-# Integration test for option parser warnings.
-function test_warning_for_weird_parameters() {
-  bazel build --check_tests_up_to_date --check_up_to_date --nobuild >$TEST_log 2>&1
-  expect_log "WARNING: Option 'check_up_to_date' is implicitly defined by"
-}
-
 # glob function should not return values that are outside the package
 function test_glob_with_subpackage() {
     mkdir -p p/subpkg || fail "mkdir p/subpkg failed"

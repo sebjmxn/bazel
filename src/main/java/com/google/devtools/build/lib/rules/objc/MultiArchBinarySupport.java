@@ -22,10 +22,10 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.analysis.configuredtargets.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.platform.ToolchainInfo;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
@@ -34,7 +34,6 @@ import com.google.devtools.build.lib.rules.apple.ApplePlatform;
 import com.google.devtools.build.lib.rules.cpp.CcLinkParamsInfo;
 import com.google.devtools.build.lib.rules.cpp.CcToolchainProvider;
 import com.google.devtools.build.lib.rules.objc.CompilationSupport.ExtraLinkArgs;
-import com.google.devtools.build.lib.rules.objc.ObjcCommon.ResourceAttributes;
 import com.google.devtools.build.lib.rules.proto.ProtoSourcesProvider;
 import java.util.List;
 import java.util.Map;
@@ -168,16 +167,16 @@ public class MultiArchBinarySupport {
       binariesToLipo.add(intermediateArtifacts.strippedSingleArchitectureBinary());
 
       ObjcProvider objcProvider = dependencySpecificConfiguration.objcLinkProvider();
-      CompilationArtifacts compilationArtifacts =
-          CompilationSupport.compilationArtifacts(
-              ruleContext,
-              ObjcRuleClasses.intermediateArtifacts(
-                  ruleContext, dependencySpecificConfiguration.config()));
+      CompilationArtifacts compilationArtifacts = new CompilationArtifacts.Builder()
+          .setIntermediateArtifacts(ObjcRuleClasses.intermediateArtifacts(
+                  ruleContext, dependencySpecificConfiguration.config()))
+          .build();
 
       CompilationSupport compilationSupport =
           new CompilationSupport.Builder()
               .setRuleContext(ruleContext)
               .setConfig(dependencySpecificConfiguration.config())
+              .setToolchainProvider(dependencySpecificConfiguration.toolchain())
               .setOutputGroupCollector(outputMapCollector)
               .build();
 
@@ -245,7 +244,8 @@ public class MultiArchBinarySupport {
                     protosToAvoid,
                     ImmutableList.<ProtoSourcesProvider>of(),
                     objcProtoProviders,
-                    ProtobufSupport.getTransitivePortableProtoFilters(objcProtoProviders))
+                    ProtobufSupport.getTransitivePortableProtoFilters(objcProtoProviders),
+                    childConfigurationsAndToolchains.get(childConfig))
                 .registerGenerationActions()
                 .registerCompilationActions();
         protosObjcProvider = protoSupport.getObjcProvider();
@@ -259,8 +259,6 @@ public class MultiArchBinarySupport {
       Iterable<ObjcProvider> additionalDepProviders =
           Iterables.concat(
               dylibObjcProviders,
-              ruleContext.getPrerequisites("bundles", Mode.TARGET,
-                  ObjcProvider.SKYLARK_CONSTRUCTOR),
               protosObjcProvider.asSet());
 
       ObjcCommon common =
@@ -294,21 +292,14 @@ public class MultiArchBinarySupport {
       List<ObjcProvider> nonPropagatedObjcDeps,
       Iterable<ObjcProvider> additionalDepProviders) {
 
-    CompilationArtifacts compilationArtifacts =
-        CompilationSupport.compilationArtifacts(ruleContext, intermediateArtifacts);
-
     ObjcCommon.Builder commonBuilder = new ObjcCommon.Builder(ruleContext, buildConfiguration)
         .setCompilationAttributes(
             CompilationAttributes.Builder.fromRuleContext(ruleContext).build())
-        .setCompilationArtifacts(compilationArtifacts)
-        .setResourceAttributes(new ResourceAttributes(ruleContext))
-        .addDefines(ruleContext.getTokenizedStringListAttr("defines"))
         .addDeps(propagatedDeps)
         .addDepObjcProviders(additionalDepProviders)
         .addNonPropagatedDepObjcProviders(nonPropagatedObjcDeps)
         .setIntermediateArtifacts(intermediateArtifacts)
         .setAlwayslink(false)
-        // TODO(b/29152500): Enable module map generation.
         .setLinkedBinary(intermediateArtifacts.strippedSingleArchitectureBinary());
 
     if (ObjcRuleClasses.objcConfiguration(ruleContext).generateDsym()) {

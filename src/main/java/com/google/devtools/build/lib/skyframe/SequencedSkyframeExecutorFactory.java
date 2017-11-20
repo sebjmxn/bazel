@@ -19,8 +19,8 @@ import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.WorkspaceStatusAction.Factory;
 import com.google.devtools.build.lib.analysis.buildinfo.BuildInfoFactory;
-import com.google.devtools.build.lib.analysis.config.BinTools;
 import com.google.devtools.build.lib.packages.PackageFactory;
+import com.google.devtools.build.lib.vfs.FileSystem;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyFunctionName;
@@ -33,29 +33,25 @@ public class SequencedSkyframeExecutorFactory implements SkyframeExecutorFactory
   @Override
   public SkyframeExecutor create(
       PackageFactory pkgFactory,
+      FileSystem fileSystem,
       BlazeDirectories directories,
-      BinTools binTools,
       Factory workspaceStatusActionFactory,
       ImmutableList<BuildInfoFactory> buildInfoFactories,
       Iterable<? extends DiffAwareness.Factory> diffAwarenessFactories,
       Predicate<PathFragment> allowedMissingInputs,
       ImmutableMap<SkyFunctionName, SkyFunction> extraSkyFunctions,
-      ImmutableList<PrecomputedValue.Injected> extraPrecomputedValues,
-      Iterable<SkyValueDirtinessChecker> customDirtinessCheckers,
-      String productName) {
+      Iterable<SkyValueDirtinessChecker> customDirtinessCheckers) {
     return SequencedSkyframeExecutor.create(
         pkgFactory,
+        fileSystem,
         directories,
-        binTools,
         workspaceStatusActionFactory,
         buildInfoFactories,
         diffAwarenessFactories,
         allowedMissingInputs,
         extraSkyFunctions,
-        extraPrecomputedValues,
         customDirtinessCheckers,
         PathFragment.EMPTY_FRAGMENT,
-        productName,
         BazelSkyframeExecutorConstants.CROSS_REPOSITORY_LABEL_VIOLATION_STRATEGY,
         BazelSkyframeExecutorConstants.BUILD_FILES_BY_PRIORITY,
         BazelSkyframeExecutorConstants.ACTION_ON_IO_EXCEPTION_READING_BUILD_FILE);

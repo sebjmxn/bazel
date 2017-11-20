@@ -46,7 +46,7 @@ public final class AndroidBinaryOnlyRule implements RuleDefinition {
         A list of resource configuration filters, such 'en' that will limit the resources in the
         apk to only the ones in the 'en' configuration.
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
-        .add(attr(ResourceFilter.RESOURCE_CONFIGURATION_FILTERS_NAME, STRING_LIST))
+        .add(attr(ResourceFilterFactory.RESOURCE_CONFIGURATION_FILTERS_NAME, STRING_LIST))
         /* <!-- #BLAZE_RULE(android_binary).ATTRIBUTE(shrink_resources) -->
         Whether to perform resource shrinking. Resources that are not used by the binary will be
         removed from the APK. This is only supported for rules using local resources (i.e. the
@@ -66,7 +66,7 @@ public final class AndroidBinaryOnlyRule implements RuleDefinition {
           <li><code>shrink_resources = 1</code>: Turns on Android resource shrinking</li>
           <li><code>shrink_resources = 0</code>: Turns off Android resource shrinking</li>
           <li><code>shrink_resources = -1</code>: Shrinking is controlled by the
-              <a href="../blaze-user-manual.html#flag--android_resource_shrinking">
+              <a href="../user-manual.html#flag--android_resource_shrinking">
               --android_resource_shrinking</a> flag.</li>
         </ul>
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
@@ -78,12 +78,13 @@ public final class AndroidBinaryOnlyRule implements RuleDefinition {
         section will also be added to the manifest if it does not already contain a superset
         listing.
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
-        .add(attr(ResourceFilter.DENSITIES_NAME, STRING_LIST))
+        .add(attr(ResourceFilterFactory.DENSITIES_NAME, STRING_LIST))
         .add(attr("$android_manifest_merge_tool", LABEL)
             .cfg(HOST)
             .exec()
             .value(env.getToolsLabel(AndroidRuleClasses.MANIFEST_MERGE_TOOL_LABEL)))
         .removeAttribute("data")
+        .advertiseProvider(ApkProvider.class)
         .build();
   }
 

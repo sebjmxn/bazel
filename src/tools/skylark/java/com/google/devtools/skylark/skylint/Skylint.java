@@ -14,28 +14,72 @@
 
 package com.google.devtools.skylark.skylint;
 
-import com.google.devtools.build.lib.syntax.BuildFileAST;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.List;
 
 /** The main class for the skylint binary. */
 public class Skylint {
-  public static void main(String[] args) throws IOException {
-    String content =
-        new String(
-            Files.readAllBytes(Paths.get(args[0]).toAbsolutePath()), StandardCharsets.ISO_8859_1);
-    BuildFileAST ast =
-        BuildFileAST.parseSkylarkString(
-            event -> {
-              System.err.println(event);
-            },
-            content);
-    List<Issue> issues = NamingConventionsChecker.check(ast);
-    for (Issue issue : issues) {
-      System.out.println(issue);
+  public static void main(String[] args) {
+    Linter linter = new Linter();
+    List<Path> paths = new ArrayList<>();
+    for (String arg : args) {
+      if (arg.equals("--single-file")) {
+        linter.setSingleFileMode();
+      } else if (arg.startsWith("--disable-categories=")) {
+        for (String categoryName : parseArgumentList(arg, "--disable-categories=")) {
+          linter.disableCategory(categoryName);
+        }
+      } else if (arg.startsWith("--disable-checks=")) {
+        for (String checkName : parseArgumentList(arg, "--disable-checks=")) {
+          linter.disableCheck(checkName);
+        }
+      } else {
+        paths.add(Paths.get(arg));
+      }
     }
+    boolean issuesFound = false;
+    for (Path path : paths) {
+      List<Issue> issues;
+      try {
+        issues = linter.lint(path);
+      } catch (IOException e) {
+        issuesFound = true;
+        if (e instanceof NoSuchFileException) {
+          System.err.println("File not found: " + path);
+        } else {
+          System.err.println("Error trying to read " + path);
+          e.printStackTrace();
+        }
+        continue;
+      }
+      if (!issues.isEmpty()) {
+        issuesFound = true;
+        for (Issue issue : issues) {
+          System.out.println(issue.prettyPrint(path.toString()));
+        }
+      }
+    }
+    System.exit(issuesFound ? 1 : 0);
+  }
+
+  /** Removes the prefix from the argument and returns the list of comma-separated items. */
+  private static List<String> parseArgumentList(String arg, String prefix) {
+    if (!arg.startsWith(prefix)) {
+      throw new IllegalArgumentException("Argument doesn't start with prefix " + prefix);
+    }
+    List<String> list = new ArrayList<>();
+    String[] items = arg.substring(prefix.length()).split(",");
+    for (String item : items) {
+      item = item.trim();
+      if (item.isEmpty()) {
+        continue;
+      }
+      list.add(item);
+    }
+    return list;
   }
 }

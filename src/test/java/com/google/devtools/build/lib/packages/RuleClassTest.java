@@ -862,6 +862,7 @@ public class RuleClassTest extends PackageLoadingTestCase {
             : ruleDefinitionEnvironment.getTransitiveContentHashCode();
     return new RuleClass(
         name,
+        name,
         /*isSkylark=*/ skylarkExecutable,
         skylarkExecutable,
         /*skylarkTestable=*/ false,
@@ -888,7 +889,7 @@ public class RuleClassTest extends PackageLoadingTestCase {
             .setMissingFragmentPolicy(missingFragmentPolicy)
             .build(),
         supportsConstraintChecking,
-        /*requiredToolchains=*/ ImmutableList.<Label>of(),
+        /*requiredToolchains=*/ ImmutableSet.<Label>of(),
         attributes);
   }
 
@@ -1037,7 +1038,6 @@ public class RuleClassTest extends PackageLoadingTestCase {
 
     assertThat(ruleClass.getRequiredToolchains())
         .containsExactly(
-            Label.parseAbsolute("//toolchain:tc1"), Label.parseAbsolute("//toolchain:tc2"))
-        .inOrder();
+            Label.parseAbsolute("//toolchain:tc1"), Label.parseAbsolute("//toolchain:tc2"));
   }
 }

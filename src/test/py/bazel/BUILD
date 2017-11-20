@@ -17,6 +17,18 @@ py_library(
     testonly = 1,
     srcs = ["test_base.py"],
     data = [":test-deps"],
+    visibility = [
+        "//src/test/py/bazel:__pkg__",
+        "//third_party/def_parser:__pkg__",
+        "//tools/android:__pkg__",
+    ],
+)
+
+py_test(
+    name = "action_temp_test",
+    size = "medium",
+    srcs = ["action_temp_test.py"],
+    deps = [":test_base"],
 )
 
 py_test(
@@ -69,4 +81,44 @@ py_test(
     size = "medium",
     srcs = ["launcher_test.py"],
     deps = [":test_base"],
+)
+
+py_test(
+    name = "bazel_windows_cpp_test",
+    size = "medium",
+    srcs = select({
+        "//src:windows": ["bazel_windows_cpp_test.py"],
+        "//src:windows_msvc": ["bazel_windows_cpp_test.py"],
+        "//src:windows_msys": ["bazel_windows_cpp_test.py"],
+        "//conditions:default": ["empty_test.py"],
+    }),
+    main = select({
+        "//src:windows": "bazel_windows_cpp_test.py",
+        "//src:windows_msvc": "bazel_windows_cpp_test.py",
+        "//src:windows_msys": "bazel_windows_cpp_test.py",
+        "//conditions:default": "empty_test.py",
+    }),
+    deps = select({
+        "//src:windows": [":test_base"],
+        "//src:windows_msvc": [":test_base"],
+        "//src:windows_msys": [":test_base"],
+        "//conditions:default": [],
+    }),
+)
+
+test_suite(
+    name = "windows_tests",
+    tags = [
+        "-no_windows",
+        "-slow",
+    ],
+    visibility = ["//visibility:private"],
+)
+
+test_suite(
+    name = "all_windows_tests",
+    tests = [
+        ":windows_tests",
+    ],
+    visibility = ["//src:__pkg__"],
 )

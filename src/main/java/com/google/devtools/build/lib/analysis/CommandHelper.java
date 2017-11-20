@@ -26,9 +26,7 @@ import com.google.devtools.build.lib.actions.RunfilesSupplier;
 import com.google.devtools.build.lib.analysis.actions.FileWriteAction;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
-import com.google.devtools.build.lib.syntax.SkylarkDict;
 import com.google.devtools.build.lib.syntax.SkylarkList;
-import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.OS;
 import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -73,7 +71,7 @@ public final class CommandHelper {
    * This is similar to heuristic location expansion in LocationExpander
    * and should be kept in sync.
    */
-  private final SkylarkDict<Label, ImmutableCollection<Artifact>> labelMap;
+  private final ImmutableMap<Label, ImmutableCollection<Artifact>> labelMap;
 
   /**
    * The ruleContext this helper works on
@@ -135,7 +133,7 @@ public final class CommandHelper {
     for (Entry<Label, Collection<Artifact>> entry : tempLabelMap.entrySet()) {
       labelMapBuilder.put(entry.getKey(), ImmutableList.copyOf(entry.getValue()));
     }
-    this.labelMap = SkylarkDict.copyOf(null, labelMapBuilder.build());
+    this.labelMap = labelMapBuilder.build();
   }
 
   public SkylarkList<Artifact> getResolvedTools() {
@@ -161,38 +159,38 @@ public final class CommandHelper {
   }
 
   /**
-   * Resolves a command, and expands known locations for $(location)
-   * variables.
+   * Resolves a command, and expands known locations for $(location) variables. This method supports
+   * legacy heuristic label expansion, which replaces strings that look like labels with their
+   * corresponding file names. Use {@link #resolveCommandAndExpandLabels} instead.
    */
-  public String resolveCommandAndExpandLabels(
-      String command,
-      @Nullable String attribute,
-      Boolean supportLegacyExpansion,
-      Boolean allowDataInLabel) {
-    LocationExpander expander = new LocationExpander(
-        ruleContext, ImmutableMap.copyOf(labelMap), allowDataInLabel);
-    if (attribute != null) {
-      command = expander.expandAttribute(attribute, command);
-    } else {
-      command = expander.expand(command);
-    }
-    if (supportLegacyExpansion) {
+  public String resolveCommandAndHeuristicallyExpandLabels(
+      String command, @Nullable String attribute, boolean enableLegacyHeuristicLabelExpansion) {
+    command = resolveCommandAndExpandLabels(command, attribute, false);
+    if (enableLegacyHeuristicLabelExpansion) {
       command = expandLabels(command, labelMap);
     }
     return command;
   }
 
   /**
-   * Resolves the 'cmd' attribute, and expands known locations for $(location)
+   * Resolves a command, and expands known locations for $(location)
    * variables.
    */
   public String resolveCommandAndExpandLabels(
-      Boolean supportLegacyExpansion, Boolean allowDataInLabel) {
-    return resolveCommandAndExpandLabels(
-        ruleContext.attributes().get("cmd", Type.STRING),
-        "cmd",
-        supportLegacyExpansion,
-        allowDataInLabel);
+      String command, @Nullable String attribute, boolean allowDataInLabel) {
+    LocationExpander expander;
+    if (allowDataInLabel) {
+      expander = new LocationExpander(ruleContext, labelMap,
+          LocationExpander.Options.EXEC_PATHS, LocationExpander.Options.ALLOW_DATA);
+    } else {
+      expander = new LocationExpander(ruleContext, labelMap, LocationExpander.Options.EXEC_PATHS);
+    }
+    if (attribute != null) {
+      command = expander.expandAttribute(attribute, command);
+    } else {
+      command = expander.expand(command);
+    }
+    return command;
   }
 
   /**
@@ -243,6 +241,27 @@ public final class CommandHelper {
   private static ImmutableList<String> buildCommandLineSimpleArgv(String command,
       PathFragment shellPath) {
     return ImmutableList.of(shellPath.getPathString(), "-c", command);
+  }
+
+  /**
+   * If {@code command} is too long, creates a helper shell script that runs that command.
+   *
+   * <p>Returns the {@link Artifact} corresponding to that script.
+   *
+   * <p>Otherwise, when {@code command} is shorter than the platform's shell's command length limit,
+   * this method does nothing and returns null.
+   */
+  @Nullable
+  public static Artifact shellCommandHelperScriptMaybe(
+      RuleContext ruleCtx,
+      String command,
+      String scriptPostFix,
+      Map<String, String> executionInfo) {
+    if (command.length() <= maxCommandLength) {
+      return null;
+    } else {
+      return buildCommandLineArtifact(ruleCtx, command, scriptPostFix);
+    }
   }
 
   /**

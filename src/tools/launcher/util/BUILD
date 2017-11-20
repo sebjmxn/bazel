@@ -1,5 +1,7 @@
 package(default_visibility = ["//src/tools/launcher:__subpackages__"])
 
+load("//src/tools/launcher:win_rules.bzl", "cc_library", "cc_binary", "cc_test")
+
 filegroup(
     name = "srcs",
     srcs = glob(["**"]),
@@ -17,6 +19,7 @@ cc_library(
     name = "util",
     srcs = ["launcher_util.cc"],
     hdrs = ["launcher_util.h"],
+    deps = ["//src/main/cpp/util:file"],
 )
 
 cc_test(
@@ -35,4 +38,21 @@ cc_test(
         ":data_parser",
         "//third_party:gtest",
     ],
+)
+
+test_suite(
+    name = "windows_tests",
+    tags = [
+        "-no_windows",
+        "-slow",
+    ],
+    visibility = ["//visibility:private"],
+)
+
+test_suite(
+    name = "all_windows_tests",
+    tests = [
+        ":windows_tests",
+    ],
+    visibility = ["//src/tools/launcher:__pkg__"],
 )

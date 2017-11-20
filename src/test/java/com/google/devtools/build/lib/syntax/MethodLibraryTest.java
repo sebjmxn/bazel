@@ -38,114 +38,6 @@ public class MethodLibraryTest extends EvaluationTestCase {
   }
 
   @Test
-  public void testMinWithInvalidArgs() throws Exception {
-    new SkylarkTest()
-        .testIfExactError("type 'int' is not iterable", "min(1)")
-        .testIfExactError("expected at least one item", "min([])");
-  }
-
-  @Test
-  public void testMinWithString() throws Exception {
-    new SkylarkTest()
-        .testStatement("min('abcdefxyz')", "a")
-        .testStatement("min('test', 'xyz')", "test");
-  }
-
-  @Test
-  public void testMinWithList() throws Exception {
-    new BothModesTest()
-        .testEval("min([4, 5], [1])", "[1]")
-        .testEval("min([1, 2], [3])", "[1, 2]")
-        .testEval("min([1, 5], [1, 6], [2, 4], [0, 6])", "[0, 6]")
-        .testStatement("min([-1])", -1)
-        .testStatement("min([5, 2, 3])", 2);
-  }
-
-  @Test
-  public void testMinWithDict() throws Exception {
-    new BothModesTest().testStatement("min({1: 2, -1 : 3})", -1).testStatement("min({2: None})", 2);
-  }
-
-  @Test
-  public void testMinWithSet() throws Exception {
-    new BothModesTest()
-        .testStatement("min(depset([-1]))", -1)
-        .testStatement("min(depset([5, 2, 3]))", 2);
-  }
-
-  @Test
-  public void testMinWithPositionalArguments() throws Exception {
-    new BothModesTest().testStatement("min(-1, 2)", -1).testStatement("min(5, 2, 3)", 2);
-  }
-
-  @Test
-  public void testMinWithSameValues() throws Exception {
-    new BothModesTest()
-        .testStatement("min(1, 1, 1, 1, 1, 1)", 1)
-        .testStatement("min([1, 1, 1, 1, 1, 1])", 1);
-  }
-
-  @Test
-  public void testMinWithDifferentTypes() throws Exception {
-    new BothModesTest()
-        .testIfExactError("Cannot compare int with string", "min(1, '2', True)")
-        .testIfExactError("Cannot compare int with string", "min([1, '2', True])");
-  }
-
-  @Test
-  public void testMaxWithInvalidArgs() throws Exception {
-    new BothModesTest()
-        .testIfExactError("type 'int' is not iterable", "max(1)")
-        .testIfExactError("expected at least one item", "max([])");
-  }
-
-  @Test
-  public void testMaxWithString() throws Exception {
-    new BothModesTest()
-        .testStatement("max('abcdefxyz')", "z")
-        .testStatement("max('test', 'xyz')", "xyz");
-  }
-
-  @Test
-  public void testMaxWithList() throws Exception {
-    new BothModesTest()
-        .testEval("max([1, 2], [5])", "[5]")
-        .testStatement("max([-1])", -1)
-        .testStatement("max([5, 2, 3])", 5);
-  }
-
-  @Test
-  public void testMaxWithDict() throws Exception {
-    new BothModesTest().testStatement("max({1: 2, -1 : 3})", 1).testStatement("max({2: None})", 2);
-  }
-
-  @Test
-  public void testMaxWithSet() throws Exception {
-    new BothModesTest()
-        .testStatement("max(depset([-1]))", -1)
-        .testStatement("max(depset([5, 2, 3]))", 5);
-  }
-
-  @Test
-  public void testMaxWithPositionalArguments() throws Exception {
-    new BothModesTest().testStatement("max(-1, 2)", 2).testStatement("max(5, 2, 3)", 5);
-  }
-
-  @Test
-  public void testMaxWithSameValues() throws Exception {
-    new BothModesTest()
-        .testStatement("max(1, 1, 1, 1, 1, 1)", 1)
-        .testStatement("max([1, 1, 1, 1, 1, 1])", 1);
-  }
-
-  @Test
-  public void testMaxWithDifferentTypes() throws Exception {
-    new BothModesTest()
-        .testIfExactError("Cannot compare int with string", "max(1, '2', True)")
-        .testIfExactError("Cannot compare int with string", "max([1, '2', True])");
-  }
-
-  @Test
   public void testSplitLines_EmptyLine() throws Exception {
     new BothModesTest().testEval("''.splitlines()", "[]").testEval("'\\n'.splitlines()", "['']");
   }
@@ -388,6 +280,25 @@ public class MethodLibraryTest extends EvaluationTestCase {
             "  s = depset()",
             "  if s[0] == 1:",
             "    x = 1",
+            "foo()");
+  }
+
+  @Test
+  public void testStackTraceWithAugmentedAssignment() throws Exception {
+    new SkylarkTest()
+        .testIfErrorContains(
+            "File \"\", line 4"
+                + LINE_SEPARATOR
+                + "\t\tfoo()"
+                + LINE_SEPARATOR
+                + "\tFile \"\", line 3, in foo"
+                + LINE_SEPARATOR
+                + "\t\ts += \"2\""
+                + LINE_SEPARATOR
+                + "unsupported operand type(s) for +: 'int' and 'string'",
+            "def foo():",
+            "  s = 1",
+            "  s += '2'",
             "foo()");
   }
 
@@ -1609,7 +1520,7 @@ public class MethodLibraryTest extends EvaluationTestCase {
         .testStatement("str(True)", "True")
         .testStatement("str(False)", "False")
         .testStatement("str(None)", "None")
-        .testStatement("str(str)", "<function str>");
+        .testStatement("str(str)", "<built-in function str>");
   }
 
   @Test
@@ -1633,7 +1544,9 @@ public class MethodLibraryTest extends EvaluationTestCase {
         .testStatement("int('11', 9)", 10)
         .testStatement("int('AF', 16)", 175)
         .testStatement("int('11', 36)", 37)
-        .testStatement("int('az', 36)", 395);
+        .testStatement("int('az', 36)", 395)
+        .testStatement("int('11', 10)", 11)
+        .testStatement("int('11', 0)", 11);
   }
 
   @Test
@@ -1662,7 +1575,9 @@ public class MethodLibraryTest extends EvaluationTestCase {
   public void testIntWithBase_NoString() throws Exception {
     new BothModesTest()
         .testIfExactError("int() can't convert non-string with explicit base", "int(True, 2)")
-        .testIfExactError("int() can't convert non-string with explicit base", "int(1, 2)");
+        .testIfExactError("int() can't convert non-string with explicit base", "int(1, 2)")
+        .testIfExactError("int() can't convert non-string with explicit base", "int(True, 10)")
+    ;
   }
 
   @Test

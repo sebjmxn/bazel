@@ -18,6 +18,7 @@ import static com.google.devtools.build.lib.analysis.config.BuildConfiguration.S
 import static com.google.devtools.build.lib.rules.java.JavaHelper.getHostJavabaseInputs;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
@@ -26,13 +27,13 @@ import com.google.devtools.build.lib.actions.ExecutionRequirements;
 import com.google.devtools.build.lib.analysis.AnalysisEnvironment;
 import com.google.devtools.build.lib.analysis.FileProvider;
 import com.google.devtools.build.lib.analysis.FilesToRunProvider;
-import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration.StrictDepsMode;
+import com.google.devtools.build.lib.analysis.configuredtargets.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.test.InstrumentedFilesCollector;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
@@ -40,15 +41,11 @@ import com.google.devtools.build.lib.packages.AttributeMap;
 import com.google.devtools.build.lib.rules.java.JavaConfiguration.JavaClasspathMode;
 import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.FileType;
-import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.LinkedHashMap;
-import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;
 import javax.annotation.Nullable;
 
 /**
@@ -205,7 +202,7 @@ public final class JavaCompilationHelper {
     builder.setExtdirInputs(getExtdirInputs());
     builder.setLangtoolsJar(javaToolchain.getJavac());
     builder.setToolsJars(javaToolchain.getTools());
-    builder.setJavaBuilderJar(javaToolchain.getJavaBuilder());
+    builder.setJavaBuilder(javaToolchain.getJavaBuilder());
     builder.setOutputJar(classJar);
     builder.setManifestProtoOutput(manifestProtoOutput);
     builder.setGensrcOutputJar(gensrcOutputJar);
@@ -224,7 +221,6 @@ public final class JavaCompilationHelper {
     builder.setClassDirectory(classDir(classJar));
     builder.setProcessorPaths(attributes.getProcessorPath());
     builder.addProcessorNames(attributes.getProcessorNames());
-    builder.addProcessorFlags(attributes.getProcessorFlags());
     builder.setStrictJavaDeps(attributes.getStrictJavaDeps());
     builder.setDirectJars(attributes.getDirectJars());
     builder.setCompileTimeDependencyArtifacts(attributes.getCompileTimeDependencyArtifacts());
@@ -377,7 +373,6 @@ public final class JavaCompilationHelper {
     // only run API-generating annotation processors during header compilation
     builder.setProcessorPaths(attributes.getApiGeneratingProcessorPath());
     builder.addProcessorNames(attributes.getApiGeneratingProcessorNames());
-    builder.addProcessorFlags(attributes.getProcessorFlags());
     builder.setJavacOpts(getJavacOpts());
     builder.setTempDirectory(tempDir(headerJar));
     builder.setOutputJar(headerJar);
@@ -461,7 +456,7 @@ public final class JavaCompilationHelper {
                     JavaCommon.getHostJavaExecutable(ruleContext),
                     getGenClassJar(ruleContext),
                     javaToolchain.getJvmOptions())
-                .setCommandLine(
+                .addCommandLine(
                     CustomCommandLine.builder()
                         .addExecPath("--manifest_proto", manifestProto)
                         .addExecPath("--class_jar", classJar)
@@ -590,15 +585,13 @@ public final class JavaCompilationHelper {
    */
   public void createSourceJarAction(Artifact outputJar, @Nullable Artifact gensrcJar) {
     JavaTargetAttributes attributes = getAttributes();
-    Collection<Artifact> resourceJars = new ArrayList<>(attributes.getSourceJars());
+    NestedSetBuilder<Artifact> resourceJars = NestedSetBuilder.stableOrder();
+    resourceJars.addAll(attributes.getSourceJars());
     if (gensrcJar != null) {
       resourceJars.add(gensrcJar);
     }
-    Map<PathFragment, Artifact> resources = new LinkedHashMap<>();
-    for (Artifact sourceFile : attributes.getSourceFiles()) {
-      resources.put(semantics.getDefaultJavaResourcePath(sourceFile.getRootRelativePath()), sourceFile);
-    }
-    SingleJarActionBuilder.createSourceJarAction(ruleContext, resources, resourceJars, outputJar);
+    SingleJarActionBuilder.createSourceJarAction(
+        ruleContext, semantics, attributes.getSourceFiles(), resourceJars.build(), outputJar);
   }
 
   /**
@@ -610,14 +603,20 @@ public final class JavaCompilationHelper {
   public Artifact createCompileTimeJarAction(
       Artifact runtimeJar, JavaCompilationArtifacts.Builder builder) {
     Artifact jar;
+    boolean isFullJar = false;
     if (shouldUseHeaderCompilation()) {
       jar = createHeaderCompilationAction(runtimeJar, builder);
     } else if (getJavaConfiguration().getUseIjars()) {
       jar = createIjarAction(ruleContext, javaToolchain, runtimeJar, false);
     } else {
       jar = runtimeJar;
+      isFullJar = true;
     }
-    builder.addCompileTimeJar(jar);
+    if (isFullJar) {
+      builder.addCompileTimeJarAsFullJar(jar);
+    } else {
+      builder.addInterfaceJarWithFullJar(jar, runtimeJar);
+    }
     return jar;
   }
 
@@ -678,7 +677,7 @@ public final class JavaCompilationHelper {
 
     JavaClasspathMode classpathMode = getJavaConfiguration().getReduceJavaClasspath();
     if (isStrict() && classpathMode != JavaClasspathMode.OFF) {
-      List<JavaCompilationArgsProvider> compilationArgsProviders = new LinkedList<>();
+      List<JavaCompilationArgsProvider> compilationArgsProviders = new ArrayList<>();
       for (TransitiveInfoCollection dep : deps) {
         JavaCompilationArgsProvider provider =
             JavaInfo.getProvider(JavaCompilationArgsProvider.class, dep);
@@ -720,8 +719,8 @@ public final class JavaCompilationHelper {
   private static ImmutableList<String> getDefaultJavacOptsFromRule(RuleContext ruleContext) {
     return ImmutableList.copyOf(
         Iterables.concat(
-            JavaToolchainProvider.fromRuleContext(ruleContext).getJavacOptions(),
-            ruleContext.getTokenizedStringListAttr("javacopts")));
+            JavaToolchainProvider.from(ruleContext).getJavacOptions(),
+            ruleContext.getExpander().withDataLocations().tokenized("javacopts")));
   }
 
   public void setTranslations(Collection<Artifact> translations) {
@@ -736,8 +735,7 @@ public final class JavaCompilationHelper {
 
   public static JavaToolchainProvider getJavaToolchainProvider(
       RuleContext ruleContext, String implicitAttributesSuffix) {
-    return ruleContext.getPrerequisite(
-        ":java_toolchain" + implicitAttributesSuffix, Mode.TARGET, JavaToolchainProvider.class);
+    return JavaToolchainProvider.from(ruleContext, ":java_toolchain" + implicitAttributesSuffix);
   }
 
   public static JavaToolchainProvider getJavaToolchainProvider(RuleContext ruleContext) {
@@ -807,7 +805,7 @@ public final class JavaCompilationHelper {
               .useDefaultShellEnvironment()
               .setProgressMessage("Extracting interface %s", ruleContext.getLabel())
               .setMnemonic("JavaIjar")
-              .setCommandLine(
+              .addCommandLine(
                   CustomCommandLine.builder()
                       .addExecPath(inputJar)
                       .addExecPath(interfaceJar)

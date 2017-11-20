@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// For rand_s function, https://msdn.microsoft.com/en-us/library/sxtz2fa8.aspx
+#define _CRT_RAND_S
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,6 +22,7 @@
 #include <sstream>
 #include <string>
 
+#include "src/main/cpp/util/file_platform.h"
 #include "src/tools/launcher/util/launcher_util.h"
 
 namespace bazel {
@@ -27,6 +30,7 @@ namespace launcher {
 
 using std::ostringstream;
 using std::string;
+using std::wstring;
 using std::stringstream;
 
 string GetLastErrorString() {
@@ -67,13 +71,30 @@ void PrintError(const char* format, ...) {
   fputc('\n', stderr);
 }
 
+wstring AsAbsoluteWindowsPath(const char* path) {
+  wstring wpath;
+  if (!blaze_util::AsAbsoluteWindowsPath(path, &wpath)) {
+    die("Couldn't convert %s to absoulte Windows path.", path);
+  }
+  return wpath;
+}
+
 bool DoesFilePathExist(const char* path) {
-  // TODO(laszlocsomor): convert `path` to (const wchar_t*), add longpath-prefix
-  // and use GetFileAttributesW.
-  DWORD dwAttrib = GetFileAttributesA(path);
+  DWORD dwAttrib = GetFileAttributesW(AsAbsoluteWindowsPath(path).c_str());
 
   return (dwAttrib != INVALID_FILE_ATTRIBUTES &&
           !(dwAttrib & FILE_ATTRIBUTE_DIRECTORY));
+}
+
+bool DoesDirectoryPathExist(const char* path) {
+  DWORD dwAttrib = GetFileAttributesW(AsAbsoluteWindowsPath(path).c_str());
+
+  return (dwAttrib != INVALID_FILE_ATTRIBUTES &&
+          (dwAttrib & FILE_ATTRIBUTE_DIRECTORY));
+}
+
+bool DeleteFileByPath(const char* path) {
+  return DeleteFileW(AsAbsoluteWindowsPath(path).c_str());
 }
 
 string GetBinaryPathWithoutExtension(const string& binary) {
@@ -118,6 +139,35 @@ string GetEscapedArgument(const string& argument) {
     escaped_arg << '\"';
   }
   return escaped_arg.str();
+}
+
+// An environment variable has a maximum size limit of 32,767 characters
+// https://msdn.microsoft.com/en-us/library/ms683188.aspx
+static const int BUFFER_SIZE = 32767;
+
+bool GetEnv(const string& env_name, string* value) {
+  char buffer[BUFFER_SIZE];
+  if (!GetEnvironmentVariableA(env_name.c_str(), buffer, BUFFER_SIZE)) {
+    return false;
+  }
+  *value = buffer;
+  return true;
+}
+
+bool SetEnv(const string& env_name, const string& value) {
+  return SetEnvironmentVariableA(env_name.c_str(), value.c_str());
+}
+
+string GetRandomStr(size_t len) {
+  static const char alphabet[] =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  ostringstream rand_str;
+  unsigned int x;
+  for (size_t i = 0; i < len; i++) {
+    rand_s(&x);
+    rand_str << alphabet[x % strlen(alphabet)];
+  }
+  return rand_str.str();
 }
 
 }  // namespace launcher

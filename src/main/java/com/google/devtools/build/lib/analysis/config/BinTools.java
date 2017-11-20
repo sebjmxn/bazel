@@ -17,8 +17,6 @@ package com.google.devtools.build.lib.analysis.config;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
-import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.actions.ArtifactFactory;
 import com.google.devtools.build.lib.actions.EnvironmentalExecException;
 import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
@@ -27,7 +25,6 @@ import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.Symlinks;
-
 import java.io.IOException;
 
 /**
@@ -147,21 +144,6 @@ public final class BinTools {
     return PathFragment.create("_bin").getRelative(PathFragment.create(embedPath).getBaseName());
   }
 
-  public Artifact getEmbeddedArtifact(String embedPath, ArtifactFactory artifactFactory) {
-    Preconditions.checkNotNull(binDir);
-    PathFragment path = getExecPath(embedPath);
-    Preconditions.checkNotNull(path, embedPath + " not found in embedded tools");
-    return artifactFactory.getDerivedArtifact(path, binDir.getParentDirectory());
-  }
-
-  public ImmutableList<Artifact> getAllEmbeddedArtifacts(ArtifactFactory artifactFactory) {
-    ImmutableList.Builder<Artifact> builder = ImmutableList.builder();
-    for (String embeddedTool : embeddedTools) {
-      builder.add(getEmbeddedArtifact(embeddedTool, artifactFactory));
-    }
-    return builder.build();
-  }
-
   private BinTools setBinDir(String workspaceName) {
     binDir = execrootParent.getRelative(workspaceName).getRelative("_bin");
     return this;
@@ -192,7 +174,7 @@ public final class BinTools {
   }
 
   private void linkTool(Path sourcePath, Path linkPath) throws ExecException {
-    if (linkPath.getFileSystem().supportsSymbolicLinksNatively()) {
+    if (linkPath.getFileSystem().supportsSymbolicLinksNatively(linkPath)) {
       try {
         if (!linkPath.isSymbolicLink()) {
           // ensureSymbolicLink() does not handle the case where there is already

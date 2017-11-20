@@ -25,6 +25,7 @@ import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.CommandLineExpansionException;
 import com.google.devtools.build.lib.actions.ExecException;
+import com.google.devtools.build.lib.actions.SpawnResult;
 import com.google.devtools.build.lib.actions.UserExecException;
 import com.google.devtools.build.lib.analysis.config.BinTools;
 import com.google.devtools.build.lib.analysis.test.TestActionContext;
@@ -55,6 +56,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import javax.annotation.Nullable;
 
 /** A strategy for executing a {@link TestRunnerAction}. */
@@ -102,6 +104,7 @@ public abstract class TestStrategy implements TestActionContext {
     }
   }
 
+  /** An enum for specifying different formats of test output. */
   public enum TestOutputFormat {
     SUMMARY, // Provide summary output only.
     ERRORS, // Print output from failed tests to the stderr after the test failure.
@@ -116,9 +119,10 @@ public abstract class TestStrategy implements TestActionContext {
     }
   }
 
+  /** An enum for specifying different formatting styles of test summaries. */
   public enum TestSummaryFormat {
     SHORT, // Print information only about tests.
-    TERSE, // Like "SHORT", but even shorter: Do not print PASSED tests.
+    TERSE, // Like "SHORT", but even shorter: Do not print PASSED and NO STATUS tests.
     DETAILED, // Print information only about failed test cases.
     NONE; // Do not print summary.
 
@@ -144,7 +148,8 @@ public abstract class TestStrategy implements TestActionContext {
   }
 
   @Override
-  public abstract void exec(TestRunnerAction action, ActionExecutionContext actionExecutionContext)
+  public abstract Set<SpawnResult> exec(
+      TestRunnerAction action, ActionExecutionContext actionExecutionContext)
       throws ExecException, InterruptedException;
 
   /**

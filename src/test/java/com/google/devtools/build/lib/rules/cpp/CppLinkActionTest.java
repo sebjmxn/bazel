@@ -84,13 +84,14 @@ public class CppLinkActionTest extends BuildViewTestCase {
     return CcToolchainFeaturesTest.buildFeatures(
             CppActionConfigs.getCppActionConfigs(
                 CppPlatform.LINUX,
-                ImmutableSet.<String>of(),
+                ImmutableSet.of(),
                 "gcc_tool",
                 "dynamic_library_linker_tool",
                 "ar_tool",
                 "strip_tool",
-                true,
-                false))
+                /* supportsEmbeddedRuntimes= */ true,
+                /* supportsInterfaceSharedLibraries= */ false),
+            CppActionConfigs.getFeaturesToAppearLastInToolchain(ImmutableSet.of()))
         .getFeatureConfiguration(
             FeatureSpecification.create(
                 ImmutableSet.of(
@@ -128,7 +129,7 @@ public class CppLinkActionTest extends BuildViewTestCase {
                 ImmutableList.<LibraryToLink>of(),
                 featureConfiguration)
             .build();
-    assertThat(linkAction.getArgv()).contains("some_flag");
+    assertThat(linkAction.getArguments()).contains("some_flag");
   }
 
   @Test
@@ -319,7 +320,8 @@ public class CppLinkActionTest extends BuildViewTestCase {
                         : staticOutputFile,
                     CppHelper.getToolchainUsingDefaultCcToolchainAttribute(ruleContext),
                     CppHelper.getFdoSupportUsingDefaultCcToolchainAttribute(ruleContext),
-                    featureConfiguration) {};
+                    featureConfiguration,
+                    MockCppSemantics.INSTANCE) {};
             builder.addCompilationInputs(
                 attributesToFlip.contains(NonStaticAttributes.COMPILATION_INPUTS)
                     ? ImmutableList.of(oFile)
@@ -380,7 +382,8 @@ public class CppLinkActionTest extends BuildViewTestCase {
                         : dynamicOutputFile,
                     CppHelper.getToolchainUsingDefaultCcToolchainAttribute(ruleContext),
                     CppHelper.getFdoSupportUsingDefaultCcToolchainAttribute(ruleContext),
-                    featureConfiguration) {};
+                    featureConfiguration,
+                    MockCppSemantics.INSTANCE) {};
             builder.addCompilationInputs(
                 attributes.contains(StaticKeyAttributes.COMPILATION_INPUTS)
                     ? ImmutableList.of(oFile)
@@ -412,7 +415,8 @@ public class CppLinkActionTest extends BuildViewTestCase {
             output,
             CppHelper.getToolchainUsingDefaultCcToolchainAttribute(ruleContext),
             CppHelper.getFdoSupportUsingDefaultCcToolchainAttribute(ruleContext),
-            FeatureConfiguration.EMPTY);
+            FeatureConfiguration.EMPTY,
+            MockCppSemantics.INSTANCE);
     builder.setLinkType(LinkTargetType.STATIC_LIBRARY);
     assertThat(builder.canSplitCommandLine()).isTrue();
 
@@ -505,7 +509,8 @@ public class CppLinkActionTest extends BuildViewTestCase {
                 ruleContext.getConfiguration(),
                 CppHelper.getToolchainUsingDefaultCcToolchainAttribute(ruleContext),
                 CppHelper.getFdoSupportUsingDefaultCcToolchainAttribute(ruleContext),
-                featureConfiguration)
+                featureConfiguration,
+                MockCppSemantics.INSTANCE)
             .addObjectFiles(nonLibraryInputs)
             .addLibraries(NestedSetBuilder.wrap(Order.LINK_ORDER, libraryInputs))
             .setLinkType(type)

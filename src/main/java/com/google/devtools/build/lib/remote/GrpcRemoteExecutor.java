@@ -14,8 +14,8 @@
 
 package com.google.devtools.build.lib.remote;
 
+import com.google.common.base.Preconditions;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
-import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.remoteexecution.v1test.ExecuteRequest;
 import com.google.devtools.remoteexecution.v1test.ExecuteResponse;
 import com.google.devtools.remoteexecution.v1test.ExecutionGrpc;
@@ -58,30 +58,42 @@ class GrpcRemoteExecutor {
 
   private ExecutionBlockingStub execBlockingStub() {
     return ExecutionGrpc.newBlockingStub(channel)
+        .withInterceptors(TracingMetadataUtils.attachMetadataFromContextInterceptor())
         .withCallCredentials(callCredentials)
         .withDeadlineAfter(callTimeoutSecs, TimeUnit.SECONDS);
   }
 
   private WatcherBlockingStub watcherBlockingStub() {
     return WatcherGrpc.newBlockingStub(channel)
+        .withInterceptors(TracingMetadataUtils.attachMetadataFromContextInterceptor())
         .withCallCredentials(callCredentials);
+  }
+
+  private void handleStatus(Status statusProto) throws IOException {
+    StatusRuntimeException e = StatusProto.toStatusRuntimeException(statusProto);
+    if (e.getStatus().getCode() == Code.OK) {
+      return;
+    }
+    if (e.getStatus().getCode() == Code.DEADLINE_EXCEEDED) {
+      // This was caused by the command itself exceeding the timeout,
+      // therefore it is not retriable.
+      throw new TimeoutException();
+    }
+    throw e;
   }
 
   private @Nullable ExecuteResponse getOperationResponse(Operation op) throws IOException {
     if (op.getResultCase() == Operation.ResultCase.ERROR) {
-      StatusRuntimeException e = StatusProto.toStatusRuntimeException(op.getError());
-      if (e.getStatus().getCode() == Code.DEADLINE_EXCEEDED) {
-        // This was caused by the command itself exceeding the timeout,
-        // therefore it is not retriable.
-        // TODO(olaola): this should propagate a timeout SpawnResult instead of raising.
-        throw new IOException("Remote execution time out");
-      }
-      throw e;
+      handleStatus(op.getError());
     }
     if (op.getDone()) {
       Preconditions.checkState(op.getResultCase() != Operation.ResultCase.RESULT_NOT_SET);
       try {
-        return op.getResponse().unpack(ExecuteResponse.class);
+        ExecuteResponse resp = op.getResponse().unpack(ExecuteResponse.class);
+        if (resp.hasStatus()) {
+          handleStatus(resp.getStatus());
+        }
+        return resp;
       } catch (InvalidProtocolBufferException e) {
         throw new IOException(e);
       }

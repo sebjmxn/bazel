@@ -14,6 +14,7 @@
 package com.google.devtools.build.lib.skyframe;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import com.google.common.base.Supplier;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -30,6 +31,7 @@ import com.google.devtools.build.lib.actions.ArtifactOwner;
 import com.google.devtools.build.lib.actions.ArtifactPrefixConflictException;
 import com.google.devtools.build.lib.actions.MutableActionGraph;
 import com.google.devtools.build.lib.actions.MutableActionGraph.ActionConflictException;
+import com.google.devtools.build.lib.actions.PackageRoots;
 import com.google.devtools.build.lib.analysis.AnalysisFailureEvent;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.BuildView;
@@ -46,7 +48,6 @@ import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationCollection;
 import com.google.devtools.build.lib.analysis.config.ConfigMatchingProvider;
 import com.google.devtools.build.lib.cmdline.Label;
-import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.ExtendedEventHandler;
@@ -64,7 +65,6 @@ import com.google.devtools.build.lib.skyframe.ConfiguredTargetFunction.Configure
 import com.google.devtools.build.lib.skyframe.SkyframeActionExecutor.ConflictException;
 import com.google.devtools.build.lib.skyframe.SkylarkImportLookupFunction.SkylarkImportFailedException;
 import com.google.devtools.build.lib.util.OrderedSetMultimap;
-import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.skyframe.CycleInfo;
 import com.google.devtools.build.skyframe.ErrorInfo;
@@ -86,7 +86,7 @@ import javax.annotation.Nullable;
  * <p>Covers enough functionality to work as a substitute for {@code BuildView#configureTargets}.
  */
 public final class SkyframeBuildView {
-  private static Logger LOG = Logger.getLogger(BuildView.class.getName());
+  private static final Logger logger = Logger.getLogger(BuildView.class.getName());
 
   private final ConfiguredTargetFactory factory;
   private final ArtifactFactory artifactFactory;
@@ -127,8 +127,8 @@ public final class SkyframeBuildView {
   public SkyframeBuildView(BlazeDirectories directories,
       SkyframeExecutor skyframeExecutor, ConfiguredRuleClassProvider ruleClassProvider) {
     this.factory = new ConfiguredTargetFactory(ruleClassProvider);
-    this.artifactFactory = new ArtifactFactory(
-        directories.getExecRoot().getParentDirectory(), directories.getRelativeOutputPath());
+    this.artifactFactory =
+        new ArtifactFactory(directories.getExecRoot(), directories.getRelativeOutputPath());
     this.skyframeExecutor = skyframeExecutor;
     this.ruleClassProvider = ruleClassProvider;
   }
@@ -155,8 +155,8 @@ public final class SkyframeBuildView {
     // prevents unbounded memory usage.
     if ((this.configurations != null && !configurations.equals(this.configurations))
         || skyframeAnalysisWasDiscarded) {
-      LOG.info("Discarding analysis cache: configurations have changed.");
-      skyframeExecutor.dropConfiguredTargets();
+      logger.info("Discarding analysis cache: configurations have changed.");
+      skyframeExecutor.handleConfiguredTargetChange();
     }
     skyframeAnalysisWasDiscarded = false;
     this.configurations = configurations;
@@ -241,8 +241,12 @@ public final class SkyframeBuildView {
       goodCts.add(ctValue.getConfiguredTarget());
       packages.addTransitive(ctValue.getTransitivePackages());
     }
-    ImmutableMap<PackageIdentifier, Path> packageRoots =
-        LoadingPhaseRunner.collectPackageRoots(packages.build().toCollection());
+    Path singleSourceRoot = skyframeExecutor.getForcedSingleSourceRootIfNoExecrootSymlinkCreation();
+    PackageRoots packageRoots =
+        singleSourceRoot == null
+            ? new MapAsPackageRoots(
+                LoadingPhaseRunner.collectPackageRoots(packages.build().toCollection()))
+            : new PackageRootsNoSymlinkCreation(singleSourceRoot);
 
     if (!result.hasError() && badActions.isEmpty()) {
       return new SkyframeAnalysisResult(
@@ -296,7 +300,11 @@ public final class SkyframeBuildView {
       if (cause instanceof ActionConflictException) {
         ((ActionConflictException) cause).reportTo(eventHandler);
       }
-      throw new ViewCreationFailedException(errorMsg);
+      if (errorInfo.getException() != null) {
+        throw new ViewCreationFailedException(errorMsg, errorInfo.getException());
+      } else {
+        throw new ViewCreationFailedException(errorMsg);
+      }
     }
 
     boolean hasLoadingError = false;
@@ -392,7 +400,7 @@ public final class SkyframeBuildView {
       if (culprit.functionName().equals(SkyFunctions.CONFIGURED_TARGET)) {
         return ((ConfiguredTargetKey) culprit.argument()).getLabel();
       } else if (culprit.functionName().equals(SkyFunctions.TRANSITIVE_TARGET)) {
-        return (Label) culprit.argument();
+        return ((TransitiveTargetKey) culprit).getLabel();
       } else {
         return labelToLoad;
       }
@@ -430,14 +438,12 @@ public final class SkyframeBuildView {
    */
   // TODO(bazel-team): Allow analysis to return null so the value builder can exit and wait for a
   // restart deps are not present.
-  private static boolean getWorkspaceStatusValues(Environment env, BuildConfiguration config)
+  private static boolean getWorkspaceStatusValues(
+      Environment env,
+      BuildConfiguration config,
+      ImmutableMap<BuildInfoKey, BuildInfoFactory> buildInfoFactories)
       throws InterruptedException {
     env.getValue(WorkspaceStatusValue.SKY_KEY);
-    Map<BuildInfoKey, BuildInfoFactory> buildInfoFactories =
-        PrecomputedValue.BUILD_INFO_FACTORIES.get(env);
-    if (buildInfoFactories == null) {
-      return false;
-    }
     // These factories may each create their own build info artifacts, all depending on the basic
     // build-info.txt and build-changelist.txt.
     List<SkyKey> depKeys = Lists.newArrayList();
@@ -459,7 +465,8 @@ public final class SkyframeBuildView {
       Environment env,
       BuildConfiguration config)
       throws InterruptedException {
-    if (config != null && !getWorkspaceStatusValues(env, config)) {
+    if (config != null
+        && !getWorkspaceStatusValues(env, config, skyframeExecutor.getBuildInfoFactories())) {
       return null;
     }
     boolean extendedSanityChecks = config != null && config.extendedSanityChecks();
@@ -505,8 +512,6 @@ public final class SkyframeBuildView {
    * Returns the host configuration trimmed to the same fragments as the input configuration. If
    * the input is null, returns the top-level host configuration.
    *
-   * <p>For static configurations, this unconditionally returns the (sole) top-level configuration.
-   *
    * <p>This may only be called after {@link #setTopLevelHostConfiguration} has set the
    * correct host configuration at the top-level.
    */
@@ -531,7 +536,7 @@ public final class SkyframeBuildView {
     Set<Class<? extends BuildConfiguration.Fragment>> fragmentClasses =
         config.trimConfigurations()
             ? config.fragmentClasses()
-            : ((ConfiguredRuleClassProvider) ruleClassProvider).getAllFragments();
+            : ruleClassProvider.getAllFragments();
     BuildConfiguration hostConfig = hostConfigurationCache.get(fragmentClasses);
     if (hostConfig != null) {
       return hostConfig;
@@ -609,7 +614,7 @@ public final class SkyframeBuildView {
    * #createConfiguredTarget}, and false immediately after the call. Use it to fail-fast in the case
    * that a target is requested for analysis not during the analysis phase.
    */
-  void enableAnalysis(boolean enable) {
+  public void enableAnalysis(boolean enable) {
     this.enableAnalysis = enable;
   }
 

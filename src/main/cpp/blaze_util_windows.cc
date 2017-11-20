@@ -15,27 +15,14 @@
 #include <fcntl.h>
 #include <stdarg.h>  // va_start, va_end, va_list
 
-#ifndef COMPILER_MSVC
-#include <errno.h>
-#include <limits.h>
-#include <sys/cygwin.h>
-#include <sys/ioctl.h>
-#include <sys/socket.h>
-#include <sys/stat.h>
-#include <sys/statfs.h>
-#include <unistd.h>
-#endif  // COMPILER_MSVC
-
 #include <windows.h>
 #include <lmcons.h>          // UNLEN
 #include <versionhelpers.h>  // IsWindows8OrGreater
 
-#ifdef COMPILER_MSVC
 #include <io.h>            // _open
 #include <knownfolders.h>  // FOLDERID_Profile
 #include <objbase.h>       // CoTaskMemFree
 #include <shlobj.h>        // SHGetKnownFolderPath
-#endif
 
 #include <algorithm>
 #include <cstdio>
@@ -110,8 +97,6 @@ class WindowsClock {
   static LARGE_INTEGER GetMillisecondsAsLargeInt(const LARGE_INTEGER& freq);
 };
 
-#ifdef COMPILER_MSVC
-
 BOOL WINAPI ConsoleCtrlHandler(_In_ DWORD ctrlType) {
   static volatile int sigint_count = 0;
   switch (ctrlType) {
@@ -153,86 +138,7 @@ ATTRIBUTE_NORETURN void SignalHandler::PropagateSignalOrExit(int exit_code) {
   exit(exit_code);
 }
 
-#else  // not COMPILER_MSVC
 
-// The number of the last received signal that should cause the client
-// to shutdown.  This is saved so that the client's WTERMSIG can be set
-// correctly.  (Currently only SIGPIPE uses this mechanism.)
-static volatile sig_atomic_t signal_handler_received_signal = 0;
-
-// Signal handler.
-static void handler(int signum) {
-  int saved_errno = errno;
-
-  static volatile sig_atomic_t sigint_count = 0;
-
-  switch (signum) {
-    case SIGINT:
-      if (++sigint_count >= 3) {
-        SigPrintf(
-            "\n%s caught third interrupt signal; killed.\n\n",
-            SignalHandler::Get().GetGlobals()->options->product_name.c_str());
-        if (SignalHandler::Get().GetGlobals()->server_pid != -1) {
-          KillServerProcess(
-              SignalHandler::Get().GetGlobals()->server_pid,
-              SignalHandler::Get().GetGlobals()->options->output_base);
-        }
-        _exit(1);
-      }
-      SigPrintf(
-          "\n%s caught interrupt signal; shutting down.\n\n",
-          SignalHandler::Get().GetGlobals()->options->product_name.c_str());
-      SignalHandler::Get().CancelServer();
-      break;
-    case SIGTERM:
-      SigPrintf(
-          "\n%s caught terminate signal; shutting down.\n\n",
-          SignalHandler::Get().GetGlobals()->options->product_name.c_str());
-      SignalHandler::Get().CancelServer();
-      break;
-    case SIGPIPE:
-      signal_handler_received_signal = SIGPIPE;
-      break;
-    case SIGQUIT:
-      SigPrintf("\nSending SIGQUIT to JVM process %d (see %s).\n\n",
-                SignalHandler::Get().GetGlobals()->server_pid,
-                SignalHandler::Get().GetGlobals()->jvm_log_file.c_str());
-      kill(SignalHandler::Get().GetGlobals()->server_pid, SIGQUIT);
-      break;
-  }
-
-  errno = saved_errno;
-}
-
-void SignalHandler::Install(GlobalVariables* globals,
-                            SignalHandler::Callback cancel_server) {
-  _globals = globals;
-  _cancel_server = cancel_server;
-
-  // Unblock all signals.
-  sigset_t sigset;
-  sigemptyset(&sigset);
-  sigprocmask(SIG_SETMASK, &sigset, NULL);
-
-  signal(SIGINT, handler);
-  signal(SIGTERM, handler);
-  signal(SIGPIPE, handler);
-  signal(SIGQUIT, handler);
-}
-
-ATTRIBUTE_NORETURN void SignalHandler::PropagateSignalOrExit(int exit_code) {
-  if (signal_handler_received_signal) {
-    // Kill ourselves with the same signal, so that callers see the
-    // right WTERMSIG value.
-    signal(signal_handler_received_signal, SIG_DFL);
-    raise(signal_handler_received_signal);
-    exit(1);  // (in case raise didn't kill us for some reason)
-  } else {
-    exit(exit_code);
-  }
-}
-
-#endif  // COMPILER_MSVC
 
 // A signal-safe version of fprintf(stderr, ...).
 //
@@ -245,11 +151,7 @@ ATTRIBUTE_NORETURN void SignalHandler::PropagateSignalOrExit(int exit_code) {
 // Also, it's a good idea to start each message with a newline,
 // in case the Blaze server has written a partial line.
 void SigPrintf(const char *format, ...) {
-#ifdef COMPILER_MSVC
   int stderr_fileno = _fileno(stderr);
-#else  // not COMPILER_MSVC
-  int stderr_fileno = STDERR_FILENO;
-#endif
   char buf[1024];
   va_list ap;
   va_start(ap, format);
@@ -305,12 +207,6 @@ string GetOutputRoot() {
       return tmpdir;
     }
   }
-#ifdef COMPILER_MSVC
-  // GetTempPathW and GetEnvironmentVariableW only work properly when Bazel
-  // runs under cmd.exe, not when it's run from msys.
-  // The reason is that MSYS consumes all environment variables and sets its own
-  // ones. The symptom of this is that GetEnvironmentVariableW returns nothing
-  // for TEMP under MSYS, though it can retrieve WINDIR.
 
   WCHAR buffer[kWindowsPathBufferSize] = {0};
   if (!::GetTempPathW(kWindowsPathBufferSize, buffer)) {
@@ -318,13 +214,9 @@ string GetOutputRoot() {
          "GetOutputRoot: GetTempPathW");
   }
   return string(blaze_util::WstringToCstring(buffer).get());
-#else  // not COMPILER_MSVC
-  return "/var/tmp";
-#endif  // COMPILER_MSVC
 }
 
 string GetHomeDir() {
-#ifdef COMPILER_MSVC
   PWSTR wpath;
   if (SUCCEEDED(::SHGetKnownFolderPath(FOLDERID_Profile, KF_FLAG_DEFAULT, NULL,
                                        &wpath))) {
@@ -332,21 +224,12 @@ string GetHomeDir() {
     ::CoTaskMemFree(wpath);
     return result;
   }
-#endif
   return GetEnv("HOME");  // only defined in MSYS/Cygwin
 }
 
 string FindSystemWideBlazerc() {
-#ifdef COMPILER_MSVC
   // TODO(bazel-team): figure out a good path to return here.
   return "";
-#else   // not COMPILER_MSVC
-  string path = "/etc/bazel.bazelrc";
-  if (blaze_util::CanReadFile(path)) {
-    return path;
-  }
-  return "";
-#endif  // COMPILER_MSVC
 }
 
 string GetJavaBinaryUnderJavabase() { return "bin/java.exe"; }
@@ -364,20 +247,9 @@ void SetScheduling(bool batch_cpu_scheduling, int io_nice_level) {
 }
 
 string GetProcessCWD(int pid) {
-#ifdef COMPILER_MSVC
   // TODO(bazel-team) 2016-11-18: decide whether we need this on Windows and
   // implement or delete.
   return "";
-#else   // not COMPILER_MSVC
-  char server_cwd[PATH_MAX] = {};
-  if (readlink(
-          ("/proc/" + ToString(pid) + "/cwd").c_str(),
-          server_cwd, sizeof(server_cwd)) < 0) {
-    return "";
-  }
-
-  return string(server_cwd);
-#endif  // COMPILER_MSVC
 }
 
 bool IsSharedLibrary(const string &filename) {
@@ -547,34 +419,6 @@ string GetJvmVersion(const string& java_exe) {
   return ReadJvmVersion(result);
 }
 
-#ifndef COMPILER_MSVC
-// If we pass DETACHED_PROCESS to CreateProcess(), cmd.exe appropriately
-// returns the command prompt when the client terminates. msys2, however, in
-// its infinite wisdom, waits until the *server* terminates and cannot be
-// convinced otherwise.
-//
-// So, we first pretend to be a POSIX daemon so that msys2 knows about our
-// intentions and *then* we call CreateProcess(). Life ain't easy.
-static bool DaemonizeOnWindows() {
-  if (fork() > 0) {
-    // We are the original client process.
-    return true;
-  }
-
-  if (fork() > 0) {
-    // We are the child of the original client process. Terminate so that the
-    // actual server is not a child process of the client.
-    exit(0);
-  }
-
-  setsid();
-  // Contrary to the POSIX version, we are not closing the three standard file
-  // descriptors here. CreateProcess() will take care of that and it's useful
-  // to see the error messages in ExecuteDaemon() on the console of the client.
-  return false;
-}
-#endif  // not COMPILER_MSVC
-
 static bool GetProcessStartupTime(HANDLE process, uint64_t* result) {
   FILETIME creation_time, dummy1, dummy2, dummy3;
   // GetProcessTimes cannot handle NULL arguments.
@@ -642,8 +486,6 @@ static HANDLE CreateJvmOutputFile(const wstring& path,
   return INVALID_HANDLE_VALUE;
 }
 
-#ifdef COMPILER_MSVC
-
 class ProcessHandleBlazeServerStartup : public BlazeServerStartup {
  public:
   ProcessHandleBlazeServerStartup(HANDLE _proc) : proc(_proc) {}
@@ -658,31 +500,10 @@ class ProcessHandleBlazeServerStartup : public BlazeServerStartup {
   AutoHandle proc;
 };
 
-#else  // COMPILER_MSVC
-
-// Keeping an eye on the server process on Windows is not implemented yet.
-// TODO(lberki): Implement this, because otherwise if we can't start up a server
-// process, the client will hang until it times out.
-class DummyBlazeServerStartup : public BlazeServerStartup {
- public:
-  DummyBlazeServerStartup() {}
-  virtual ~DummyBlazeServerStartup() {}
-  virtual bool IsStillAlive() { return true; }
-};
-
-#endif  // COMPILER_MSVC
 
 void ExecuteDaemon(const string& exe, const std::vector<string>& args_vector,
                    const string& daemon_output, const string& server_dir,
                    BlazeServerStartup** server_startup) {
-#ifndef COMPILER_MSVC
-  if (DaemonizeOnWindows()) {
-    // We are the client process
-    *server_startup = new DummyBlazeServerStartup();
-    return;
-  }
-#endif  // not COMPILER_MSVC
-
   wstring wdaemon_output;
   if (!blaze_util::AsAbsoluteWindowsPath(daemon_output, &wdaemon_output)) {
     pdie(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
@@ -759,10 +580,8 @@ void ExecuteDaemon(const string& exe, const std::vector<string>& args_vector,
 
   WriteProcessStartupTime(server_dir, processInfo.hProcess);
 
-#ifdef COMPILER_MSVC
   // Pass ownership of processInfo.hProcess
   *server_startup = new ProcessHandleBlazeServerStartup(processInfo.hProcess);
-#endif
 
   string pid_string = ToString(processInfo.dwProcessId);
   string pid_file = blaze_util::JoinPath(server_dir, kServerPidFile);
@@ -774,49 +593,12 @@ void ExecuteDaemon(const string& exe, const std::vector<string>& args_vector,
   // Don't close processInfo.hProcess here, it's now owned by the
   // ProcessHandleBlazeServerStartup instance.
   CloseHandle(processInfo.hThread);
-
-#ifndef COMPILER_MSVC
-  exit(0);
-#endif  // COMPILER_MSVC
 }
 
-void BatchWaiterThread(HANDLE java_handle) {
-  WaitForSingleObject(java_handle, INFINITE);
-}
-
-#ifdef COMPILER_MSVC
-  // TODO(bazel-team): implement signal handling.
-#else  // not COMPILER_MSVC
-static void MingwSignalHandler(int signum) {
-  // Java process will be terminated because we set the job to terminate if its
-  // handle is closed.
-  //
-  // Note that this is different how interruption is handled on Unix, where the
-  // Java process sets up a signal handler for SIGINT itself. That cannot be
-  // done on Windows without using native code, and it's better to have as
-  // little JNI as possible. The most important part of the cleanup after
-  // termination (killing all child processes) happens automatically on Windows
-  // anyway, since we put the batch Java process in its own job which does not
-  // allow breakaway processes.
-  exit(blaze_exit_code::ExitCode::INTERRUPTED);
-}
-#endif  // COMPILER_MSVC
-
-// Returns whether assigning the given process to a job failed because nested
-// jobs are not available on the current system.
-static bool IsFailureDueToNestedJobsNotSupported(HANDLE process) {
-  BOOL is_in_job;
-  if (!IsProcessInJob(process, NULL, &is_in_job)) {
-    pdie(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
-         "IsFailureDueToNestedJobsNotSupported: IsProcessInJob");
-    return false;
-  }
-
-  if (!is_in_job) {
-    // Not in a job.
-    return false;
-  }
-  return !IsWindows8OrGreater();
+// Returns whether nested jobs are not available on the current system.
+static bool NestedJobsSupported() {
+  // Nested jobs are supported from Windows 8
+  return IsWindows8OrGreater();
 }
 
 // Run the given program in the current working directory, using the given
@@ -831,20 +613,23 @@ void ExecuteProgram(const string& exe, const std::vector<string>& args_vector) {
 
   PROCESS_INFORMATION processInfo = {0};
 
-  HANDLE job = CreateJobObject(NULL, NULL);
-  if (job == NULL) {
-    pdie(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
-         "ExecuteProgram(%s): CreateJobObject", exe.c_str());
-  }
+  HANDLE job = INVALID_HANDLE_VALUE;
+  if (NestedJobsSupported()) {
+    job = CreateJobObject(NULL, NULL);
+    if (job == NULL) {
+      pdie(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
+           "ExecuteProgram(%s): CreateJobObject", exe.c_str());
+    }
 
-  JOBOBJECT_EXTENDED_LIMIT_INFORMATION job_info = {0};
-  job_info.BasicLimitInformation.LimitFlags =
-      JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION job_info = {0};
+    job_info.BasicLimitInformation.LimitFlags =
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
 
-  if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation,
-                               &job_info, sizeof(job_info))) {
-    pdie(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
-         "ExecuteProgram(%s): SetInformationJobObject", exe.c_str());
+    if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation,
+                                 &job_info, sizeof(job_info))) {
+      pdie(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
+           "ExecuteProgram(%s): SetInformationJobObject", exe.c_str());
+    }
   }
 
   BOOL success = CreateProcessA(
@@ -864,18 +649,23 @@ void ExecuteProgram(const string& exe, const std::vector<string>& args_vector) {
          "ExecuteProgram(%s): CreateProcess(%s)", exe.c_str(), cmdline.cmdline);
   }
 
-  // We will try to put the launched process into a Job object. This will make
-  // Windows reliably kill all child processes that the process itself may
-  // launch once the process exits. On Windows systems that don't support nested
-  // jobs, this may fail if we are already running inside a job ourselves. In
-  // this case, we'll continue anyway, because we assume that our parent is
-  // handling process management for us.
-  if (!AssignProcessToJobObject(job, processInfo.hProcess) &&
-      !IsFailureDueToNestedJobsNotSupported(processInfo.hProcess)) {
-    pdie(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
-         "ExecuteProgram(%s): AssignProcessToJobObject", exe.c_str());
+  // On Windows versions that support nested jobs (Windows 8 and above), we
+  // assign the Bazel server to a job object. Every process that Bazel creates,
+  // as well as all their child processes, will be assigned to this job object.
+  // When the Bazel server terminates the OS can reliably kill the entire
+  // process tree under it. On Windows versions that don't support nested jobs
+  // (Windows 7), we don't assign the Bazel server to a big job object. Instead,
+  // when Bazel creates new processes, it does so using the JNI library. The
+  // library assigns individual job objects to each subprocess. This way when
+  // these processes terminate, the OS can kill all their subprocesses. Bazel's
+  // own subprocesses are not in a job object though, so we only create
+  // subprocesses via the JNI library.
+  if (job != INVALID_HANDLE_VALUE) {
+    if (!AssignProcessToJobObject(job, processInfo.hProcess)) {
+      pdie(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
+           "ExecuteProgram(%s): AssignProcessToJobObject", exe.c_str());
+    }
   }
-
   // Now that we potentially put the process into a new job object, we can start
   // running it.
   if (ResumeThread(processInfo.hThread) == -1) {
@@ -883,20 +673,7 @@ void ExecuteProgram(const string& exe, const std::vector<string>& args_vector) {
          "ExecuteProgram(%s): ResumeThread", exe.c_str());
   }
 
-  // msys doesn't deliver signals while a Win32 call is pending so we need to
-  // do the blocking call in another thread
-
-#ifdef COMPILER_MSVC
-  // TODO(bazel-team): implement signal handling.
-#else  // not COMPILER_MSVC
-  signal(SIGINT, MingwSignalHandler);
-#endif  // COMPILER_MSVC
-  std::thread batch_waiter_thread([=]() {
-    BatchWaiterThread(processInfo.hProcess);
-  });
-
-  // The output base lock is held while waiting
-  batch_waiter_thread.join();
+  WaitForSingleObject(processInfo.hProcess, INFINITE);
   DWORD exit_code;
   GetExitCodeProcess(processInfo.hProcess, &exit_code);
   CloseHandle(processInfo.hProcess);
@@ -920,7 +697,6 @@ string PathAsJvmFlag(const string& path) {
 }
 
 string ConvertPath(const string& path) {
-#ifdef COMPILER_MSVC
   // The path may not be Windows-style and may not be normalized, so convert it.
   wstring wpath;
   if (!blaze_util::AsAbsoluteWindowsPath(path, &wpath)) {
@@ -931,40 +707,11 @@ string ConvertPath(const string& path) {
   return string(blaze_util::WstringToCstring(
                     blaze_util::RemoveUncPrefixMaybe(wpath.c_str()))
                     .get());
-#else  // not COMPILER_MSVC
-  // If the path looks like %USERPROFILE%/foo/bar, don't convert.
-  if (path.empty() || path[0] == '%') {
-    // It's fine to convert to lower-case even if the path contains environment
-    // variable names, since Windows can look them up case-insensitively.
-    return blaze_util::AsLower(path);
-  }
-  char* wpath = static_cast<char*>(cygwin_create_path(
-      CCP_POSIX_TO_WIN_A, static_cast<const void*>(path.c_str())));
-  string result(wpath);
-  free(wpath);
-  return blaze_util::AsLower(result);
-#endif  // COMPILER_MSVC
 }
 
 // Convert a Unix path list to Windows path list
 string ConvertPathList(const string& path_list) {
-#ifdef COMPILER_MSVC
-  // In the MSVC version we use the actual %PATH% value which is separated by
-  // ";" and contains Windows paths.
   return path_list;
-#else   // not COMPILER_MSVC
-  string w_list = "";
-  int start = 0;
-  int pos;
-  while ((pos = path_list.find(":", start)) != string::npos) {
-    w_list += ConvertPath(path_list.substr(start, pos - start)) + ";";
-    start = pos + 1;
-  }
-  if (start < path_list.size()) {
-    w_list += ConvertPath(path_list.substr(start));
-  }
-  return w_list;
-#endif  // COMPILER_MSVC
 }
 
 bool SymlinkDirectories(const string &posix_target, const string &posix_name) {
@@ -982,9 +729,9 @@ bool SymlinkDirectories(const string &posix_target, const string &posix_name) {
          posix_target.c_str(), posix_name.c_str(), posix_name.c_str());
     return false;
   }
-  string error(CreateJunction(name, target));
+  wstring error(CreateJunction(name, target));
   if (!error.empty()) {
-    blaze_util::PrintError("SymlinkDirectories(%s, %s): CreateJunction: %s",
+    blaze_util::PrintError("SymlinkDirectories(%s, %s): CreateJunction: %S",
                            posix_target.c_str(), posix_name.c_str(),
                            error.c_str());
     return false;
@@ -1091,32 +838,6 @@ void CreateSecureOutputRoot(const string& path) {
          "MakeDirectories(%s) failed", root);
   }
 
-#ifndef COMPILER_MSVC
-  struct stat fileinfo = {};
-
-  // The path already exists.
-  // Check ownership and mode, and verify that it is a directory.
-
-  if (lstat(root, &fileinfo) < 0) {
-    pdie(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR, "lstat('%s')", root);
-  }
-
-  if (fileinfo.st_uid != geteuid()) {
-    die(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR, "'%s' is not owned by me",
-        root);
-  }
-
-  // Ensure the permission mask is indeed 0755 (rwxr-xr-x).
-  if ((fileinfo.st_mode & 022) != 0) {
-    int new_mode = fileinfo.st_mode & (~022);
-    if (chmod(root, new_mode) < 0) {
-      die(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
-          "'%s' has mode %o, chmod to %o failed", root,
-          fileinfo.st_mode & 07777, new_mode);
-    }
-  }
-#endif  // not COMPILER_MSVC
-
   if (!blaze_util::IsDirectory(path)) {
     die(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR, "'%s' is not a directory",
         root);
@@ -1128,12 +849,7 @@ void CreateSecureOutputRoot(const string& path) {
 string GetEnv(const string& name) {
   DWORD size = ::GetEnvironmentVariableA(name.c_str(), NULL, 0);
   if (size == 0) {
-#ifdef COMPILER_MSVC
     return string();  // unset or empty envvar
-#else  // not COMPILER_MSVC
-    char* result = getenv(name.c_str());
-    return result != NULL ? string(result) : string();
-#endif  // COMPILER_MSVC
   }
 
   unique_ptr<char[]> value(new char[size]);
@@ -1183,7 +899,6 @@ bool WarnIfStartedFromDesktop() {
 #endif  // not ENABLE_VIRTUAL_TERMINAL_PROCESSING
 
 void SetupStdStreams() {
-#ifdef COMPILER_MSVC
   static const DWORD stdhandles[] = {STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
                                      STD_ERROR_HANDLE};
   for (int i = 0; i <= 2; ++i) {
@@ -1207,22 +922,6 @@ void SetupStdStreams() {
       }
     }
   }
-#else  // not COMPILER_MSVC
-  // Set non-buffered output mode for stderr/stdout. The server already
-  // line-buffers messages where it makes sense, so there's no need to do set
-  // line-buffering here. On the other hand the server sometimes sends binary
-  // output (when for example a query returns results as proto), in which case
-  // we must not perform line buffering on the client side. So turn off
-  // buffering here completely.
-  setvbuf(stdout, NULL, _IONBF, 0);
-  setvbuf(stderr, NULL, _IONBF, 0);
-
-  // Ensure we have three open fds.  Otherwise we can end up with
-  // bizarre things like stdout going to the lock file, etc.
-  if (fcntl(STDIN_FILENO, F_GETFL) == -1) open("/dev/null", O_RDONLY);
-  if (fcntl(STDOUT_FILENO, F_GETFL) == -1) open("/dev/null", O_WRONLY);
-  if (fcntl(STDERR_FILENO, F_GETFL) == -1) open("/dev/null", O_WRONLY);
-#endif  // COMPILER_MSVC
 }
 
 LARGE_INTEGER WindowsClock::GetFrequency() {
@@ -1380,7 +1079,6 @@ bool IsEmacsTerminal() {
 // (this is computed heuristically based on the values of
 // environment variables).
 bool IsStandardTerminal() {
-#ifdef COMPILER_MSVC
   for (DWORD i : {STD_OUTPUT_HANDLE, STD_ERROR_HANDLE}) {
     DWORD mode = 0;
     HANDLE handle = ::GetStdHandle(i);
@@ -1393,27 +1091,11 @@ bool IsStandardTerminal() {
     }
   }
   return true;
-#else  // not COMPILER_MSVC
-  string term = GetEnv("TERM");
-  if (term.empty() || term == "dumb" || term == "emacs" ||
-      term == "xterm-mono" || term == "symbolics" || term == "9term" ||
-      IsEmacsTerminal()) {
-    return false;
-  }
-  return isatty(STDOUT_FILENO) && isatty(STDERR_FILENO);
-#endif  // COMPILER_MSVC
 }
 
 // Returns the number of columns of the terminal to which stdout is
 // connected, or $COLUMNS (default 80) if there is no such terminal.
 int GetTerminalColumns() {
-#ifndef COMPILER_MSVC
-  struct winsize ws;
-  if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) != -1) {
-    return ws.ws_col;
-  }
-#endif  // not COMPILER_MSVC
-
   string columns_env = GetEnv("COLUMNS");
   if (!columns_env.empty()) {
     char* endptr;
@@ -1622,7 +1304,7 @@ static string GetBashFromGitOnWin() {
   return bash_exe;
 }
 
-static string GetBashFromPath() {
+static string GetBinaryFromPath(const string& binary_name) {
   char found[MAX_PATH];
   string path_list = blaze::GetEnv("PATH");
 
@@ -1639,14 +1321,14 @@ static string GetBashFromPath() {
     if (path.size() > 1 && path[0] == '"' && path[path.size() - 1] == '"') {
       path = path.substr(1, path.size() - 2);
     }
-    if (SearchPathA(path.c_str(),   // _In_opt_  LPCTSTR lpPath,
-                    "bash.exe",     // _In_      LPCTSTR lpFileName,
-                    0,              // LPCTSTR lpExtension,
-                    sizeof(found),  // DWORD   nBufferLength,
-                    found,          // _Out_     LPTSTR  lpBuffer,
-                    0               // _Out_opt_ LPTSTR  *lpFilePart
+    if (SearchPathA(path.c_str(),         // _In_opt_  LPCTSTR lpPath,
+                    binary_name.c_str(),  // _In_      LPCTSTR lpFileName,
+                    0,                    // LPCTSTR lpExtension,
+                    sizeof(found),        // DWORD   nBufferLength,
+                    found,                // _Out_     LPTSTR  lpBuffer,
+                    0                     // _Out_opt_ LPTSTR  *lpFilePart
                     )) {
-      debug_log("bash.exe found on PATH: %s", found);
+      debug_log("%s found on PATH: %s", binary_name.c_str(), found);
       return string(found);
     }
     if (end == string::npos) {
@@ -1655,7 +1337,7 @@ static string GetBashFromPath() {
     start = end + 1;
   } while (true);
 
-  debug_log("bash.exe not found on PATH");
+  debug_log("%s not found on PATH", binary_name.c_str());
   return string();
 }
 
@@ -1670,7 +1352,7 @@ static string LocateBash() {
     return git_on_win_bash;
   }
 
-  return GetBashFromPath();
+  return GetBinaryFromPath("bash.exe");
 }
 
 void DetectBashOrDie() {
@@ -1700,6 +1382,16 @@ void DetectBashOrDie() {
         "set BAZEL_SH environment variable to its location:\n"
         "       set BAZEL_SH=c:\\path\\to\\bash.exe\n");
     exit(1);
+  }
+}
+
+void EnsurePythonPathOption(std::vector<string>* options) {
+  string python_path = GetBinaryFromPath("python.exe");
+  if (!python_path.empty()) {
+    // Provide python path as coming from the least important rc file.
+    std::replace(python_path.begin(), python_path.end(), '\\', '/');
+    options->push_back(string("--default_override=0:build=--python_path=") +
+                       python_path);
   }
 }
 

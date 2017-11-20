@@ -21,6 +21,8 @@ import com.google.common.collect.Sets;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
+import com.google.devtools.build.lib.analysis.ServerDirectories;
+import com.google.devtools.build.lib.clock.BlazeClock;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
@@ -29,21 +31,19 @@ import com.google.devtools.build.lib.packages.PackageFactory;
 import com.google.devtools.build.lib.packages.PackageFactory.EnvironmentExtension;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.RuleVisibility;
+import com.google.devtools.build.lib.packages.SkylarkSemanticsOptions;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.pkgcache.PackageCacheOptions;
 import com.google.devtools.build.lib.pkgcache.PackageManager;
 import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
 import com.google.devtools.build.lib.skyframe.BazelSkyframeExecutorConstants;
 import com.google.devtools.build.lib.skyframe.DiffAwareness;
-import com.google.devtools.build.lib.skyframe.PrecomputedValue;
 import com.google.devtools.build.lib.skyframe.SequencedSkyframeExecutor;
 import com.google.devtools.build.lib.skyframe.SkyValueDirtinessChecker;
 import com.google.devtools.build.lib.skyframe.SkyframeExecutor;
-import com.google.devtools.build.lib.syntax.SkylarkSemanticsOptions;
 import com.google.devtools.build.lib.testutil.FoundationTestCase;
 import com.google.devtools.build.lib.testutil.TestConstants;
 import com.google.devtools.build.lib.testutil.TestRuleClassProvider;
-import com.google.devtools.build.lib.util.BlazeClock;
 import com.google.devtools.build.lib.util.io.TimestampGranularityMonitor;
 import com.google.devtools.build.lib.vfs.ModifiedFileSet;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -71,6 +71,7 @@ public abstract class PackageLoadingTestCase extends FoundationTestCase {
   protected ConfiguredRuleClassProvider ruleClassProvider;
   protected PackageFactory packageFactory;
   protected SkyframeExecutor skyframeExecutor;
+  protected BlazeDirectories directories;
 
   @Before
   public final void initializeSkyframeExecutor() throws Exception {
@@ -88,9 +89,14 @@ public abstract class PackageLoadingTestCase extends FoundationTestCase {
     } else {
       ruleClassProvider = loadingMock.createRuleClassProvider();
     }
+    directories =
+        new BlazeDirectories(
+            new ServerDirectories(outputBase, outputBase),
+            rootDirectory,
+            loadingMock.getProductName());
     packageFactory =
         loadingMock
-            .getPackageFactoryBuilderForTesting()
+            .getPackageFactoryBuilderForTesting(directories)
             .setEnvironmentExtensions(getEnvironmentExtensions())
             .build(ruleClassProvider, scratch.getFileSystem());
     skyframeExecutor = createSkyframeExecutor();
@@ -106,18 +112,15 @@ public abstract class PackageLoadingTestCase extends FoundationTestCase {
     SkyframeExecutor skyframeExecutor =
         SequencedSkyframeExecutor.create(
             packageFactory,
-            new BlazeDirectories(
-                outputBase, outputBase, rootDirectory, loadingMock.getProductName()),
-            null, /* BinTools */
+            fileSystem,
+            directories,
             null, /* workspaceStatusActionFactory */
             ruleClassProvider.getBuildInfoFactories(),
             ImmutableList.<DiffAwareness.Factory>of(),
             Predicates.<PathFragment>alwaysFalse(),
             ImmutableMap.<SkyFunctionName, SkyFunction>of(),
-            ImmutableList.<PrecomputedValue.Injected>of(),
             ImmutableList.<SkyValueDirtinessChecker>of(),
             PathFragment.EMPTY_FRAGMENT,
-            loadingMock.getProductName(),
             BazelSkyframeExecutorConstants.CROSS_REPOSITORY_LABEL_VIOLATION_STRATEGY,
             BazelSkyframeExecutorConstants.BUILD_FILES_BY_PRIORITY,
             BazelSkyframeExecutorConstants.ACTION_ON_IO_EXCEPTION_READING_BUILD_FILE);

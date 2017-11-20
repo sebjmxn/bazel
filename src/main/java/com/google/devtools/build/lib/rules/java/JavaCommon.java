@@ -15,6 +15,7 @@ package com.google.devtools.build.lib.rules.java;
 
 import static com.google.common.collect.ImmutableList.toImmutableList;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableList.Builder;
 import com.google.common.collect.ImmutableMap;
@@ -27,7 +28,6 @@ import com.google.devtools.build.lib.analysis.AnalysisEnvironment;
 import com.google.devtools.build.lib.analysis.AnalysisUtils;
 import com.google.devtools.build.lib.analysis.OutputGroupProvider;
 import com.google.devtools.build.lib.analysis.PrerequisiteArtifacts;
-import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.Runfiles;
@@ -35,6 +35,7 @@ import com.google.devtools.build.lib.analysis.RunfilesProvider;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
 import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
 import com.google.devtools.build.lib.analysis.Util;
+import com.google.devtools.build.lib.analysis.configuredtargets.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.test.InstrumentedFilesCollector;
 import com.google.devtools.build.lib.analysis.test.InstrumentedFilesCollector.InstrumentationSpec;
 import com.google.devtools.build.lib.analysis.test.InstrumentedFilesCollector.LocalMetadataCollector;
@@ -54,7 +55,6 @@ import com.google.devtools.build.lib.rules.java.JavaCompilationArgs.ClasspathTyp
 import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.FileTypeSet;
 import com.google.devtools.build.lib.util.Pair;
-import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import java.util.ArrayList;
@@ -321,7 +321,8 @@ public class JavaCommon {
       if (neverLinkedness == null) {
         continue;
       }
-      boolean reportError = !ruleContext.getConfiguration().getAllowRuntimeDepsOnNeverLink();
+      boolean reportError =
+          !ruleContext.getFragment(JavaConfiguration.class).getAllowRuntimeDepsOnNeverLink();
       if (neverLinkedness.isNeverlink()) {
         String msg = String.format("neverlink dep %s not allowed in runtime deps", c.getLabel());
         if (reportError) {
@@ -459,9 +460,9 @@ public class JavaCommon {
 
   private ImmutableList<String> computeJavacOpts(Iterable<String> extraJavacOpts) {
     return Streams.concat(
-            JavaToolchainProvider.fromRuleContext(ruleContext).getJavacOptions().stream(),
+            JavaToolchainProvider.from(ruleContext).getJavacOptions().stream(),
             Streams.stream(extraJavacOpts),
-            ruleContext.getTokenizedStringListAttr("javacopts").stream())
+            ruleContext.getExpander().withDataLocations().tokenized("javacopts").stream())
         .collect(toImmutableList());
   }
 
@@ -480,10 +481,11 @@ public class JavaCommon {
   }
 
   /**
-   * Returns the string that the stub should use to determine the JVM
+   * Returns the path of the java executable that the java stub should use.
+   *
    * @param launcher if non-null, the cc_binary used to launch the Java Virtual Machine
    */
-  public static String getJavaBinSubstitution(
+  public static String getJavaExecutableForStub(
       RuleContext ruleContext, @Nullable Artifact launcher) {
     Preconditions.checkState(ruleContext.getConfiguration().hasFragment(Jvm.class));
     PathFragment javaExecutable;
@@ -501,8 +503,16 @@ public class JavaCommon {
       javaExecutable =
           PathFragment.create(PathFragment.create(ruleContext.getWorkspaceName()), javaExecutable);
     }
-    javaExecutable = javaExecutable.normalize();
+    return javaExecutable.normalize().getPathString();
+  }
 
+  /**
+   * Returns the shell command that computes `JAVABIN`.
+   * The command derives the JVM location from a given Java executable path.
+   */
+  public static String getJavaBinSubstitutionFromJavaExecutable(
+      RuleContext ruleContext, String javaExecutableStr) {
+    PathFragment javaExecutable = PathFragment.create(javaExecutableStr);
     if (ruleContext.getConfiguration().runfilesEnabled()) {
       String prefix = "";
       if (!javaExecutable.isAbsolute()) {
@@ -512,6 +522,13 @@ public class JavaCommon {
     } else {
       return "JAVABIN=${JAVABIN:-$(rlocation " + javaExecutable.getPathString() + ")}";
     }
+  }
+
+  /** Returns the string that the stub should use to determine the JVM binary (java) path */
+  public static String getJavaBinSubstitution(
+      RuleContext ruleContext, @Nullable Artifact launcher) {
+    return getJavaBinSubstitutionFromJavaExecutable(
+        ruleContext, getJavaExecutableForStub(ruleContext, launcher));
   }
 
   /**
@@ -553,7 +570,7 @@ public class JavaCommon {
   public static List<String> getJvmFlags(RuleContext ruleContext) {
     List<String> jvmFlags = new ArrayList<>();
     jvmFlags.addAll(ruleContext.getFragment(JavaConfiguration.class).getDefaultJvmFlags());
-    jvmFlags.addAll(ruleContext.getExpandedStringListAttr("jvm_flags", RuleContext.Tokenize.NO));
+    jvmFlags.addAll(ruleContext.getExpander().withDataLocations().list("jvm_flags"));
     return jvmFlags;
   }
 
@@ -875,7 +892,7 @@ public class JavaCommon {
    */
   public final <P extends TransitiveInfoProvider> Iterable<P> getDependencies(
       Class<P> provider) {
-    return AnalysisUtils.getProviders(getDependencies(), provider);
+    return JavaInfo.getProvidersFromListOfTargets(provider, getDependencies());
   }
 
   /** Gets all the deps that implement a particular provider. */

@@ -102,9 +102,9 @@ public class CcLibraryConfiguredTargetTest extends BuildViewTestCase {
   @Test
   public void testDefinesAndMakeVariables() throws Exception {
     ConfiguredTarget l = scratchConfiguredTarget("a", "l",
-        "cc_library(name='l', srcs=['l.cc'], defines=['V=$(TEST_VARIABLE)'], toolchains=[':v'])",
-        "make_variable_tester(name='v')");
-    assertThat(l.getProvider(CppCompilationContext.class).getDefines()).contains("V=FOOBAR");
+        "cc_library(name='l', srcs=['l.cc'], defines=['V=$(FOO)'], toolchains=[':v'])",
+        "make_variable_tester(name='v', variables={'FOO': 'BAR'})");
+    assertThat(l.getProvider(CppCompilationContext.class).getDefines()).contains("V=BAR");
   }
 
   @Test
@@ -282,15 +282,13 @@ public class CcLibraryConfiguredTargetTest extends BuildViewTestCase {
         .isEqualTo(action.getLinkCommandLine().getLinkTargetType().name());
     assertThat(cppLinkInfo.getLinkStaticness())
         .isEqualTo(action.getLinkCommandLine().getLinkStaticness().name());
-    Iterable<String> linkstamps = Artifact.asExecPaths(
-        action.getLinkCommandLine().getLinkstamps().values());
+    Iterable<String> linkstamps = Artifact.asExecPaths(action.getLinkstamps().values());
     assertThat(cppLinkInfo.getLinkStampList()).containsExactlyElementsIn(linkstamps);
-    Iterable<String> buildInfoHeaderArtifacts = Artifact.asExecPaths(
-        action.getLinkCommandLine().getBuildInfoHeaderArtifacts());
+    Iterable<String> buildInfoHeaderArtifacts =
+        Artifact.asExecPaths(action.getBuildInfoHeaderArtifacts());
     assertThat(cppLinkInfo.getBuildInfoHeaderArtifactList())
         .containsExactlyElementsIn(buildInfoHeaderArtifacts);
-    assertThat(cppLinkInfo.getLinkOptList())
-        .containsExactlyElementsIn(action.getLinkCommandLine().getRawLinkArgv());
+    assertThat(cppLinkInfo.getLinkOptList()).containsExactlyElementsIn(action.getArguments());
   }
 
   @Test
@@ -317,15 +315,13 @@ public class CcLibraryConfiguredTargetTest extends BuildViewTestCase {
         .isEqualTo(action.getLinkCommandLine().getLinkTargetType().name());
     assertThat(cppLinkInfo.getLinkStaticness())
         .isEqualTo(action.getLinkCommandLine().getLinkStaticness().name());
-    Iterable<String> linkstamps = Artifact.asExecPaths(
-        action.getLinkCommandLine().getLinkstamps().values());
+    Iterable<String> linkstamps = Artifact.asExecPaths(action.getLinkstamps().values());
     assertThat(cppLinkInfo.getLinkStampList()).containsExactlyElementsIn(linkstamps);
-    Iterable<String> buildInfoHeaderArtifacts = Artifact.asExecPaths(
-        action.getLinkCommandLine().getBuildInfoHeaderArtifacts());
+    Iterable<String> buildInfoHeaderArtifacts =
+        Artifact.asExecPaths(action.getBuildInfoHeaderArtifacts());
     assertThat(cppLinkInfo.getBuildInfoHeaderArtifactList())
         .containsExactlyElementsIn(buildInfoHeaderArtifacts);
-    assertThat(cppLinkInfo.getLinkOptList())
-        .containsExactlyElementsIn(action.getLinkCommandLine().getRawLinkArgv());
+    assertThat(cppLinkInfo.getLinkOptList()).containsExactlyElementsIn(action.getArguments());
   }
 
   @Test
@@ -340,7 +336,7 @@ public class CcLibraryConfiguredTargetTest extends BuildViewTestCase {
 
     CppLinkAction action = (CppLinkAction) getGeneratingAction(archive);
 
-    assertThat(action.getArgv()).contains(archive.getExecPathString());
+    assertThat(action.getArguments()).contains(archive.getExecPathString());
   }
 
   @Test
@@ -1185,6 +1181,52 @@ public class CcLibraryConfiguredTargetTest extends BuildViewTestCase {
                 .getLibraries());
     assertThat(artifactsToStrings(libraries)).doesNotContain("src a/libfoo.so");
     assertThat(artifactsToStrings(libraries)).contains("src a/libfoo.lo");
+  }
+
+  @Test
+  public void testCcLinkParamsHasExecutionDynamicLibraries() throws Exception {
+    AnalysisMock.get()
+        .ccSupport()
+        .setupCrosstool(
+            mockToolsConfig, MockCcSupport.COPY_DYNAMIC_LIBRARIES_TO_BINARY_CONFIGURATION);
+    useConfiguration("--cpu=k8", "--features=copy_dynamic_libraries_to_binary");
+    ConfiguredTarget target =
+        scratchConfiguredTarget("a", "foo", "cc_library(name = 'foo', srcs = ['foo.cc'])");
+    Iterable<Artifact> libraries =
+        target
+            .get(CcLinkParamsInfo.PROVIDER)
+            .getCcLinkParams(false, true)
+            .getExecutionDynamicLibraries();
+    assertThat(artifactsToStrings(libraries)).doesNotContain("bin a/libfoo.ifso");
+    assertThat(artifactsToStrings(libraries)).contains("bin a/libfoo.so");
+  }
+
+  @Test
+  public void testCcLinkParamsHasExecutionDynamicLibrariesWithoutCopyFeature() throws Exception {
+    useConfiguration("--cpu=k8");
+    ConfiguredTarget target =
+        scratchConfiguredTarget("a", "foo", "cc_library(name = 'foo', srcs = ['foo.cc'])");
+    Iterable<Artifact> libraries =
+        target
+            .get(CcLinkParamsInfo.PROVIDER)
+            .getCcLinkParams(false, true)
+            .getExecutionDynamicLibraries();
+    assertThat(artifactsToStrings(libraries)).doesNotContain("bin _solib_k8/liba_Slibfoo.ifso");
+    assertThat(artifactsToStrings(libraries)).contains("bin _solib_k8/liba_Slibfoo.so");
+  }
+
+  @Test
+  public void testCcLinkParamsDoNotHasExecutionDynamicLibraries() throws Exception {
+    useConfiguration("--cpu=k8");
+    ConfiguredTarget target =
+        scratchConfiguredTarget(
+            "a", "foo", "cc_library(name = 'foo', srcs = ['foo.cc'], linkstatic=1)");
+    Iterable<Artifact> libraries =
+        target
+            .get(CcLinkParamsInfo.PROVIDER)
+            .getCcLinkParams(false, true)
+            .getExecutionDynamicLibraries();
+    assertThat(artifactsToStrings(libraries)).isEmpty();
   }
 
   @Test

@@ -29,12 +29,12 @@ import com.google.devtools.build.lib.buildtool.buildevent.BuildCompleteEvent;
 import com.google.devtools.build.lib.buildtool.buildevent.BuildStartingEvent;
 import com.google.devtools.build.lib.buildtool.buildevent.ExecutionProgressReceiverAvailableEvent;
 import com.google.devtools.build.lib.buildtool.buildevent.TestFilteringCompleteEvent;
+import com.google.devtools.build.lib.clock.Clock;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.events.ExtendedEventHandler.FetchProgress;
 import com.google.devtools.build.lib.pkgcache.LoadingPhaseCompleteEvent;
 import com.google.devtools.build.lib.skyframe.LoadingPhaseStartedEvent;
 import com.google.devtools.build.lib.skyframe.PackageProgressReceiver;
-import com.google.devtools.build.lib.util.Clock;
 import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.build.lib.util.io.AnsiTerminalWriter;
 import com.google.devtools.build.lib.util.io.PositionAwareAnsiTerminalWriter;
@@ -245,10 +245,15 @@ class ExperimentalStateTracker {
 
   void actionStatusMessage(ActionStatusMessage event) {
     String strategy = event.getStrategy();
+    String name = event.getActionMetadata().getPrimaryOutput().getPath().getPathString();
     if (strategy != null) {
-      String name = event.getActionMetadata().getPrimaryOutput().getPath().getPathString();
       synchronized (this) {
         actionStrategy.put(name, strategy);
+      }
+    } else {
+      String message = event.getMessage();
+      synchronized (this) {
+        actionStrategy.put(name, message);
       }
     }
   }
@@ -549,8 +554,8 @@ class ExperimentalStateTracker {
         } else {
           terminalWriter.failStatus();
         }
-        terminalWriter.append(
-            shortenedLabelString(mostRecentTest.getTarget().getLabel(), width - prefix.length()));
+        terminalWriter.append(shortenedLabelString(
+            mostRecentTest.getLabel(), width - prefix.length()));
         terminalWriter.normal();
       }
       return true;
@@ -736,14 +741,14 @@ class ExperimentalStateTracker {
       terminalWriter.append(";");
     }
     if (runningActions.size() == 0) {
-      terminalWriter.normal().append(" no action running");
+      terminalWriter.normal().append(" no action");
       maybeShowRecentTest(terminalWriter, shortVersion, targetWidth - terminalWriter.getPosition());
     } else if (runningActions.size() == 1) {
       if (maybeShowRecentTest(null, shortVersion, targetWidth - terminalWriter.getPosition())) {
         // As we will break lines anyway, also show the number of running actions, to keep
         // things stay roughly in the same place (also compensating for the missing plural-s
         // in the word action).
-        terminalWriter.normal().append("  1 action running");
+        terminalWriter.normal().append("  1 action");
         maybeShowRecentTest(
             terminalWriter, shortVersion, targetWidth - terminalWriter.getPosition());
         String statusMessage =
@@ -766,10 +771,10 @@ class ExperimentalStateTracker {
                 clock.nanoTime(),
                 targetWidth - terminalWriter.getPosition(),
                 null);
-        statusMessage += " ... (" + runningActions.size() + " actions running)";
+        statusMessage += " ... (" + runningActions.size() + " actions)";
         terminalWriter.normal().append(" " + statusMessage);
       } else {
-        String statusMessage = "" + runningActions.size() + " actions running";
+        String statusMessage = "" + runningActions.size() + " actions";
         terminalWriter.normal().append(" " + statusMessage);
         maybeShowRecentTest(
             terminalWriter, shortVersion, targetWidth - terminalWriter.getPosition());

@@ -47,7 +47,6 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import javax.annotation.Generated;
-import javax.tools.JavaFileManager;
 import javax.tools.JavaFileObject;
 
 /**
@@ -77,7 +76,6 @@ public final class StrictJavaDepsPlugin extends BlazeJavaCompilerPlugin {
 
   private static Properties targetMap;
 
-  private JavaFileManager fileManager;
 
   private PrintWriter errWriter;
 
@@ -103,7 +101,6 @@ public final class StrictJavaDepsPlugin extends BlazeJavaCompilerPlugin {
   public void init(Context context, Log log, JavaCompiler compiler) {
     super.init(context, log, compiler);
     errWriter = log.getWriter(WriterKind.ERROR);
-    fileManager = context.get(JavaFileManager.class);
     implicitDependencyExtractor =
         new ImplicitDependencyExtractor(
             dependencyModule.getUsedClasspath(),
@@ -113,7 +110,7 @@ public final class StrictJavaDepsPlugin extends BlazeJavaCompilerPlugin {
     if (checkingTreeScanner == null) {
       Set<String> platformJars = dependencyModule.getPlatformJars();
       checkingTreeScanner =
-          new CheckingTreeScanner(dependencyModule, log, missingTargets, platformJars, fileManager);
+          new CheckingTreeScanner(dependencyModule, log, missingTargets, platformJars);
       context.put(CheckingTreeScanner.class, checkingTreeScanner);
     }
     initTargetMap();
@@ -152,6 +149,7 @@ public final class StrictJavaDepsPlugin extends BlazeJavaCompilerPlugin {
       }
       if (toplevels.add(env.toplevel)) {
         checkingTreeScanner.scan(env.toplevel.getImports());
+        checkingTreeScanner.scan(env.toplevel.getPackage());
         dependencyModule.addPackage(env.toplevel.packge);
       }
     } finally {
@@ -193,7 +191,7 @@ public final class StrictJavaDepsPlugin extends BlazeJavaCompilerPlugin {
   private static class CheckingTreeScanner extends TreeScanner {
 
     private static final String TRANSITIVE_DEP_MESSAGE =
-        "[strict] Using type {0} from an indirect dependency (TOOL_INFO: \"{1}\"). "
+        "[strict] Using {0} from an indirect dependency (TOOL_INFO: \"{1}\"). "
             + "See command below **";
 
     /** Lookup for jars coming from transitive dependencies */
@@ -201,9 +199,6 @@ public final class StrictJavaDepsPlugin extends BlazeJavaCompilerPlugin {
 
     /** All error reporting is done through javac's log, */
     private final Log log;
-
-    /** The compilation's file manager. */
-    private final JavaFileManager fileManager;
 
     /** The strict_java_deps mode */
     private final StrictJavaDeps strictJavaDepsMode;
@@ -229,15 +224,13 @@ public final class StrictJavaDepsPlugin extends BlazeJavaCompilerPlugin {
         DependencyModule dependencyModule,
         Log log,
         Set<JarOwner> missingTargets,
-        Set<String> platformJars,
-        JavaFileManager fileManager) {
+        Set<String> platformJars) {
       this.indirectJarsToTargets = dependencyModule.getIndirectMapping();
       this.strictJavaDepsMode = dependencyModule.getStrictJavaDeps();
       this.log = log;
       this.missingTargets = missingTargets;
       this.directDependenciesMap = dependencyModule.getExplicitDependenciesMap();
       this.platformJars = platformJars;
-      this.fileManager = fileManager;
     }
 
     Set<ClassSymbol> getSeenClasses() {
@@ -245,13 +238,11 @@ public final class StrictJavaDepsPlugin extends BlazeJavaCompilerPlugin {
     }
 
     /** Checks an AST node denoting a class type against direct/transitive dependencies. */
-    private void checkTypeLiteral(JCTree node) {
-      if (node == null || node.type.tsym == null) {
+    private void checkTypeLiteral(JCTree node, Symbol sym) {
+      if (sym == null || sym.kind != Kinds.Kind.TYP) {
         return;
       }
-
-      Symbol.TypeSymbol sym = node.type.tsym;
-      String jarName = getJarName(fileManager, sym.enclClass(), platformJars);
+      String jarName = getJarName(sym.enclClass(), platformJars);
 
       // If this type symbol comes from a class file loaded from a jar, check
       // whether that jar was a direct dependency and error out otherwise.
@@ -265,7 +256,7 @@ public final class StrictJavaDepsPlugin extends BlazeJavaCompilerPlugin {
      * strict_java_deps is enabled, it emits a [strict] compiler warning/error (behavior to be soon
      * replaced by the more complete Blaze implementation).
      */
-    private void collectExplicitDependency(String jarName, JCTree node, Symbol.TypeSymbol sym) {
+    private void collectExplicitDependency(String jarName, JCTree node, Symbol sym) {
       if (strictJavaDepsMode.isEnabled() && !isStrictDepsExempt) {
         // Does it make sense to emit a warning/error for this pair of (type, owner)?
         // We want to emit only one error/warning per owner.
@@ -278,16 +269,15 @@ public final class StrictJavaDepsPlugin extends BlazeJavaCompilerPlugin {
               owner.aspect() == null
                   ? canonicalTargetName
                   : String.format("%s wrapped in %s", canonicalTargetName, owner.aspect());
+          String used =
+              sym.getSimpleName().contentEquals("package-info")
+                  ? "package " + sym.getEnclosingElement()
+                  : "type " + sym;
+          String message = MessageFormat.format(TRANSITIVE_DEP_MESSAGE, used, toolInfo);
           if (strictJavaDepsMode == ERROR) {
-            log.error(
-                node.pos,
-                "proc.messager",
-                MessageFormat.format(TRANSITIVE_DEP_MESSAGE, sym, toolInfo));
+            log.error(node.pos, "proc.messager", message);
           } else {
-            log.warning(
-                node.pos,
-                "proc.messager",
-                MessageFormat.format(TRANSITIVE_DEP_MESSAGE, sym, toolInfo));
+            log.warning(node.pos, "proc.messager", message);
           }
         }
       }
@@ -315,9 +305,7 @@ public final class StrictJavaDepsPlugin extends BlazeJavaCompilerPlugin {
     /** Visits an identifier in the AST. We only care about type symbols. */
     @Override
     public void visitIdent(JCTree.JCIdent tree) {
-      if (tree.sym != null && tree.sym.kind == Kinds.Kind.TYP) {
-        checkTypeLiteral(tree);
-      }
+      checkTypeLiteral(tree, tree.sym);
     }
 
     /**
@@ -328,9 +316,7 @@ public final class StrictJavaDepsPlugin extends BlazeJavaCompilerPlugin {
     @Override
     public void visitSelect(JCTree.JCFieldAccess tree) {
       scan(tree.selected);
-      if (tree.sym != null && tree.sym.kind == Kinds.Kind.TYP) {
-        checkTypeLiteral(tree);
-      }
+      checkTypeLiteral(tree, tree.sym);
     }
 
     @Override
@@ -340,6 +326,11 @@ public final class StrictJavaDepsPlugin extends BlazeJavaCompilerPlugin {
         scan(tree.params);
       }
       scan(tree.body);
+    }
+
+    @Override
+    public void visitPackageDef(JCTree.JCPackageDecl tree) {
+      checkTypeLiteral(tree, tree.packge.package_info);
     }
   }
 
@@ -418,8 +409,7 @@ public final class StrictJavaDepsPlugin extends BlazeJavaCompilerPlugin {
    *
    * @param platformJars jars on javac's bootclasspath
    */
-  static String getJarName(
-      JavaFileManager fileManager, ClassSymbol classSymbol, Set<String> platformJars) {
+  public static String getJarName(ClassSymbol classSymbol, Set<String> platformJars) {
     if (classSymbol == null) {
       return null;
     }

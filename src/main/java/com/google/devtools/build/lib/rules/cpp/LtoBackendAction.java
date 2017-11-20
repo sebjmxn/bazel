@@ -14,6 +14,7 @@
 
 package com.google.devtools.build.lib.rules.cpp;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.actions.AbstractAction;
@@ -89,13 +90,16 @@ public final class LtoBackendAction extends SpawnAction {
         false,
         null);
     mandatoryInputs = inputs;
+    Preconditions.checkState(
+        (bitcodeFiles == null) == (imports == null),
+        "Either both or neither bitcodeFiles and imports files should be null");
     bitcodeFiles = allBitcodeFiles;
     imports = importsFile;
   }
 
   @Override
   public boolean discoversInputs() {
-    return true;
+    return imports != null;
   }
 
   private Set<Artifact> computeBitcodeInputs(Collection<PathFragment> inputPaths) {
@@ -161,12 +165,6 @@ public final class LtoBackendAction extends SpawnAction {
   }
 
   @Override
-  public void execute(ActionExecutionContext actionExecutionContext)
-      throws ActionExecutionException, InterruptedException {
-    super.execute(actionExecutionContext);
-  }
-
-  @Override
   protected String computeKey() {
     Fingerprint f = new Fingerprint();
     f.addString(GUID);
@@ -184,10 +182,12 @@ public final class LtoBackendAction extends SpawnAction {
     for (Artifact input : getMandatoryInputs()) {
       f.addPath(input.getExecPath());
     }
-    for (PathFragment bitcodePath : bitcodeFiles.keySet()) {
-      f.addPath(bitcodePath);
+    if (imports != null) {
+      for (PathFragment bitcodePath : bitcodeFiles.keySet()) {
+        f.addPath(bitcodePath);
+      }
+      f.addPath(imports.getExecPath());
     }
-    f.addPath(imports.getExecPath());
     f.addStringMap(getEnvironment());
     f.addStringMap(getExecutionInfo());
     return f.hexDigestAndReset();

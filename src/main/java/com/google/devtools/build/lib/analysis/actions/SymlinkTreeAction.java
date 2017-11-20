@@ -13,16 +13,18 @@
 // limitations under the License.
 package com.google.devtools.build.lib.analysis.actions;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.actions.AbstractAction;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionExecutionException;
 import com.google.devtools.build.lib.actions.ActionOwner;
+import com.google.devtools.build.lib.actions.ActionResult;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.util.Fingerprint;
-import com.google.devtools.build.lib.util.Preconditions;
+import com.google.devtools.build.lib.vfs.Path;
 import javax.annotation.Nullable;
 
 /**
@@ -37,7 +39,7 @@ public final class SymlinkTreeAction extends AbstractAction {
   private final Artifact inputManifest;
   private final Artifact outputManifest;
   private final boolean filesetTree;
-  private final ImmutableMap<String, String> shellEnviroment;
+  private final ImmutableMap<String, String> shellEnvironment;
   private final boolean enableRunfiles;
 
   /**
@@ -66,7 +68,7 @@ public final class SymlinkTreeAction extends AbstractAction {
     this.inputManifest = inputManifest;
     this.outputManifest = outputManifest;
     this.filesetTree = filesetTree;
-    this.shellEnviroment = shellEnvironment;
+    this.shellEnvironment = shellEnvironment;
     this.enableRunfiles = enableRunfiles;
   }
 
@@ -74,9 +76,11 @@ public final class SymlinkTreeAction extends AbstractAction {
       Artifact inputManifest, Artifact artifactMiddleman) {
     ImmutableList.Builder<Artifact> result = ImmutableList.<Artifact>builder()
         .add(inputManifest);
-    if (artifactMiddleman != null
-        && !artifactMiddleman.getPath().getFileSystem().supportsSymbolicLinksNatively()) {
-      result.add(artifactMiddleman);
+    if (artifactMiddleman != null) {
+      Path path = artifactMiddleman.getPath();
+      if (!path.getFileSystem().supportsSymbolicLinksNatively(path)) {
+        result.add(artifactMiddleman);
+      }
     }
     return result.build();
   }
@@ -113,10 +117,11 @@ public final class SymlinkTreeAction extends AbstractAction {
   }
 
   @Override
-  public void execute(ActionExecutionContext actionExecutionContext)
+  public ActionResult execute(ActionExecutionContext actionExecutionContext)
       throws ActionExecutionException, InterruptedException {
-    actionExecutionContext
-        .getContext(SymlinkTreeActionContext.class)
-        .createSymlinks(this, actionExecutionContext, shellEnviroment, enableRunfiles);
+    return ActionResult.create(
+        actionExecutionContext
+            .getContext(SymlinkTreeActionContext.class)
+            .createSymlinks(this, actionExecutionContext, shellEnvironment, enableRunfiles));
   }
 }

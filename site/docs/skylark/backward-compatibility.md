@@ -2,25 +2,49 @@
 layout: documentation
 title: Extensions - Backward compatibility
 ---
+
 # Backward compatibility
 
-Bazel is still in Beta and we are going to do breaking changes. As we make
-changes and polish the extension mechanism, old features may be removed and new
-features that are not backwards-compatible may be added.
+Bazel is still in Beta and new releases may include backward incompatible
+changes. As we make changes and polish the extension mechanism, old features
+may be removed and new features that are not backward compatible may be added.
 
-Each release, new incompatible changes will be behind a flag with its default
-value set to `false`. In later releases, the flag will be enabled by default, or
-the flag will be removed entirely.
+Backward incompatible changes are introduced gradually:
 
-To check if your code will be compatible with future releases:
+1.  The backward incompatible change is introduced behind a flag with its
+    default value set to `false`.
+2.  In a later release, the flag's default value will be set to `true`. You
+    can still use the flag to disable the change.
+3.  Then in a later release, the flag will be removed and you will no longer be
+    able to disable the change.
 
-*   build your code with the flag `--all_incompatible_changes`, or
-*   use boolean flags to enable/disable specific incompatible changes.
+To check if your code will be compatible with future releases you can:
 
-This following are the planned incompatible changes that are implemented and
-guarded behind flags.
+*   Build your code with the flag `--all_incompatible_changes`. This flag
+    enables all backward incompatible changes, and so you can ensure your code
+    is compatible with upcoming changes.
+*   Use boolean flags to enable/disable specific backward incompatible changes.
 
-## Set constructor
+## Current backward incompatible changes
+
+The following are the backward incompatible changes that are implemented and
+guarded behind flags in the current release:
+
+*   [Set constructor](#set-constructor)
+*   [Keyword-only arguments](#keyword-only-arguments)
+*   [Mutating `+=`](#mutating)
+*   [Dictionary concatenation](#dictionary-concatenation)
+*   [Load must appear at top of file](#load-must-appear-at-top-of-file)
+*   [Load argument is a label](#load-argument-is-a-label)
+*   [Top level `if` statements](#top-level-if-statements)
+*   [Comprehensions variables](#comprehensions-variables)
+*   [Depset is no longer iterable](#depset-is-no-longer-iterable)
+*   [String is no longer iterable](#string-is-no-longer-iterable)
+*   [Dictionary literal has no duplicates](#dictionary-literal-has-no-duplicates)
+*   [New actions API](#new-actions-api)
+*   [Checked arithmetic](#checked-arithmetic)
+
+### Set constructor
 
 We are removing the `set` constructor. Use `depset` instead. `set` and `depset`
 are equivalent, you just need to do search and replace to update the old code.
@@ -29,10 +53,10 @@ We are doing this to reduce confusion between the specialized
 [depset](depsets.md) data structure and Python's set datatype.
 
 *   Flag: `--incompatible_disallow_set_constructor`
-*   Default: `false`
+*   Default: `true`
 
 
-## Keyword-only arguments
+### Keyword-only arguments
 
 Keyword-only parameters are parameters that can be called only using their name.
 
@@ -53,10 +77,10 @@ compatibility with Python 2, we are removing this feature (which we have never
 documented).
 
 *   Flag: `--incompatible_disallow_keyword_only_args`
-*   Default: `false`
+*   Default: `true`
 
 
-## Mutating `+=`
+### Mutating `+=`
 
 We are changing `left += right` when `left` is a list. The old behavior is
 equivalent to `left = left + right`, which creates a new list and assigns it to
@@ -76,10 +100,10 @@ This change makes Skylark more compatible with Python and avoids performance
 issues. The `+=` operator for tuples is unaffected.
 
 *   Flag: `--incompatible_list_plus_equals_inplace`
-*   Default: `false`
+*   Default: `true`
 
 
-## Dictionary concatenation
+### Dictionary concatenation
 
 We are removing the `+` operator on dictionaries. This includes the `+=` form
 where the left-hand side is a dictionary. This is done to improve compatibility
@@ -89,7 +113,17 @@ with Python. A possible workaround is to use the `.update` method instead.
 *   Default: `false`
 
 
-## Load argument is a label
+### Load must appear at top of file
+
+Previously, the `load` statement could appear anywhere in a `.bzl` file so long
+as it was at the top level. With this change, for `.bzl` files, `load` must
+appear at the beginning of the file, i.e. before any other non-`load` statement.
+
+*   Flag: `--incompatible_bzl_disallow_load_after_statement`
+*   Default: `false`
+
+
+### Load argument is a label
 
 Historically, the first argument of `load` could be a path with an implicit
 `.bzl` suffix. We are going to require that all `load` statements use the label
@@ -104,7 +138,7 @@ load("//path:foo.bzl", "var")  # recommended
 *   Default: `false`
 
 
-## Top level `if` statements
+### Top level `if` statements
 
 This change forbids `if` statements at the top level of `.bzl` files (they are
 already forbidden in `BUILD` files). This change ensures that every global
@@ -115,7 +149,7 @@ that global values cannot be redefined.
 *   Default: `true`
 
 
-## Comprehensions variables
+### Comprehensions variables
 
 This change makes list and dict comprehensions follow Python 3's semantics
 instead of Python 2's. That is, comprehensions have their own local scopes, and
@@ -149,10 +183,10 @@ In other words, please do not refer to a loop variable outside the list or dict
 comprehension.
 
 *   Flag: `--incompatible_comprehension_variables_do_not_leak`
-*   Default: `false`
+*   Default: `true`
 
 
-## Depset is no longer iterable
+### Depset is no longer iterable
 
 When the flag is set to true, `depset` objects are not treated as iterable. If
 you need an iterable, call the `.to_list()` method. This affects `for` loops and
@@ -173,7 +207,7 @@ sorted(deps.to_list())  # recommended
 *   Default: `false`
 
 
-## String is no longer iterable
+### String is no longer iterable
 
 When the flag is set to true, `string` objects are not treated as iterable. This
 affects `for` loops and many functions, e.g. `list`, `tuple`, `min`, `max`,
@@ -185,14 +219,18 @@ def my_macro(name, srcs):
   for src in srcs:
     # do something with src
 
-my_macro("foo")  # equivalent to: my_macro(["f", "o", "o"])
+# equivalent to: my_macro("hello", ["f", "o", "o", ".", "c", "c"])
+my_macro(
+  name = "hello",
+  srcs = "foo.cc",
+)
 ```
 
 String indexing and `len` are still allowed. If you need to iterate over a
 string, you may explicitly use:
 
 ``` python
-my_string="hello world"
+my_string = "hello world"
 for i in range(len(my_string)):
   char = my_string[i]
   # do something with char
@@ -202,7 +240,7 @@ for i in range(len(my_string)):
 *   Default: `false`
 
 
-## Dictionary literal has no duplicates
+### Dictionary literal has no duplicates
 
 When the flag is set to true, duplicated keys are not allowed in the dictionary
 literal syntax.
@@ -219,13 +257,37 @@ If you really want to override a value, use a separate statement:
 `mydict["a"] = 4`.
 
 *   Flag: `--incompatible_dict_literal_has_no_duplicates`
+*   Default: `true`
+
+
+### New actions API
+
+This change removes the old methods for registering actions within rules, and
+requires that you use the new methods instead. The deprecated methods and their
+replacements are as follows.
+
+*   `ctx.new_file(...)` --> `ctx.actions.declare_file(...)`
+*   `ctx.experimental_new_directory(...)` -->
+    `ctx.actions.declare_directory(...)`
+*   `ctx.action(...)` --> either `ctx.actions.run(...)` or
+    `ctx.actions.run_shell(...)`
+*   `ctx.file_action(...)` --> `ctx.actions.write(...)`
+*   `ctx.empty_action(...)` --> `ctx.actions.do_nothing(...)`
+*   `ctx.template_action(...)` --> `ctx.actions.expand_template(...)`
+
+<!-- filler comment, needed by Markdown to separate the lists -->
+
+*   Flag: `--incompatible_new_actions_api`
 *   Default: `false`
 
 
-## Checked arithmetic
+### Checked arithmetic
 
 When set, arithmetic operations (`+`, `-`, `*`) will fail in case of overflow.
 All integers are stored using signed 32 bits.
 
-*   Flag: `--incompatible_incompatible_checked_arithmetic`
-*   Default: `false`
+*   Flag: `--incompatible_checked_arithmetic`
+*   Default: `true`
+
+
+<!-- Add new options here -->

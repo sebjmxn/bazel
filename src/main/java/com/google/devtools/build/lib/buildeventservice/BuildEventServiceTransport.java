@@ -41,13 +41,15 @@ import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.Bui
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildFinished;
 import com.google.devtools.build.lib.buildeventstream.BuildEventTransport;
 import com.google.devtools.build.lib.buildeventstream.PathConverter;
+import com.google.devtools.build.lib.clock.Clock;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.EventKind;
 import com.google.devtools.build.lib.runtime.BlazeModule.ModuleEnvironment;
 import com.google.devtools.build.lib.util.AbruptExitException;
-import com.google.devtools.build.lib.util.Clock;
 import com.google.devtools.build.lib.util.ExitCode;
+import com.google.devtools.build.lib.util.JavaSleeper;
+import com.google.devtools.build.lib.util.Sleeper;
 import com.google.devtools.build.v1.BuildStatus.Result;
 import com.google.devtools.build.v1.PublishBuildToolEventStreamRequest;
 import com.google.devtools.build.v1.PublishBuildToolEventStreamResponse;
@@ -56,6 +58,7 @@ import com.google.protobuf.Any;
 import io.grpc.Status;
 import java.time.Duration;
 import java.util.Deque;
+import java.util.Set;
 import java.util.concurrent.BlockingDeque;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentLinkedDeque;
@@ -65,7 +68,6 @@ import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.locks.LockSupport;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.annotation.Nullable;
@@ -79,8 +81,10 @@ public class BuildEventServiceTransport implements BuildEventTransport {
 
   private static final Logger logger = Logger.getLogger(BuildEventServiceTransport.class.getName());
 
-  /** Max wait time until for the Streaming RPC to finish after all events were enqueued. */
-  private static final Duration PUBLISH_EVENT_STREAM_FINISHED_TIMEOUT = Duration.ofSeconds(120);
+  /** Max wait time until for the Streaming RPC to finish after all events were sent. */
+  private static final Duration PUBLISH_EVENT_STREAM_FINISHED_TIMEOUT = Duration.ofSeconds(30);
+  /** Max wait time between isStreamActive checks of the PublishBuildToolEventStream RPC. */
+  private static final int STREAMING_RPC_POLL_IN_SECS = 1;
 
   private final ListeningExecutorService uploaderExecutorService;
   private final Duration uploadTimeout;
@@ -90,8 +94,8 @@ public class BuildEventServiceTransport implements BuildEventTransport {
   private final BuildEventServiceProtoUtil besProtoUtil;
   private final ModuleEnvironment moduleEnvironment;
   private final EventHandler commandLineReporter;
-
   private final PathConverter pathConverter;
+  private final Sleeper sleeper;
   /** Contains all pendingAck events that might be retried in case of failures. */
   private ConcurrentLinkedDeque<PublishBuildToolEventStreamRequest> pendingAck;
   /** Contains all events should be sent ordered by sequence number. */
@@ -110,6 +114,11 @@ public class BuildEventServiceTransport implements BuildEventTransport {
   private volatile Exception lastKnownError;
   /** Returns true if we already reported a warning or error to UI. */
   private volatile boolean errorsReported;
+  /**
+   * Returns the number of ACKs received since the last time {@link #publishEventStream()} was
+   * retried due to a failure.
+   */
+  private volatile int acksReceivedSinceLastRetry;
 
   public BuildEventServiceTransport(
       BuildEventServiceClient besClient,
@@ -123,30 +132,32 @@ public class BuildEventServiceTransport implements BuildEventTransport {
       Clock clock,
       PathConverter pathConverter,
       EventHandler commandLineReporter,
-      @Nullable String projectId) {
-    this(
-        besClient,
-        uploadTimeout,
-        bestEffortUpload,
-        publishLifecycleEvents,
-        moduleEnvironment,
-        new BuildEventServiceProtoUtil(buildRequestId, invocationId, projectId, command, clock),
-        pathConverter,
-        commandLineReporter);
+      @Nullable String projectId,
+      Set<String> keywords) {
+    this(besClient, uploadTimeout, bestEffortUpload, publishLifecycleEvents, buildRequestId,
+        invocationId, command, moduleEnvironment, clock, pathConverter, commandLineReporter,
+        projectId, keywords, new JavaSleeper());
   }
 
   @VisibleForTesting
-  BuildEventServiceTransport(
+  public BuildEventServiceTransport(
       BuildEventServiceClient besClient,
       Duration uploadTimeout,
       boolean bestEffortUpload,
       boolean publishLifecycleEvents,
+      String buildRequestId,
+      String invocationId,
+      String command,
       ModuleEnvironment moduleEnvironment,
-      BuildEventServiceProtoUtil besProtoUtil,
+      Clock clock,
       PathConverter pathConverter,
-      EventHandler commandLineReporter) {
+      EventHandler commandLineReporter,
+      @Nullable String projectId,
+      Set<String> keywords,
+      Sleeper sleeper) {
     this.besClient = besClient;
-    this.besProtoUtil = besProtoUtil;
+    this.besProtoUtil = new BuildEventServiceProtoUtil(
+        buildRequestId, invocationId, projectId, command, clock, keywords);
     this.publishLifecycleEvents = publishLifecycleEvents;
     this.moduleEnvironment = moduleEnvironment;
     this.commandLineReporter = commandLineReporter;
@@ -162,11 +173,32 @@ public class BuildEventServiceTransport implements BuildEventTransport {
     this.invocationResult = UNKNOWN_STATUS;
     this.uploadTimeout = uploadTimeout;
     this.bestEffortUpload = bestEffortUpload;
+    this.sleeper = sleeper;
+  }
+
+  public boolean isStreaming() {
+    return besClient.isStreamActive();
   }
 
   @Override
-  public synchronized ListenableFuture<Void> close() {
+  public ListenableFuture<Void> close() {
+    return close(/*now=*/false);
+  }
+
+  @Override
+  @SuppressWarnings("FutureReturnValueIgnored")
+  public void closeNow() {
+    close(/*now=*/true);
+  }
+
+  private synchronized ListenableFuture<Void> close(boolean now) {
     if (shutdownFuture != null) {
+      if (now) {
+        cancelUpload();
+        if (!shutdownFuture.isDone()) {
+          shutdownFuture.set(null);
+        }
+      }
       return shutdownFuture;
     }
 
@@ -174,6 +206,12 @@ public class BuildEventServiceTransport implements BuildEventTransport {
 
     // The future is completed once the close succeeded or failed.
     shutdownFuture = SettableFuture.create();
+
+    if (now) {
+      cancelUpload();
+      shutdownFuture.set(null);
+      return shutdownFuture;
+    }
 
     uploaderExecutorService.execute(
         () -> {
@@ -221,6 +259,23 @@ public class BuildEventServiceTransport implements BuildEventTransport {
         });
 
     return shutdownFuture;
+  }
+
+  private void cancelUpload() {
+    if (!uploaderExecutorService.isShutdown()) {
+      logger.log(Level.INFO, "Forcefully closing the build event service transport.");
+      // This will interrupt the thread doing the BES upload.
+      if (uploadComplete != null) {
+        uploadComplete.cancel(true);
+      }
+      uploaderExecutorService.shutdownNow();
+      try {
+        uploaderExecutorService.awaitTermination(100, TimeUnit.MILLISECONDS);
+      } catch (InterruptedException e) {
+        // Ignore this exception. We are shutting down independently no matter what the BES
+        // upload does.
+      }
+    }
   }
 
   @Override
@@ -396,50 +451,88 @@ public class BuildEventServiceTransport implements BuildEventTransport {
 
   /**
    * Used as method reference, responsible for the entire Streaming RPC. Safe to retry. This method
-   * it carries states between consecutive calls (pendingAck messages will be added to the head of
+   * carries over the state between consecutive calls (pendingAck messages will be added to the head
    * of the pendingSend queue), but that is intended behavior.
    */
-  private Status publishEventStream() throws Exception {
+  private void publishEventStream() throws Exception {
     // Reschedule unacked messages if required, keeping its original order.
     PublishBuildToolEventStreamRequest unacked;
     while ((unacked = pendingAck.pollLast()) != null) {
       pendingSend.addFirst(unacked);
     }
     pendingAck = new ConcurrentLinkedDeque<>();
-
-    return publishEventStream(pendingAck, pendingSend, besClient)
-        .get(PUBLISH_EVENT_STREAM_FINISHED_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+    publishEventStream(pendingAck, pendingSend, besClient);
   }
 
   /** Method responsible for a single Streaming RPC. */
-  private static ListenableFuture<Status> publishEventStream(
+  private void publishEventStream(
       final ConcurrentLinkedDeque<PublishBuildToolEventStreamRequest> pendingAck,
       final BlockingDeque<PublishBuildToolEventStreamRequest> pendingSend,
       final BuildEventServiceClient besClient)
       throws Exception {
-    PublishBuildToolEventStreamRequest event;
-    ListenableFuture<Status> streamDone = besClient.openStream(ackCallback(pendingAck, besClient));
+    ListenableFuture<Status> streamDone = besClient
+        .openStream(ackCallback(pendingAck, besClient));
     try {
+      @Nullable PublishBuildToolEventStreamRequest event;
       do {
-        event = pendingSend.takeFirst();
-        pendingAck.add(event);
-        besClient.sendOverStream(event);
+        event = pendingSend.pollFirst(STREAMING_RPC_POLL_IN_SECS, TimeUnit.SECONDS);
+        if (event != null) {
+          pendingAck.add(event);
+          besClient.sendOverStream(event);
+        }
+        checkState(besClient.isStreamActive(), "Stream was closed prematurely.");
       } while (!isLastEvent(event));
-      besClient.closeStream();
-      logger.log(Level.INFO, "Closing the build event stream.");
+      logger.log(
+          Level.INFO,
+          String.format(
+              "Will end publishEventStream() isLastEvent: %s isStreamActive: %s",
+              isLastEvent(event), besClient.isStreamActive()));
+    } catch (InterruptedException e) {
+      // By convention the interrupted flag should have been cleared,
+      // but just to be sure clear it.
+      Thread.interrupted();
+      String additionalDetails = "Sending build events.";
+      besClient.abortStream(Status.CANCELLED.augmentDescription(additionalDetails));
+      throw e;
     } catch (Exception e) {
-      logger.log(Level.WARNING, "Aborting publishEventStream.", e);
-      besClient.abortStream(Status.INTERNAL.augmentDescription(e.getMessage()));
+      Status status = streamDone.isDone() ? streamDone.get() : null;
+      String additionalDetail = e.getMessage();
+      logger.log(
+          Level.WARNING,
+          String.format(
+              "Aborting publishBuildToolEventStream RPC (status=%s): %s", status, additionalDetail),
+          e);
+      besClient.abortStream(Status.INTERNAL.augmentDescription(additionalDetail));
+      throw e;
     }
-    return streamDone;
+
+    try {
+      Status status =
+          streamDone.get(PUBLISH_EVENT_STREAM_FINISHED_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+      logger.log(Level.INFO, "Done with publishEventStream(). Status: " + status);
+    } catch (InterruptedException e) {
+      // By convention the interrupted flag should have been cleared,
+      // but just to be sure clear it.
+      Thread.interrupted();
+      String additionalDetails = "Waiting for ACK messages.";
+      besClient.abortStream(Status.CANCELLED.augmentDescription(additionalDetails));
+      throw e;
+    } catch (TimeoutException e) {
+      String additionalDetail = "Build Event Protocol upload timed out waiting for ACK messages";
+      logger
+          .log(Level.WARNING, "Cancelling publishBuildToolEventStream RPC: " + additionalDetail);
+      besClient.abortStream(Status.CANCELLED.augmentDescription(additionalDetail));
+      throw e;
+    }
   }
 
-  private static boolean isLastEvent(PublishBuildToolEventStreamRequest event) {
+  private static boolean isLastEvent(@Nullable PublishBuildToolEventStreamRequest event) {
     return event != null
         && event.getOrderedBuildEvent().getEvent().getEventCase() == COMPONENT_STREAM_FINISHED;
   }
 
-  private static Function<PublishBuildToolEventStreamResponse, Void> ackCallback(
+  @SuppressWarnings("NonAtomicVolatileUpdate")
+  private Function<PublishBuildToolEventStreamResponse, Void> ackCallback(
       final Deque<PublishBuildToolEventStreamRequest> pendingAck,
       final BuildEventServiceClient besClient) {
     return ack -> {
@@ -451,47 +544,55 @@ public class BuildEventServiceTransport implements BuildEventTransport {
       if (pendingSeq != ackSeq) {
         besClient.abortStream(
             Status.INTERNAL.augmentDescription(
-                format("Expected ack %s but was %s.", pendingSeq, ackSeq)));
-      } else {
-        pendingAck.removeFirst();
+                format("Expected ACK %s but was %s.", pendingSeq, ackSeq)));
+        return null;
       }
+      PublishBuildToolEventStreamRequest event = pendingAck.removeFirst();
+      if (isLastEvent(event)) {
+        logger.log(Level.INFO, "Last ACK received.");
+        besClient.closeStream();
+      }
+      acksReceivedSinceLastRetry++;
       return null;
     };
-  }
-
-  private void retryOnException(Callable<?> c) throws Exception {
-    retryOnException(c, 3, 100);
   }
 
   /**
    * Executes a {@link Callable} retrying on exception thrown.
    */
   // TODO(eduardocolaco): Implement transient/persistent failures
-  private void retryOnException(Callable<?> c, final int maxRetries, final long initalDelayMillis)
-      throws Exception {
+  private void retryOnException(Callable<?> c) throws Exception {
+    final int maxRetries = 5;
+    final long initialDelayMillis = 0;
+    final long delayMillis = 1000;
+
     int tries = 0;
     while (tries <= maxRetries) {
       try {
+        acksReceivedSinceLastRetry = 0;
         c.call();
         lastKnownError = null;
         return;
-        // TODO(buchgr): Narrow the exception to not catch InterruptedException and
-        // RuntimeException's.
+      } catch (InterruptedException e) {
+        throw e;
       } catch (Exception e) {
+        if (acksReceivedSinceLastRetry > 0) {
+          logger.fine(String.format("ACKs received since last retry %d.",
+              acksReceivedSinceLastRetry));
+          tries = 0;
+        }
         tries++;
         lastKnownError = e;
-        /*
-         * Exponential backoff:
-         * Retry 1: initalDelayMillis * 2^0
-         * Retry 2: initalDelayMillis * 2^1
-         * Retry 3: initalDelayMillis * 2^2
-         * ...
-         */
-        long sleepMillis = initalDelayMillis << (tries - 1);
-        String message = String.format("Retrying RPC to BES. Attempt %s. Backoff %s ms.",
-            tries, sleepMillis);
+        long sleepMillis;
+        if (tries == 1) {
+          sleepMillis = initialDelayMillis;
+        } else {
+          // This roughly matches the gRPC connection backoff.
+          sleepMillis = (long) (delayMillis * Math.pow(1.6, tries));
+        }
+        String message = String.format("Retrying RPC to BES. Backoff %s ms.", sleepMillis);
         logger.log(Level.INFO, message, lastKnownError);
-        LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(sleepMillis));
+        sleeper.sleepMillis(sleepMillis);
       }
     }
     Preconditions.checkNotNull(lastKnownError);

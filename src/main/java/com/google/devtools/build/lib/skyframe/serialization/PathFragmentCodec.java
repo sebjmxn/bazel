@@ -14,6 +14,7 @@
 
 package com.google.devtools.build.lib.skyframe.serialization;
 
+import com.google.devtools.build.lib.skyframe.serialization.strings.StringCodecs;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.protobuf.CodedInputStream;
 import com.google.protobuf.CodedOutputStream;
@@ -22,7 +23,7 @@ import java.io.IOException;
 /** Custom serialization for {@link PathFragment}s. */
 class PathFragmentCodec implements ObjectCodec<PathFragment> {
 
-  private final ObjectCodec<String> stringCodec = new FastStringCodec();
+  private final ObjectCodec<String> stringCodec = StringCodecs.asciiOptimized();
 
   @Override
   public Class<PathFragment> getEncodedClass() {

@@ -1,8 +1,9 @@
 load("//tools/build_defs/pkg:pkg.bzl", "pkg_tar")
+load("//scripts/docs:jekyll.bzl", "jekyll_build")
 
 exports_files(
     [
-        "docs/bazel-user-manual.html",
+        "docs/user-manual.html",
         "command-line-reference-prefix.html",
         "command-line-reference-suffix.html",
     ],
@@ -144,4 +145,10 @@ genrule(
     tools = [
         "jekyll-tree.sh",
     ],
+)
+
+jekyll_build(
+    name = "site",
+    srcs = [":jekyll-tree"],
+    bucket = "docs.bazel.build",
 )

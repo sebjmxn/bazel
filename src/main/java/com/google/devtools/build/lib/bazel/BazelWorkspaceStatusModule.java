@@ -17,6 +17,7 @@ import static com.google.common.base.StandardSystemProperty.USER_NAME;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.stream.Collectors.joining;
 
+import com.google.common.base.Preconditions;
 import com.google.common.base.Supplier;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -24,6 +25,7 @@ import com.google.common.eventbus.Subscribe;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionExecutionException;
 import com.google.devtools.build.lib.actions.ActionOwner;
+import com.google.devtools.build.lib.actions.ActionResult;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ArtifactFactory;
 import com.google.devtools.build.lib.actions.ArtifactOwner;
@@ -49,7 +51,7 @@ import com.google.devtools.build.lib.shell.CommandException;
 import com.google.devtools.build.lib.shell.CommandResult;
 import com.google.devtools.build.lib.util.CommandBuilder;
 import com.google.devtools.build.lib.util.NetUtil;
-import com.google.devtools.build.lib.util.Preconditions;
+import com.google.devtools.build.lib.vfs.FileSystem;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -169,15 +171,15 @@ public class BazelWorkspaceStatusModule extends BlazeModule {
     }
 
     @Override
-    public void prepare(Path execRoot) throws IOException {
+    public void prepare(FileSystem fileSystem, Path execRoot) throws IOException {
       // The default implementation of this method deletes all output files; override it to keep
       // the old stableStatus around. This way we can reuse the existing file (preserving its mtime)
       // if the contents haven't changed.
-      deleteOutput(volatileStatus);
+      deleteOutput(fileSystem, volatileStatus);
     }
 
     @Override
-    public void execute(ActionExecutionContext actionExecutionContext)
+    public ActionResult execute(ActionExecutionContext actionExecutionContext)
         throws ActionExecutionException {
       try {
         Map<String, String> statusMap = parseWorkspaceStatus(
@@ -231,6 +233,7 @@ public class BazelWorkspaceStatusModule extends BlazeModule {
             this,
             true);
       }
+      return ActionResult.EMPTY;
     }
 
     @Override
@@ -282,7 +285,6 @@ public class BazelWorkspaceStatusModule extends BlazeModule {
   }
 
   private class BazelStatusActionFactory implements WorkspaceStatusAction.Factory {
-    private String hostname;
 
     @Override
     public Map<String, String> createDummyWorkspaceStatus() {
@@ -312,11 +314,7 @@ public class BazelWorkspaceStatusModule extends BlazeModule {
      * changes during bazel server lifetime, bazel will not see the change.
      */
     private String getHostname() {
-      if (hostname == null) {
-        hostname = NetUtil.findShortHostName();
-      }
-
-      return hostname;
+      return NetUtil.getCachedShortHostName();
     }
   }
 

@@ -20,8 +20,8 @@ import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
 import com.google.devtools.build.lib.analysis.actions.SymlinkAction;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
-import com.google.devtools.build.lib.rules.apple.AppleConfiguration;
 import com.google.devtools.build.lib.rules.apple.ApplePlatform;
+import com.google.devtools.build.lib.rules.apple.XcodeConfigProvider;
 
 /**
  * Support for registering actions using the Apple tool "lipo", which combines artifacts of
@@ -48,12 +48,12 @@ public class LipoSupport {
     if (inputBinaries.toList().size() > 1) {
       ruleContext.registerAction(
           ObjcRuleClasses.spawnAppleEnvActionBuilder(
-                  ruleContext.getFragment(AppleConfiguration.class), platform)
+                  XcodeConfigProvider.fromRuleContext(ruleContext), platform)
               .setMnemonic("ObjcCombiningArchitectures")
               .addTransitiveInputs(inputBinaries)
               .addOutput(outputBinary)
               .setExecutable(CompilationSupport.xcrunwrapper(ruleContext))
-              .setCommandLine(
+              .addCommandLine(
                   CustomCommandLine.builder()
                       .add(ObjcRuleClasses.LIPO)
                       .addExecPaths("-create", inputBinaries)

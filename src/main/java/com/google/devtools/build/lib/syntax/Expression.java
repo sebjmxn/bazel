@@ -21,6 +21,26 @@ import java.io.IOException;
 public abstract class Expression extends ASTNode {
 
   /**
+   * Kind of the expression. This is similar to using instanceof, except that it's more efficient
+   * and can be used in a switch/case.
+   */
+  public enum Kind {
+    BINARY_OPERATOR,
+    COMPREHENSION,
+    CONDITIONAL,
+    DICTIONARY_LITERAL,
+    DOT,
+    FUNCALL,
+    IDENTIFIER,
+    INDEX,
+    INTEGER_LITERAL,
+    LIST_LITERAL,
+    SLICE,
+    STRING_LITERAL,
+    UNARY_OPERATOR,
+  }
+
+  /**
    * Returns the result of evaluating this build-language expression in the
    * specified environment. All BUILD language datatypes are mapped onto the
    * corresponding Java types as follows:
@@ -42,9 +62,14 @@ public abstract class Expression extends ASTNode {
    */
   public final Object eval(Environment env) throws EvalException, InterruptedException {
     try {
-      return doEval(env);
-    } catch (EvalException ex) {
-      throw maybeTransformException(ex);
+      Callstack.push(this);
+      try {
+        return doEval(env);
+      } catch (EvalException ex) {
+        throw maybeTransformException(ex);
+      }
+    } finally {
+      Callstack.pop();
     }
   }
 
@@ -70,4 +95,10 @@ public abstract class Expression extends ASTNode {
    */
   @Override
   public abstract void prettyPrint(Appendable buffer) throws IOException;
+
+  /**
+   * Kind of the expression. This is similar to using instanceof, except that it's more efficient
+   * and can be used in a switch/case.
+   */
+  public abstract Kind kind();
 }

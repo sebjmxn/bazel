@@ -20,13 +20,14 @@ import com.google.devtools.common.options.OptionDocumentationCategory;
 import com.google.devtools.common.options.OptionEffectTag;
 import com.google.devtools.common.options.OptionsBase;
 import com.google.devtools.common.options.OptionsParser;
+import com.google.devtools.common.options.ShellQuotedParamsFilePreProcessor;
 import java.nio.file.FileSystems;
 
 /**
  * Provides an entry point for the resource processing stages.
  *
  * <p>A single entry point simplifies the build tool binary configuration and keeps the size of tool
- * jar small, as opposed to multiple tools for each prosess step. It also makes it easy to prototype
+ * jar small, as opposed to multiple tools for each process step. It also makes it easy to prototype
  * changes in the resource processing system.
  *
  * <pre>
@@ -91,6 +92,12 @@ public class ResourceProcessorBusyBox {
         AndroidResourceMergingAction.main(args);
       }
     },
+    MERGE_COMPILED() {
+      @Override
+      void call(String[] args) throws Exception {
+        AndroidCompiledResourceMergingAction.main(args);
+      }
+    },
     GENERATE_AAR() {
       @Override
       void call(String[] args) throws Exception {
@@ -115,10 +122,22 @@ public class ResourceProcessorBusyBox {
         CompileLibraryResourcesAction.main(args);
       }
     },
+    LINK_STATIC_LIBRARY() {
+      @Override
+      void call(String[] args) throws Exception {
+        ValidateAndLinkResourcesAction.main(args);
+      }
+    },
     AAPT2_PACKAGE() {
       @Override
       void call(String[] args) throws Exception {
         Aapt2ResourcePackagingAction.main(args);
+      }
+    },
+    SHRINK_AAPT2() {
+      @Override
+      void call(String[] args) throws Exception {
+        Aapt2ResourceShrinkingAction.main(args);
       }
     };
 
@@ -146,7 +165,7 @@ public class ResourceProcessorBusyBox {
           "The processing tool to execute. "
               + "Valid tools: PACKAGE, VALIDATE, GENERATE_BINARY_R, GENERATE_LIBRARY_R, PARSE, "
               + "MERGE, GENERATE_AAR, SHRINK, MERGE_MANIFEST, COMPILE_LIBRARY_RESOURCES, "
-              + "AAPT2_PACKAGE."
+              + "LINK_STATIC_LIBRARY, AAPT2_PACKAGE, SHRINK_AAPT2, MERGE_COMPILED."
     )
     public Tool tool;
   }
@@ -154,7 +173,8 @@ public class ResourceProcessorBusyBox {
   public static void main(String[] args) throws Exception {
     OptionsParser optionsParser = OptionsParser.newOptionsParser(Options.class);
     optionsParser.setAllowResidue(true);
-    optionsParser.enableParamsFileSupport(FileSystems.getDefault());
+    optionsParser.enableParamsFileSupport(
+        new ShellQuotedParamsFilePreProcessor(FileSystems.getDefault()));
     optionsParser.parse(args);
     Options options = optionsParser.getOptions(Options.class);
     options.tool.call(optionsParser.getResidue().toArray(new String[0]));

@@ -17,11 +17,11 @@ import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Root;
 import com.google.devtools.build.lib.analysis.FilesToRunProvider;
-import com.google.devtools.build.lib.analysis.RuleConfiguredTarget;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.Runfiles;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
+import com.google.devtools.build.lib.analysis.configuredtargets.RuleConfiguredTarget;
 import com.google.devtools.build.lib.util.FileType;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import java.util.HashMap;
@@ -125,7 +125,7 @@ public final class PythonUtils {
             .setExecutable(py2to3converter)
             .setProgressMessage("Converting to Python 3: %s", input.prettyPrint())
             .setMnemonic("2to3")
-            .setCommandLine(commandLine.build())
+            .addCommandLine(commandLine.build())
             .build(ruleContext));
     return output;
   }

@@ -13,17 +13,17 @@
 // limitations under the License.
 package com.google.devtools.build.lib.actions.cache;
 
+import com.google.common.base.Preconditions;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheStats;
 import com.google.common.io.BaseEncoding;
 import com.google.common.primitives.Longs;
+import com.google.devtools.build.lib.clock.BlazeClock;
 import com.google.devtools.build.lib.profiler.Profiler;
 import com.google.devtools.build.lib.profiler.ProfilerTask;
-import com.google.devtools.build.lib.util.BlazeClock;
 import com.google.devtools.build.lib.util.Fingerprint;
 import com.google.devtools.build.lib.util.LoggingUtil;
-import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.util.VarInt;
 import com.google.devtools.build.lib.vfs.FileStatus;
 import com.google.devtools.build.lib.vfs.Path;

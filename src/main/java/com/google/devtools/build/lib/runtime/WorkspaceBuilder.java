@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.runtime;
 
+import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
@@ -23,15 +24,13 @@ import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
 import com.google.devtools.build.lib.analysis.WorkspaceStatusAction;
 import com.google.devtools.build.lib.analysis.config.BinTools;
 import com.google.devtools.build.lib.packages.PackageFactory;
+import com.google.devtools.build.lib.profiler.memory.AllocationTracker;
 import com.google.devtools.build.lib.skyframe.DiffAwareness;
-import com.google.devtools.build.lib.skyframe.PrecomputedValue;
-import com.google.devtools.build.lib.skyframe.PrecomputedValue.Injected;
 import com.google.devtools.build.lib.skyframe.SequencedSkyframeExecutorFactory;
 import com.google.devtools.build.lib.skyframe.SkyValueDirtinessChecker;
 import com.google.devtools.build.lib.skyframe.SkyframeExecutor;
 import com.google.devtools.build.lib.skyframe.SkyframeExecutorFactory;
 import com.google.devtools.build.lib.util.AbruptExitException;
-import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyFunctionName;
@@ -54,10 +53,9 @@ public final class WorkspaceBuilder {
   // is inserted.
   private final ImmutableMap.Builder<SkyFunctionName, SkyFunction> skyFunctions =
       ImmutableMap.builder();
-  private final ImmutableList.Builder<PrecomputedValue.Injected> precomputedValues =
-      ImmutableList.builder();
   private final ImmutableList.Builder<SkyValueDirtinessChecker> customDirtinessCheckers =
       ImmutableList.builder();
+  private AllocationTracker allocationTracker;
 
   WorkspaceBuilder(BlazeDirectories directories, BinTools binTools) {
     this.directories = directories;
@@ -68,7 +66,6 @@ public final class WorkspaceBuilder {
       BlazeRuntime runtime,
       PackageFactory packageFactory,
       ConfiguredRuleClassProvider ruleClassProvider,
-      String productName,
       SubscriberExceptionHandler eventBusExceptionHandler) throws AbruptExitException {
     // Set default values if none are set.
     if (skyframeExecutorFactory == null) {
@@ -78,21 +75,25 @@ public final class WorkspaceBuilder {
       allowedMissingInputs = Predicates.alwaysFalse();
     }
 
-    SkyframeExecutor skyframeExecutor = skyframeExecutorFactory.create(
-        packageFactory,
-        directories,
-        binTools,
-        workspaceStatusActionFactory,
-        ruleClassProvider.getBuildInfoFactories(),
-        diffAwarenessFactories.build(),
-        allowedMissingInputs,
-        skyFunctions.build(),
-        precomputedValues.build(),
-        customDirtinessCheckers.build(),
-        productName);
+    SkyframeExecutor skyframeExecutor =
+        skyframeExecutorFactory.create(
+            packageFactory,
+            runtime.getFileSystem(),
+            directories,
+            workspaceStatusActionFactory,
+            ruleClassProvider.getBuildInfoFactories(),
+            diffAwarenessFactories.build(),
+            allowedMissingInputs,
+            skyFunctions.build(),
+            customDirtinessCheckers.build());
     return new BlazeWorkspace(
-        runtime, directories, skyframeExecutor, eventBusExceptionHandler,
-        workspaceStatusActionFactory, binTools);
+        runtime,
+        directories,
+        skyframeExecutor,
+        eventBusExceptionHandler,
+        workspaceStatusActionFactory,
+        binTools,
+        allocationTracker);
   }
 
   /**
@@ -118,6 +119,13 @@ public final class WorkspaceBuilder {
         "At most one workspace status action factory supported. But found two: %s and %s",
         this.workspaceStatusActionFactory, workspaceStatusActionFactory);
     this.workspaceStatusActionFactory = Preconditions.checkNotNull(workspaceStatusActionFactory);
+    return this;
+  }
+
+  public WorkspaceBuilder setAllocationTracker(AllocationTracker allocationTracker) {
+    Preconditions.checkState(
+        this.allocationTracker == null, "At most one allocation tracker can be set.");
+    this.allocationTracker = Preconditions.checkNotNull(allocationTracker);
     return this;
   }
 
@@ -155,27 +163,6 @@ public final class WorkspaceBuilder {
   /** Add "extra" SkyFunctions for SkyValues. */
   public WorkspaceBuilder addSkyFunctions(Map<SkyFunctionName, SkyFunction> skyFunctions) {
     this.skyFunctions.putAll(Preconditions.checkNotNull(skyFunctions));
-    return this;
-  }
-
-  /**
-   * Adds an extra precomputed value to Skyframe.
-   *
-   * <p>This functionality can be used to implement precomputed values that are not constant during
-   * the lifetime of a Blaze instance (naturally, they must be constant over the course of a build).
-   *
-   * <p>The following things must be done in order to define a new precomputed values:
-   * <ul>
-   * <li> Create a public static final variable of type
-   *     {@link com.google.devtools.build.lib.skyframe.PrecomputedValue.Precomputed}.
-   * <li> Set its value by adding an {@link Injected} via this method (it can be created using the
-   *     aforementioned variable and the value or a supplier of the value).
-   * <li> Reference the value in Skyframe functions by calling the {@code get} method on the
-   *     {@link com.google.devtools.build.lib.skyframe.PrecomputedValue.Precomputed} variable.
-   * </ul>
-   */
-  public WorkspaceBuilder addPrecomputedValue(PrecomputedValue.Injected precomputedValue) {
-    this.precomputedValues.add(Preconditions.checkNotNull(precomputedValue));
     return this;
   }
 

@@ -23,6 +23,7 @@ import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionInputPrefetcher;
 import com.google.devtools.build.lib.actions.ActionOwner;
+import com.google.devtools.build.lib.actions.ActionResult;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.analysis.util.ActionTester;
@@ -34,6 +35,7 @@ import com.google.devtools.build.lib.vfs.Path;
 import java.util.Collection;
 import org.junit.Before;
 
+/** Test cases for {@link FileWriteAction}. */
 public abstract class FileWriteActionTestCase extends BuildViewTestCase {
 
   private Action action;
@@ -52,7 +54,7 @@ public abstract class FileWriteActionTestCase extends BuildViewTestCase {
 
   @Before
   public final void createExecutorAndContext() throws Exception {
-    executor = new TestExecutorBuilder(directories, binTools).build();
+    executor = new TestExecutorBuilder(fileSystem, directories, binTools).build();
     context = new ActionExecutionContext(executor, null, ActionInputPrefetcher.NONE, null,
         new FileOutErr(), ImmutableMap.<String, String>of(), null);
   }
@@ -72,7 +74,8 @@ public abstract class FileWriteActionTestCase extends BuildViewTestCase {
   }
 
   protected void checkCanWriteNonExecutableFile() throws Exception {
-    action.execute(context);
+    ActionResult actionResult = action.execute(context);
+    assertThat(actionResult.spawnResults()).isEmpty();
     String content = new String(FileSystemUtils.readContentAsLatin1(output));
     assertThat(content).isEqualTo("Hello World");
     assertThat(output.isExecutable()).isFalse();
@@ -82,7 +85,8 @@ public abstract class FileWriteActionTestCase extends BuildViewTestCase {
     Artifact outputArtifact = getBinArtifactWithNoOwner("hello");
     Path output = outputArtifact.getPath();
     Action action = createAction(NULL_ACTION_OWNER, outputArtifact, "echo 'Hello World'", true);
-    action.execute(context);
+    ActionResult actionResult = action.execute(context);
+    assertThat(actionResult.spawnResults()).isEmpty();
     String content = new String(FileSystemUtils.readContentAsLatin1(output));
     assertThat(content).isEqualTo("echo 'Hello World'");
     assertThat(output.isExecutable()).isTrue();

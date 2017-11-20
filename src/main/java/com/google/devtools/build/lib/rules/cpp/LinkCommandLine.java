@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.rules.cpp;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
+import com.google.common.base.Preconditions;
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -36,7 +37,6 @@ import com.google.devtools.build.lib.rules.cpp.Link.LinkStaticness;
 import com.google.devtools.build.lib.rules.cpp.Link.LinkTargetType;
 import com.google.devtools.build.lib.rules.cpp.Link.Staticness;
 import com.google.devtools.build.lib.util.Pair;
-import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.util.ShellEscaper;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import java.util.ArrayList;
@@ -69,7 +69,7 @@ public final class LinkCommandLine extends CommandLine {
   private final ImmutableList<String> linkopts;
   private final ImmutableSet<String> features;
   private final ImmutableMap<Artifact, Artifact> linkstamps;
-  private final ImmutableList<String> linkstampCompileOptions;
+  private final ImmutableList<String> additionalLinkstampDefines;
   @Nullable private final String fdoBuildStamp;
   @Nullable private final PathFragment runtimeSolibDir;
   private final boolean nativeDeps;
@@ -92,7 +92,7 @@ public final class LinkCommandLine extends CommandLine {
       ImmutableList<String> linkopts,
       ImmutableSet<String> features,
       ImmutableMap<Artifact, Artifact> linkstamps,
-      ImmutableList<String> linkstampCompileOptions,
+      ImmutableList<String> additionalLinkstampDefines,
       @Nullable String fdoBuildStamp,
       @Nullable PathFragment runtimeSolibDir,
       boolean nativeDeps,
@@ -116,12 +116,13 @@ public final class LinkCommandLine extends CommandLine {
     this.linkTargetType = Preconditions.checkNotNull(linkTargetType);
     this.linkStaticness = Preconditions.checkNotNull(linkStaticness);
     // For now, silently ignore linkopts if this is a static library link.
-    this.linkopts = linkTargetType.staticness() == Staticness.STATIC
-        ? ImmutableList.<String>of()
-        : Preconditions.checkNotNull(linkopts);
+    this.linkopts =
+        linkTargetType.staticness() == Staticness.STATIC
+            ? ImmutableList.of()
+            : Preconditions.checkNotNull(linkopts);
     this.features = Preconditions.checkNotNull(features);
     this.linkstamps = Preconditions.checkNotNull(linkstamps);
-    this.linkstampCompileOptions = linkstampCompileOptions;
+    this.additionalLinkstampDefines = additionalLinkstampDefines;
     this.fdoBuildStamp = fdoBuildStamp;
     this.runtimeSolibDir = runtimeSolibDir;
     this.nativeDeps = nativeDeps;
@@ -135,9 +136,7 @@ public final class LinkCommandLine extends CommandLine {
     return paramFile;
   }
 
-  /**
-   * Returns the (ordered, immutable) list of header files that contain build info.
-   */
+  /** See {@link CppLinkAction#getBuildInfoHeaderArtifacts()} */
   public ImmutableList<Artifact> getBuildInfoHeaderArtifacts() {
     return buildInfoHeaderArtifacts;
   }
@@ -177,14 +176,8 @@ public final class LinkCommandLine extends CommandLine {
     return linkopts;
   }
 
-  /**
-   * Returns a (possibly empty) mapping of (C++ source file, .o output file) pairs for source files
-   * that need to be compiled at link time.
-   *
-   * <p>This is used to embed various values from the build system into binaries to identify their
-   * provenance.
-   */
-  public ImmutableMap<Artifact, Artifact> getLinkstamps() {
+  /** See {@link CppLinkAction#getLinkstamps()} */
+  protected ImmutableMap<Artifact, Artifact> getLinkstamps() {
     return linkstamps;
   }
 
@@ -356,7 +349,7 @@ public final class LinkCommandLine extends CommandLine {
 
     // Extra test-specific link options.
     if (useTestOnlyFlags) {
-      toolchainFlags.addAll(cppConfiguration.getTestOnlyLinkOptions());
+      toolchainFlags.addAll(ccProvider.getTestOnlyLinkOptions());
     }
 
     toolchainFlags.addAll(ccProvider.getLinkOptions());
@@ -397,8 +390,7 @@ public final class LinkCommandLine extends CommandLine {
     argv.addAll(
         featureConfiguration.getCommandLine(
             actionName,
-            new Variables.Builder()
-                .addAll(variables)
+            new Variables.Builder(variables)
                 .addStringSequenceVariable(
                     CppLinkActionBuilder.LEGACY_LINK_FLAGS_VARIABLE, getToolchainFlags())
                 .build()));
@@ -496,7 +488,7 @@ public final class LinkCommandLine extends CommandLine {
       return ImmutableList.copyOf(batchCommand);
     }
   }
-  
+
   private boolean isSharedNativeLibrary() {
     return nativeDeps && cppConfiguration.shareNativeDeps();
   }
@@ -519,80 +511,100 @@ public final class LinkCommandLine extends CommandLine {
       return ImmutableList.of();
     }
 
-    String compilerCommand = cppConfiguration.getCppExecutable().getPathString();
     List<String> commands = Lists.newArrayListWithCapacity(linkstamps.size());
 
     for (Map.Entry<Artifact, Artifact> linkstamp : linkstamps.entrySet()) {
-      List<String> optionList = new ArrayList<>();
+      Artifact sourceFile = linkstamp.getKey();
+      Artifact outputFile = linkstamp.getValue();
+      Variables linkstampVariables = collectLinkstampVariables(sourceFile, outputFile);
 
-      // Defines related to the build info are read from generated headers.
-      for (Artifact header : buildInfoHeaderArtifacts) {
-        optionList.add("-include");
-        optionList.add(header.getExecPathString());
-      }
-
-      String labelReplacement = Matcher.quoteReplacement(
-          isSharedNativeLibrary() ? output.getExecPathString() : Label.print(owner.getLabel()));
-      String outputPathReplacement = Matcher.quoteReplacement(
-          output.getExecPathString());
-      for (String option : linkstampCompileOptions) {
-        optionList.add(option
-            .replaceAll(Pattern.quote("${LABEL}"), labelReplacement)
-            .replaceAll(Pattern.quote("${OUTPUT_PATH}"), outputPathReplacement));
-      }
-
-      optionList.add("-DGPLATFORM=\"" + cppConfiguration + "\"");
-      optionList.add("-DBUILD_COVERAGE_ENABLED=" + (codeCoverageEnabled ? "1" : "0"));
-
-      // Needed to find headers included from linkstamps.
-      optionList.add("-I.");
-
-      // Add sysroot.
-      PathFragment sysroot = ccProvider.getSysroot();
-      if (sysroot != null) {
-        optionList.add("--sysroot=" + sysroot.getPathString());
-      }
-
-      // Add toolchain compiler options.
-      optionList.addAll(cppConfiguration.getCompilerOptions(features));
-      optionList.addAll(cppConfiguration.getCOptions());
-      optionList.addAll(ccProvider.getUnfilteredCompilerOptions(features));
-      if (CppFileTypes.CPP_SOURCE.matches(linkstamp.getKey().getExecPath())) {
-        optionList.addAll(cppConfiguration.getCxxOptions(features));
-      }
-
-      // For dynamic libraries, produce position independent code.
-      if (linkTargetType == LinkTargetType.DYNAMIC_LIBRARY
-          && cppConfiguration.toolchainNeedsPic()) {
-        optionList.add("-fPIC");
-      }
-
-      // Stamp FDO builds with FDO subtype string
-      if (fdoBuildStamp != null) {
-        optionList.add("-D" + CppConfiguration.FDO_STAMP_MACRO + "=\"" + fdoBuildStamp + "\"");
-      }
-
-      // Add the compilation target.
-      optionList.add("-c");
-      optionList.add(linkstamp.getKey().getExecPathString());
-
-      // Assemble the final command, exempting outputPrefix from shell escaping.
-      commands.add(compilerCommand + " "
-          + ShellEscaper.escapeJoinAll(optionList)
-          + " -o "
-          + outputPrefix
-          + ShellEscaper.escapeString(linkstamp.getValue().getExecPathString()));
+      ImmutableList.Builder<String> linkstampCompileCommandLine = ImmutableList.builder();
+      linkstampCompileCommandLine.add(
+          featureConfiguration
+              .getToolForAction(CppCompileAction.LINKSTAMP_COMPILE)
+              .getToolPath(cppConfiguration.getCrosstoolTopPathFragment())
+              .getPathString());
+      linkstampCompileCommandLine.addAll(
+          featureConfiguration.getCommandLine(
+              CppCompileAction.LINKSTAMP_COMPILE, linkstampVariables));
+      // TODO(b/28946988): Remove -c/-o hardcoded flags from bazel
+      linkstampCompileCommandLine.add("-c");
+      linkstampCompileCommandLine.add(sourceFile.getExecPathString());
+      linkstampCompileCommandLine.add("-o");
+      // outputPrefix is there only for cc_fake_binary, and it can contain env var expansions
+      // (such as $TEST_TMPDIR) and cannot be escaped. When we move linkstamping to a separate
+      // action, there will no longer be bash around the invocation and therefore no need to do
+      // shell escaping.
+      String escapedCommandWithoutOutput =
+          ShellEscaper.escapeJoinAll(linkstampCompileCommandLine.build());
+      commands.add(
+          escapedCommandWithoutOutput
+              + " "
+              + outputPrefix
+              + ShellEscaper.escapeString(outputFile.getExecPathString()));
     }
 
     return commands;
   }
 
-  /**
-   * A builder for a {@link LinkCommandLine}.
-   */
-  public static final class Builder {
-    // TODO(bazel-team): Pass this in instead of having it here. Maybe move to cc_toolchain.
-    private static final ImmutableList<String> DEFAULT_LINKSTAMP_OPTIONS = ImmutableList.of(
+  private Variables collectLinkstampVariables(Artifact sourceFile, Artifact outputFile) {
+    // TODO(b/34761650): Remove all this hardcoding by separating a full blown compile action.
+    Preconditions.checkArgument(
+        featureConfiguration.actionIsConfigured(CppCompileAction.LINKSTAMP_COMPILE));
+
+    Variables.Builder linkstampVariables = new Variables.Builder(ccProvider.getBuildVariables());
+    // We need to force inclusion of build_info headers
+    linkstampVariables.addStringSequenceVariable(
+        CppModel.INCLUDES_VARIABLE_NAME,
+        buildInfoHeaderArtifacts
+            .stream()
+            .map(Artifact::getExecPathString)
+            .collect(ImmutableList.toImmutableList()));
+    // Input/Output files.
+    linkstampVariables.addStringVariable(
+        CppModel.SOURCE_FILE_VARIABLE_NAME, sourceFile.getExecPathString());
+    linkstampVariables.addStringVariable(
+        CppModel.OUTPUT_OBJECT_FILE_VARIABLE_NAME, outputFile.getExecPathString());
+    // Include directories for (normal includes with ".", empty quote- and system- includes).
+    linkstampVariables.addStringSequenceVariable(
+        CppModel.INCLUDE_PATHS_VARIABLE_NAME, ImmutableList.of("."));
+    linkstampVariables.addStringSequenceVariable(
+        CppModel.QUOTE_INCLUDE_PATHS_VARIABLE_NAME, ImmutableList.of());
+    linkstampVariables.addStringSequenceVariable(
+        CppModel.SYSTEM_INCLUDE_PATHS_VARIABLE_NAME, ImmutableList.of());
+    // Legacy flags coming from fields such as compiler_flag
+    linkstampVariables.addLazyStringSequenceVariable(
+        CppModel.LEGACY_COMPILE_FLAGS_VARIABLE_NAME,
+        CppModel.getLegacyCompileFlagsSupplier(
+            cppConfiguration, sourceFile.getExecPathString(), features));
+    // Unfilterable flags coming from unfiltered_cxx_flag fields
+    linkstampVariables.addLazyStringSequenceVariable(
+        CppModel.UNFILTERED_COMPILE_FLAGS_VARIABLE_NAME,
+        CppModel.getUnfilteredCompileFlagsSupplier(ccProvider, features));
+    // Collect all preprocessor defines, and in each replace ${LABEL} by labelReplacements, and
+    // ${OUTPUT_PATH} with outputPathReplacement.
+    linkstampVariables.addStringSequenceVariable(
+        CppModel.PREPROCESSOR_DEFINES_VARIABLE_NAME,
+        computeAllLinkstampDefines());
+    // For dynamic libraries, produce position independent code.
+    if (cppConfiguration.forcePic()
+        || (linkTargetType == LinkTargetType.DYNAMIC_LIBRARY && ccProvider.toolchainNeedsPic())) {
+      linkstampVariables.addStringVariable(CppModel.PIC_VARIABLE_NAME, "");
+    }
+    return linkstampVariables.build();
+  }
+
+  private ImmutableList<String> computeAllLinkstampDefines() {
+    String labelReplacement =
+        Matcher.quoteReplacement(
+            isSharedNativeLibrary() ? output.getExecPathString() : Label.print(owner.getLabel()));
+    String outputPathReplacement = Matcher.quoteReplacement(output.getExecPathString());
+    String labelPattern = Pattern.quote("${LABEL}");
+    String outputPathPattern = Pattern.quote("${OUTPUT_PATH}");
+    ImmutableList.Builder<String> defines = ImmutableList.builder();
+    defines
+        .add("GPLATFORM=\"" + cppConfiguration + "\"")
+        .add("BUILD_COVERAGE_ENABLED=" + (codeCoverageEnabled ? "1" : "0"))
         // G3_VERSION_INFO and G3_TARGET_NAME are C string literals that normally
         // contain the label of the target being linked.  However, they are set
         // differently when using shared native deps. In that case, a single .so file
@@ -600,13 +612,31 @@ public final class LinkCommandLine extends CommandLine {
         // target(s) were specified on the command line.  So in that case we have
         // to use the (obscure) name of the .so file instead, or more precisely
         // the path of the .so file relative to the workspace root.
-        "-DG3_VERSION_INFO=\"${LABEL}\"",
-        "-DG3_TARGET_NAME=\"${LABEL}\"",
-
+        .add("G3_VERSION_INFO=\"${LABEL}\"")
+        .add("G3_TARGET_NAME=\"${LABEL}\"")
         // G3_BUILD_TARGET is a C string literal containing the output of this
         // link.  (An undocumented and untested invariant is that G3_BUILD_TARGET is the location of
         // the executable, either absolutely, or relative to the directory part of BUILD_INFO.)
-        "-DG3_BUILD_TARGET=\"${OUTPUT_PATH}\"");
+        .add("G3_BUILD_TARGET=\"${OUTPUT_PATH}\"")
+        .addAll(additionalLinkstampDefines);
+
+    if (fdoBuildStamp != null) {
+      defines.add(CppConfiguration.FDO_STAMP_MACRO + "=\"" + fdoBuildStamp + "\"");
+    }
+
+    return defines
+        .build()
+        .stream()
+        .map(
+            define ->
+                define
+                    .replaceAll(labelPattern, labelReplacement)
+                    .replaceAll(outputPathPattern, outputPathReplacement))
+        .collect(ImmutableList.toImmutableList());
+  }
+
+  /** A builder for a {@link LinkCommandLine}. */
+  public static final class Builder {
 
     private final BuildConfiguration configuration;
     private final ActionOwner owner;
@@ -622,7 +652,7 @@ public final class LinkCommandLine extends CommandLine {
     private ImmutableList<String> linkopts = ImmutableList.of();
     private ImmutableSet<String> features = ImmutableSet.of();
     private ImmutableMap<Artifact, Artifact> linkstamps = ImmutableMap.of();
-    private List<String> linkstampCompileOptions = new ArrayList<>();
+    private ImmutableList<String> additionalLinkstampDefines = ImmutableList.of();
     @Nullable private PathFragment runtimeSolibDir;
     private boolean nativeDeps;
     private boolean useTestOnlyFlags;
@@ -654,14 +684,6 @@ public final class LinkCommandLine extends CommandLine {
         Preconditions.checkArgument(
             buildInfoHeaderArtifacts.isEmpty(),
             "build info headers may only be present on dynamic library or executable links");
-      }
-
-      ImmutableList<String> actualLinkstampCompileOptions;
-      if (linkstampCompileOptions.isEmpty()) {
-        actualLinkstampCompileOptions = DEFAULT_LINKSTAMP_OPTIONS;
-      } else {
-        actualLinkstampCompileOptions = ImmutableList.copyOf(
-                Iterables.concat(DEFAULT_LINKSTAMP_OPTIONS, linkstampCompileOptions));
       }
 
       if (toolchain == null) {
@@ -700,7 +722,7 @@ public final class LinkCommandLine extends CommandLine {
           linkopts,
           features,
           linkstamps,
-          actualLinkstampCompileOptions,
+          additionalLinkstampDefines,
           CppHelper.getFdoBuildStamp(ruleContext, fdoSupport),
           runtimeSolibDir,
           nativeDeps,
@@ -804,12 +826,9 @@ public final class LinkCommandLine extends CommandLine {
       return this;
     }
 
-    /**
-     * Adds the given C++ compiler options to the list of options passed to the linkstamp
-     * compilation.
-     */
-    public Builder addLinkstampCompileOptions(List<String> linkstampCompileOptions) {
-      this.linkstampCompileOptions.addAll(linkstampCompileOptions);
+    /** Adds the given list of preprocessor defines to the linkstamp compilation. */
+    public Builder setAdditionalLinkstampDefines(ImmutableList<String> additionalLinkstampDefines) {
+      this.additionalLinkstampDefines = Preconditions.checkNotNull(additionalLinkstampDefines);
       return this;
     }
 

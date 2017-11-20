@@ -14,6 +14,7 @@
 
 package com.google.devtools.build.lib.rules.java;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap.Builder;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
@@ -23,7 +24,6 @@ import com.google.devtools.build.lib.skylarkinterface.SkylarkCallable;
 import com.google.devtools.build.lib.skylarkinterface.SkylarkModule;
 import com.google.devtools.build.lib.skylarkinterface.SkylarkModuleCategory;
 import com.google.devtools.build.lib.util.OsUtils;
-import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 /**
@@ -41,6 +41,7 @@ public final class Jvm extends BuildConfiguration.Fragment {
   private final PathFragment javaHome;
   private final Label jvmLabel;
   private final PathFragment java;
+  private final boolean enableMakeVariables;
 
   public static final String BIN_JAVA = "bin/java" + OsUtils.executableExtension();
 
@@ -49,11 +50,12 @@ public final class Jvm extends BuildConfiguration.Fragment {
    * and/or the {@code jvmLabel} parameter must be non-null. Only the
    * {@code jvmLabel} is optional.
    */
-  public Jvm(PathFragment javaHome, Label jvmLabel) {
+  public Jvm(PathFragment javaHome, Label jvmLabel, boolean enableMakeVariables) {
     Preconditions.checkArgument(javaHome.isAbsolute() || jvmLabel != null);
     this.javaHome = javaHome;
     this.jvmLabel = jvmLabel;
     this.java = javaHome.getRelative(BIN_JAVA);
+    this.enableMakeVariables = enableMakeVariables;
   }
 
   /**
@@ -80,9 +82,15 @@ public final class Jvm extends BuildConfiguration.Fragment {
     return jvmLabel;
   }
 
+  public PathFragment getJavaHome() {
+    return javaHome;
+  }
+
   @Override
   public void addGlobalMakeVariables(Builder<String, String> globalMakeEnvBuilder) {
-    globalMakeEnvBuilder.put("JAVABASE", javaHome.getPathString());
-    globalMakeEnvBuilder.put("JAVA", java.getPathString());
+    if (enableMakeVariables) {
+      globalMakeEnvBuilder.put("JAVABASE", javaHome.getPathString());
+      globalMakeEnvBuilder.put("JAVA", java.getPathString());
+    }
   }
 }

@@ -105,13 +105,13 @@ import javax.annotation.Nullable;
     category = SkylarkModuleCategory.BUILTIN,
     doc = "Data required for the analysis of a target that comes from targets that "
         + "depend on it and not targets that it depends on.")
-public final class BuildConfiguration implements BuildEvent {
+public class BuildConfiguration implements BuildEvent {
   /**
    * An interface for language-specific configurations.
    *
-   * <p>All implementations must be immutable and communicate this as clearly as possible
-   * (e.g. declare {@link ImmutableList} signatures on their interfaces vs. {@link List}).
-   * This is because fragment instances may be shared across configurations.
+   * <p>All implementations must be immutable and communicate this as clearly as possible (e.g.
+   * declare {@link ImmutableList} signatures on their interfaces vs. {@link List}). This is because
+   * fragment instances may be shared across configurations.
    */
   public abstract static class Fragment {
     /**
@@ -449,18 +449,19 @@ public final class BuildConfiguration implements BuildEvent {
       category = "semantics",
       documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
       effectTags = { OptionEffectTag.AFFECTS_OUTPUTS },
+      metadataTags = { OptionMetadataTag.EXPERIMENTAL },
       help = "Whether to have a separate genfiles directory or fold it into the bin directory"
     )
-
     public boolean separateGenfilesDirectory;
+
     @Option(
       name = "define",
       converter = Converters.AssignmentConverter.class,
       defaultValue = "",
       category = "semantics",
       allowMultiple = true,
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.OUTPUT_PARAMETERS,
+      effectTags = { OptionEffectTag.CHANGES_INPUTS, OptionEffectTag.AFFECTS_OUTPUTS },
       help = "Each --define option specifies an assignment for a build variable."
     )
     public List<Map.Entry<String, String>> commandLineBuildVariables;
@@ -470,34 +471,20 @@ public final class BuildConfiguration implements BuildEvent {
       defaultValue = "",
       category = "semantics",
       converter = AutoCpuConverter.class,
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.OUTPUT_PARAMETERS,
+      effectTags = { OptionEffectTag.CHANGES_INPUTS, OptionEffectTag.AFFECTS_OUTPUTS },
       help = "The target CPU."
     )
     public String cpu;
-
-    /**
-     * Allows a configuration to record if --experimental_multi_cpu was used to set a cpu value.
-     * This is necessary to ensure that a configuration transition that sets cpu does not erase the
-     * difference between a pair of configurations created by --experimental_multi_cpu, leading to a
-     * crash when the configurations are treated as the same.
-     *
-     * <p>TODO(b/33780512): Remove once dynamic configurations are used.
-     */
-    @Option(
-      name = "experimental multi cpu distinguisher",
-      defaultValue = "",
-      documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
-      effectTags = {OptionEffectTag.UNKNOWN},
-      metadataTags = {OptionMetadataTag.INTERNAL}
-    )
-    public String experimentalMultiCpuDistinguisher;
 
     @Option(
       name = "min_param_file_size",
       defaultValue = "32768",
       documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      effectTags = {
+          OptionEffectTag.LOADING_AND_ANALYSIS,
+          OptionEffectTag.EXECUTION,
+          OptionEffectTag.ACTION_COMMAND_LINES},
       help = "Minimum command line length before creating a parameter file."
     )
     public int minParamFileSize;
@@ -506,7 +493,8 @@ public final class BuildConfiguration implements BuildEvent {
       name = "experimental_extended_sanity_checks",
       defaultValue = "false",
       documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      effectTags = { OptionEffectTag.BAZEL_INTERNAL_CONFIGURATION },
+      metadataTags = { OptionMetadataTag.EXPERIMENTAL },
       help =
           "Enables internal validation checks to make sure that configured target "
               + "implementations only access things they should. Causes a performance hit."
@@ -514,22 +502,11 @@ public final class BuildConfiguration implements BuildEvent {
     public boolean extendedSanityChecks;
 
     @Option(
-      name = "experimental_allow_runtime_deps_on_neverlink",
-      defaultValue = "true",
-      documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
-      effectTags = {OptionEffectTag.UNKNOWN},
-      help =
-          "Flag to help transition from allowing to disallowing runtime_deps on neverlink"
-              + " Java archives. The depot needs to be cleaned up to roll this out by default."
-    )
-    public boolean allowRuntimeDepsOnNeverLink;
-
-    @Option(
       name = "strict_filesets",
       defaultValue = "false",
       category = "semantics",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.INPUT_STRICTNESS,
+      effectTags = { OptionEffectTag.BUILD_FILE_SEMANTICS, OptionEffectTag.EAGERNESS_TO_EXIT },
       help =
           "If this option is enabled, filesets crossing package boundaries are reported "
               + "as errors. It does not work when check_fileset_dependencies_recursively is "
@@ -537,40 +514,12 @@ public final class BuildConfiguration implements BuildEvent {
     )
     public boolean strictFilesets;
 
-    // Plugins are build using the host config. To avoid cycles we just don't propagate
-    // this option to the host config. If one day we decide to use plugins when building
-    // host tools, we can improve this by (for example) creating a compiler configuration that is
-    // used only for building plugins.
-    @Option(
-      name = "plugin",
-      converter = LabelListConverter.class,
-      allowMultiple = true,
-      defaultValue = "",
-      category = "flags",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
-      help = "Plugins to use in the build. Currently works with java_plugin."
-    )
-    public List<Label> pluginList;
-
-    @Option(
-      name = "plugin_copt",
-      converter = PluginOptionConverter.class,
-      allowMultiple = true,
-      category = "flags",
-      defaultValue = ":",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
-      help = "Plugin options"
-    )
-    public List<Map.Entry<String, String>> pluginCoptList;
-
     @Option(
       name = "stamp",
       defaultValue = "false",
       category = "semantics",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.OUTPUT_PARAMETERS,
+      effectTags = { OptionEffectTag.AFFECTS_OUTPUTS },
       help = "Stamp binaries with the date, username, hostname, workspace information, etc."
     )
     public boolean stampBinaries;
@@ -582,8 +531,8 @@ public final class BuildConfiguration implements BuildEvent {
       converter = RegexFilter.RegexFilterConverter.class,
       defaultValue = "-/javatests[/:],-/test/java[/:]",
       category = "semantics",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.OUTPUT_PARAMETERS,
+      effectTags = { OptionEffectTag.AFFECTS_OUTPUTS },
       help =
           "When coverage is enabled, only rules with names included by the "
               + "specified regex-based filter will be instrumented. Rules prefixed "
@@ -596,8 +545,8 @@ public final class BuildConfiguration implements BuildEvent {
       name = "instrument_test_targets",
       defaultValue = "false",
       category = "semantics",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.OUTPUT_PARAMETERS,
+      effectTags = { OptionEffectTag.AFFECTS_OUTPUTS },
       help =
           "When coverage is enabled, specifies whether to consider instrumenting test rules. "
               + "When set, test rules included by --instrumentation_filter are instrumented. "
@@ -610,8 +559,8 @@ public final class BuildConfiguration implements BuildEvent {
       defaultValue = "",
       category = "semantics",
       converter = AutoCpuConverter.class,
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.OUTPUT_PARAMETERS,
+      effectTags = { OptionEffectTag.CHANGES_INPUTS, OptionEffectTag.AFFECTS_OUTPUTS },
       help = "The host CPU."
     )
     public String hostCpu;
@@ -622,8 +571,8 @@ public final class BuildConfiguration implements BuildEvent {
       converter = CompilationMode.Converter.class,
       defaultValue = "fastbuild",
       category = "semantics", // Should this be "flags"?
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.OUTPUT_PARAMETERS,
+      effectTags = { OptionEffectTag.AFFECTS_OUTPUTS, OptionEffectTag.ACTION_COMMAND_LINES },
       help = "Specify the mode the binary will be built in. " + "Values: 'fastbuild', 'dbg', 'opt'."
     )
     public CompilationMode compilationMode;
@@ -637,8 +586,12 @@ public final class BuildConfiguration implements BuildEvent {
       name = "output directory name",
       defaultValue = "null",
       documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
-      effectTags = {OptionEffectTag.UNKNOWN},
-      metadataTags = {OptionMetadataTag.INTERNAL}
+      effectTags = {
+          OptionEffectTag.LOSES_INCREMENTAL_STATE,
+          OptionEffectTag.AFFECTS_OUTPUTS,
+          OptionEffectTag.LOADING_AND_ANALYSIS
+      },
+      metadataTags = { OptionMetadataTag.INTERNAL }
     )
     public String outputDirectoryName;
 
@@ -646,8 +599,12 @@ public final class BuildConfiguration implements BuildEvent {
       name = "platform_suffix",
       defaultValue = "null",
       category = "misc",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.OUTPUT_PARAMETERS,
+      effectTags = {
+          OptionEffectTag.LOSES_INCREMENTAL_STATE,
+          OptionEffectTag.AFFECTS_OUTPUTS,
+          OptionEffectTag.LOADING_AND_ANALYSIS
+      },
       help = "Specifies a suffix to be added to the configuration directory."
     )
     public String platformSuffix;
@@ -661,8 +618,8 @@ public final class BuildConfiguration implements BuildEvent {
       allowMultiple = true,
       defaultValue = "",
       category = "testing",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.TESTING,
+      effectTags = { OptionEffectTag.TEST_RUNNER },
       help =
           "Specifies additional environment variables to be injected into the test runner "
               + "environment. Variables can be either specified by name, in which case its value "
@@ -681,8 +638,8 @@ public final class BuildConfiguration implements BuildEvent {
       allowMultiple = true,
       defaultValue = "",
       category = "semantics",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.OUTPUT_PARAMETERS,
+      effectTags = { OptionEffectTag.ACTION_COMMAND_LINES},
       help =
           "Specifies the set of environment variables available to actions. "
               + "Variables can be either specified by name, in which case the value will be "
@@ -697,8 +654,8 @@ public final class BuildConfiguration implements BuildEvent {
       name = "collect_code_coverage",
       defaultValue = "false",
       category = "testing",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.OUTPUT_PARAMETERS,
+      effectTags = { OptionEffectTag.AFFECTS_OUTPUTS },
       help =
           "If specified, Bazel will instrument code (using offline instrumentation where "
               + "possible) and will collect coverage information during tests. Only targets that "
@@ -712,8 +669,12 @@ public final class BuildConfiguration implements BuildEvent {
       converter = LabelConverter.class,
       defaultValue = "@bazel_tools//tools/test:coverage_support",
       category = "testing",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.TOOLCHAIN,
+      effectTags = {
+          OptionEffectTag.CHANGES_INPUTS,
+          OptionEffectTag.AFFECTS_OUTPUTS,
+          OptionEffectTag.LOADING_AND_ANALYSIS
+      },
       help =
           "Location of support files that are required on the inputs of every test action "
               + "that collects code coverage. Defaults to '//tools/test:coverage_support'."
@@ -725,8 +686,12 @@ public final class BuildConfiguration implements BuildEvent {
       converter = LabelConverter.class,
       defaultValue = "@bazel_tools//tools/test:coverage_report_generator",
       category = "testing",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.TOOLCHAIN,
+      effectTags = {
+          OptionEffectTag.CHANGES_INPUTS,
+          OptionEffectTag.AFFECTS_OUTPUTS,
+          OptionEffectTag.LOADING_AND_ANALYSIS
+      },
       help =
           "Location of the binary that is used to generate coverage reports. This must "
               + "currently be a filegroup that contains a single file, the binary. Defaults to "
@@ -738,8 +703,13 @@ public final class BuildConfiguration implements BuildEvent {
       name = "experimental_use_llvm_covmap",
       defaultValue = "false",
       category = "experimental",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.OUTPUT_PARAMETERS,
+      effectTags = {
+          OptionEffectTag.CHANGES_INPUTS,
+          OptionEffectTag.AFFECTS_OUTPUTS,
+          OptionEffectTag.LOADING_AND_ANALYSIS
+      },
+      metadataTags = { OptionMetadataTag.EXPERIMENTAL },
       help =
           "If specified, Bazel will generate llvm-cov coverage map information rather than "
               + "gcov when collect_code_coverage is enabled."
@@ -750,8 +720,8 @@ public final class BuildConfiguration implements BuildEvent {
       name = "build_runfile_manifests",
       defaultValue = "true",
       category = "strategy",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.OUTPUT_SELECTION,
+      effectTags = { OptionEffectTag.AFFECTS_OUTPUTS },
       help =
           "If true, write runfiles manifests for all targets.  "
               + "If false, omit them."
@@ -762,8 +732,8 @@ public final class BuildConfiguration implements BuildEvent {
       name = "build_runfile_links",
       defaultValue = "true",
       category = "strategy",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.OUTPUT_SELECTION,
+      effectTags = { OptionEffectTag.AFFECTS_OUTPUTS },
       help =
           "If true, build runfiles symlink forests for all targets.  "
               + "If false, write only manifests when possible."
@@ -774,20 +744,25 @@ public final class BuildConfiguration implements BuildEvent {
       name = "legacy_external_runfiles",
       defaultValue = "true",
       category = "strategy",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.OUTPUT_SELECTION,
+      effectTags = { OptionEffectTag.AFFECTS_OUTPUTS },
       help =
           "If true, build runfiles symlink forests for external repositories under "
               + ".runfiles/wsname/external/repo (in addition to .runfiles/repo)."
     )
     public boolean legacyExternalRunfiles;
 
+    @Deprecated
     @Option(
       name = "check_fileset_dependencies_recursively",
       defaultValue = "true",
       category = "semantics",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
+      deprecationWarning = "Setting this to false is unsupported and will go away soon as it leads "
+          + "to incorrect results. Please contact kush@ with your use case if you need "
+          + "to continue setting this flag to false. If you're setting this to true then stop "
+          + "setting this flag to stop this warning.",
+      effectTags = { OptionEffectTag.AFFECTS_OUTPUTS },
       help =
           "If false, fileset targets will, whenever possible, create "
               + "symlinks to directories instead of creating one symlink for each "
@@ -802,8 +777,9 @@ public final class BuildConfiguration implements BuildEvent {
       name = "experimental_skyframe_native_filesets",
       defaultValue = "false",
       category = "experimental",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.BUILD_TIME_OPTIMIZATION,
+      effectTags = { OptionEffectTag.BAZEL_INTERNAL_CONFIGURATION },
+      metadataTags = { OptionMetadataTag.EXPERIMENTAL },
       help =
           "If true, Blaze will use the skyframe-native implementation of the Fileset rule."
               + " This offers improved performance in incremental builds of Filesets as well as"
@@ -817,8 +793,8 @@ public final class BuildConfiguration implements BuildEvent {
       category = "run",
       defaultValue = "null",
       converter = RunUnderConverter.class,
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.OUTPUT_PARAMETERS,
+      effectTags = { OptionEffectTag.ACTION_COMMAND_LINES},
       help =
           "Prefix to insert in front of command before running. "
               + "Examples:\n"
@@ -835,8 +811,12 @@ public final class BuildConfiguration implements BuildEvent {
       name = "distinct_host_configuration",
       defaultValue = "true",
       category = "strategy",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.BUILD_TIME_OPTIMIZATION,
+      effectTags = {
+          OptionEffectTag.LOSES_INCREMENTAL_STATE,
+          OptionEffectTag.BAZEL_INTERNAL_CONFIGURATION,
+          OptionEffectTag.LOADING_AND_ANALYSIS,
+      },
       help =
           "Build all the tools used during the build for a distinct configuration from that used "
               + "for the target program. When this is disabled, the same configuration is used for "
@@ -856,8 +836,8 @@ public final class BuildConfiguration implements BuildEvent {
       name = "check_visibility",
       defaultValue = "true",
       category = "checking",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.INPUT_STRICTNESS,
+      effectTags = { OptionEffectTag.BUILD_FILE_SEMANTICS },
       help = "If disabled, visibility errors are demoted to warnings."
     )
     public boolean checkVisibility;
@@ -869,8 +849,8 @@ public final class BuildConfiguration implements BuildEvent {
       name = "check_licenses",
       defaultValue = "false",
       category = "checking",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.INPUT_STRICTNESS,
+      effectTags = { OptionEffectTag.BUILD_FILE_SEMANTICS },
       help =
           "Check that licensing constraints imposed by dependent packages "
               + "do not conflict with distribution modes of the targets being built. "
@@ -881,8 +861,8 @@ public final class BuildConfiguration implements BuildEvent {
     @Option(
       name = "enforce_constraints",
       defaultValue = "true",
-      documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.INPUT_STRICTNESS,
+      effectTags = { OptionEffectTag.BUILD_FILE_SEMANTICS },
       help =
           "Checks the environments each target is compatible with and reports errors if any "
               + "target has dependencies that don't support the same environments",
@@ -896,8 +876,9 @@ public final class BuildConfiguration implements BuildEvent {
       defaultValue = "",
       category = "experimental",
       converter = LabelListConverter.class,
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.OUTPUT_PARAMETERS,
+      effectTags = { OptionEffectTag.EXECUTION },
+      metadataTags = { OptionMetadataTag.EXPERIMENTAL },
       help = "Use action_listener to attach an extra_action to existing build actions."
     )
     public List<Label> actionListeners;
@@ -909,7 +890,8 @@ public final class BuildConfiguration implements BuildEvent {
       name = "experimental_transparent_compression",
       defaultValue = "true",
       documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      effectTags = { OptionEffectTag.BAZEL_INTERNAL_CONFIGURATION },
+      metadataTags = { OptionMetadataTag.EXPERIMENTAL },
       help =
           "Enables gzip compression for the contents of FileWriteActions, which reduces "
               + "memory usage in the analysis phase at the expense of additional time overhead."
@@ -920,8 +902,8 @@ public final class BuildConfiguration implements BuildEvent {
       name = "is host configuration",
       defaultValue = "false",
       documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
-      effectTags = {OptionEffectTag.UNKNOWN},
-      metadataTags = {OptionMetadataTag.INTERNAL},
+      effectTags = { OptionEffectTag.BAZEL_INTERNAL_CONFIGURATION },
+      metadataTags = { OptionMetadataTag.INTERNAL },
       help = "Shows whether these options are set for host configuration."
     )
     public boolean isHost;
@@ -931,8 +913,8 @@ public final class BuildConfiguration implements BuildEvent {
       allowMultiple = true,
       defaultValue = "",
       category = "flags",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.OUTPUT_PARAMETERS,
+      effectTags = { OptionEffectTag.CHANGES_INPUTS, OptionEffectTag.AFFECTS_OUTPUTS },
       help =
           "The given features will be enabled or disabled by default for all packages. "
               + "Specifying -<feature> will disable the feature globally. "
@@ -948,8 +930,8 @@ public final class BuildConfiguration implements BuildEvent {
       allowMultiple = true,
       defaultValue = "",
       category = "flags",
-      documentationCategory = OptionDocumentationCategory.EXECUTION_STRATEGY,
-      effectTags = {OptionEffectTag.LOADING_AND_ANALYSIS},
+      documentationCategory = OptionDocumentationCategory.INPUT_STRICTNESS,
+      effectTags = { OptionEffectTag.CHANGES_INPUTS },
       help =
           "Declares this build's target environment. Must be a label reference to an "
               + "\"environment\" rule. If specified, all top-level targets must be "
@@ -958,12 +940,12 @@ public final class BuildConfiguration implements BuildEvent {
     public List<Label> targetEnvironments;
 
     @Option(
-      name = "experimental_auto_cpu_environment_group",
+      name = "auto_cpu_environment_group",
       converter = EmptyToNullLabelConverter.class,
       defaultValue = "",
       category = "flags",
-      documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
-      effectTags = {OptionEffectTag.LOADING_AND_ANALYSIS},
+      documentationCategory = OptionDocumentationCategory.INPUT_STRICTNESS,
+      effectTags = {OptionEffectTag.CHANGES_INPUTS, OptionEffectTag.LOADING_AND_ANALYSIS},
       metadataTags = {OptionMetadataTag.EXPERIMENTAL},
       help =
           "Declare the environment_group to use for automatically mapping cpu values to "
@@ -971,60 +953,77 @@ public final class BuildConfiguration implements BuildEvent {
     )
     public Label autoCpuEnvironmentGroup;
 
-    /**
-     * Values for --experimental_dynamic_configs.
-     */
-    public enum DynamicConfigsMode {
-      /** Use dynamic configurations, including only the fragments each rule needs. */
+    /** The source of make variables for this configuration. */
+    public enum MakeVariableSource {
+      CONFIGURATION,
+      TOOLCHAIN
+    }
+
+    /** Converter for --make_variables_source. */
+    public static class MakeVariableSourceConverter extends EnumConverter<MakeVariableSource> {
+      public MakeVariableSourceConverter() {
+        super(MakeVariableSource.class, "Make variable source");
+      }
+    }
+
+    @Option(
+      name = "make_variables_source",
+      converter = MakeVariableSourceConverter.class,
+      defaultValue = "configuration",
+      metadataTags = {OptionMetadataTag.HIDDEN},
+      documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
+      effectTags = {OptionEffectTag.UNKNOWN}
+    )
+    public MakeVariableSource makeVariableSource;
+
+    /** Values for --experimental_dynamic_configs. */
+    public enum ConfigsMode {
+      /** Only include the configuration fragments each rule needs. */
       ON,
-      /** Use dynamic configurations, always including all fragments known to Blaze. */
+      /** Always including all fragments known to Blaze. */
       NOTRIM,
     }
 
     /**
      * Converter for --experimental_dynamic_configs.
      */
-    public static class DynamicConfigsConverter extends EnumConverter<DynamicConfigsMode> {
-      public DynamicConfigsConverter() {
-        super(DynamicConfigsMode.class, "dynamic configurations mode");
+    public static class ConfigsModeConverter extends EnumConverter<ConfigsMode> {
+      public ConfigsModeConverter() {
+        super(ConfigsMode.class, "configurations mode");
       }
     }
 
     @Option(
       name = "experimental_dynamic_configs",
       defaultValue = "notrim",
-      converter = DynamicConfigsConverter.class,
+      converter = ConfigsModeConverter.class,
       documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      effectTags = {
+          OptionEffectTag.LOSES_INCREMENTAL_STATE,
+          OptionEffectTag.BAZEL_INTERNAL_CONFIGURATION,
+          OptionEffectTag.LOADING_AND_ANALYSIS,
+      },
+      metadataTags = { OptionMetadataTag.EXPERIMENTAL },
       help =
-          "Dynamically instantiates build configurations instead of using the default "
-              + "static globally defined ones"
+          "Instantiates build configurations with the specified properties"
     )
-    public DynamicConfigsMode useDynamicConfigurations;
+    public ConfigsMode configsMode;
 
     @Option(
       name = "experimental_enable_runfiles",
       defaultValue = "auto",
       documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      effectTags = { OptionEffectTag.AFFECTS_OUTPUTS },
+      metadataTags = { OptionMetadataTag.EXPERIMENTAL },
       help = "Enable runfiles; off on Windows, on on other platforms"
     )
     public TriState enableRunfiles;
 
     @Option(
-      name = "build_python_zip",
-      defaultValue = "auto",
-      documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
-      effectTags = {OptionEffectTag.UNKNOWN},
-      help = "Build python executable zip; on on Windows, off on other platforms"
-    )
-    public TriState buildPythonZip;
-
-    @Option(
       name = "windows_exe_launcher",
       defaultValue = "true",
       documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      effectTags = { OptionEffectTag.CHANGES_INPUTS, OptionEffectTag.AFFECTS_OUTPUTS },
       help =
           "Build a Windows exe launcher for sh_binary rule, "
               + "it has no effect on other platforms than Windows"
@@ -1032,28 +1031,19 @@ public final class BuildConfiguration implements BuildEvent {
     public boolean windowsExeLauncher;
 
     @Override
-    public FragmentOptions getHost(boolean fallback) {
+    public FragmentOptions getHost() {
       Options host = (Options) getDefault();
 
       host.outputDirectoryName = "host";
       host.compilationMode = CompilationMode.OPT;
       host.isHost = true;
-      host.useDynamicConfigurations = useDynamicConfigurations;
+      host.configsMode = configsMode;
       host.enableRunfiles = enableRunfiles;
-      host.buildPythonZip = buildPythonZip;
       host.windowsExeLauncher = windowsExeLauncher;
       host.commandLineBuildVariables = commandLineBuildVariables;
       host.enforceConstraints = enforceConstraints;
       host.separateGenfilesDirectory = separateGenfilesDirectory;
-
-      if (fallback) {
-        // In the fallback case, we have already tried the target options and they didn't work, so
-        // now we try the default options; the hostCpu field has the default value, because we use
-        // getDefault() above.
-        host.cpu = host.hostCpu;
-      } else {
-        host.cpu = hostCpu;
-      }
+      host.cpu = hostCpu;
 
       // === Runfiles ===
       host.buildRunfilesManifests = buildRunfilesManifests;
@@ -1072,9 +1062,6 @@ public final class BuildConfiguration implements BuildEvent {
 
       // === Fileset ===
       host.skyframeNativeFileset = skyframeNativeFileset;
-
-      // === Allow runtime_deps to depend on neverlink Java libraries.
-      host.allowRuntimeDepsOnNeverLink = allowRuntimeDepsOnNeverLink;
 
       // === Pass on C++ compiler features.
       host.defaultFeatures = ImmutableList.copyOf(defaultFeatures);
@@ -1234,9 +1221,9 @@ public final class BuildConfiguration implements BuildEvent {
    * Returns true if this configuration is semantically equal to the other, with
    * the possible exception that the other has fewer fragments.
    *
-   * <p>This is useful for dynamic configurations - as the same configuration gets "trimmed" while
-   * going down a dependency chain, it's still the same configuration but loses some of its
-   * fragments. So we need a more nuanced concept of "equality" than simple reference equality.
+   * <p>This is useful for trimming: as the same configuration gets "trimmed" while going down a
+   * dependency chain, it's still the same configuration but loses some of its fragments. So we need
+   * a more nuanced concept of "equality" than simple reference equality.
    */
   public boolean equalsOrIsSupersetOf(BuildConfiguration other) {
     return this.equals(other)
@@ -1294,20 +1281,6 @@ public final class BuildConfiguration implements BuildEvent {
   public void reportInvalidOptions(EventHandler reporter) {
     for (Fragment fragment : fragments.values()) {
       fragment.reportInvalidOptions(reporter, this.buildOptions);
-    }
-
-    Set<String> plugins = new HashSet<>();
-    for (Label plugin : options.pluginList) {
-      String name = plugin.getName();
-      if (plugins.contains(name)) {
-        reporter.handle(Event.error("A build cannot have two plugins with the same name"));
-      }
-      plugins.add(name);
-    }
-    for (Map.Entry<String, String> opt : options.pluginCoptList) {
-      if (!plugins.contains(opt.getKey())) {
-        reporter.handle(Event.error("A plugin_copt must refer to an existing plugin"));
-      }
     }
 
     if (options.outputDirectoryName != null) {
@@ -1379,9 +1352,6 @@ public final class BuildConfiguration implements BuildEvent {
 
   /**
    * Constructs a new BuildConfiguration instance.
-   *
-   * <p>Callers that pass null for {@code dynamicTransitionMapper} should not use dynamic
-   * configurations.
    */
   public BuildConfiguration(BlazeDirectories directories,
       Map<Class<? extends Fragment>, Fragment> fragmentsMap,
@@ -1698,16 +1668,8 @@ public final class BuildConfiguration implements BuildEvent {
             repositoryName, outputDirName, directories, mainRepositoryName);
   }
 
-  public boolean getAllowRuntimeDepsOnNeverLink() {
-    return options.allowRuntimeDepsOnNeverLink;
-  }
-
   public boolean isStrictFilesets() {
     return options.strictFilesets;
-  }
-
-  public List<Label> getPlugins() {
-    return options.pluginList;
   }
 
   public String getMainRepositoryName() {
@@ -1763,7 +1725,7 @@ public final class BuildConfiguration implements BuildEvent {
    * client's own environment, and are returned by this function.
    *
    * <p>The values of the "variable" variables are tracked in Skyframe via the {@link
-   * com.google.devtools.build.lib.skyframe.SkyFunctions.CLIENT_ENVIRONMENT_VARIABLE} skyfunction.
+   * com.google.devtools.build.lib.skyframe.SkyFunctions#CLIENT_ENVIRONMENT_VARIABLE} skyfunction.
    * This method only returns the names of those variables to be inherited, if set in the client's
    * environment. (Variables where the name is not returned in this set should not be taken from the
    * client environment.)
@@ -2000,11 +1962,11 @@ public final class BuildConfiguration implements BuildEvent {
   }
 
   /**
-   * Returns whether we should trim dynamic configurations to only include the fragments needed
-   * to correctly analyze a rule.
+   * Returns whether we should trim configurations to only include the fragments needed to correctly
+   * analyze a rule.
    */
   public boolean trimConfigurations() {
-    return options.useDynamicConfigurations == Options.DynamicConfigsMode.ON;
+    return options.configsMode == Options.ConfigsMode.ON;
   }
 
   /**
@@ -2015,7 +1977,7 @@ public final class BuildConfiguration implements BuildEvent {
   }
 
   /** Returns the cache key of the build options used to create this configuration. */
-  public final String checksum() {
+  public String checksum() {
     return checksum;
   }
 
@@ -2031,9 +1993,9 @@ public final class BuildConfiguration implements BuildEvent {
    * <p><b>Be very careful using this method.</b> Options classes are mutable - no caller
    * should ever call this method if there's any change the reference might be written to.
    * This method only exists because {@link #cloneOptions} can be expensive when applied to
-   * every edge in a dependency graph, which becomes possible with dynamic configurations.
+   * every edge in a dependency graph.
    *
-   * <p>Do not use this method without careful review with other Bazel developers..
+   * <p>Do not use this method without careful review with other Bazel developers.
    */
   public BuildOptions getOptions() {
     return buildOptions;
@@ -2056,17 +2018,6 @@ public final class BuildConfiguration implements BuildEvent {
         return false;
       default:
         return OS.getCurrent() != OS.WINDOWS;
-    }
-  }
-
-  public boolean buildPythonZip() {
-    switch (options.buildPythonZip) {
-      case YES:
-        return true;
-      case NO:
-        return false;
-      default:
-        return OS.getCurrent() == OS.WINDOWS;
     }
   }
 
@@ -2182,7 +2133,7 @@ public final class BuildConfiguration implements BuildEvent {
     BuildEventStreamProtos.Configuration.Builder builder =
         BuildEventStreamProtos.Configuration.newBuilder()
             .setMnemonic(getMnemonic())
-            .setPlatformName(getPlatformName())
+            .setPlatformName(getCpu())
             .putAllMakeVariable(getMakeEnvironment())
             .setCpu(getCpu());
     return GenericBuildEvent.protoChaining(this).setConfiguration(builder.build()).build();

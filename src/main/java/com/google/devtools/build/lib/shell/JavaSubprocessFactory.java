@@ -26,7 +26,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * A subprocess factory that uses {@link java.lang.ProcessBuilder}.
  */
-public class JavaSubprocessFactory implements Subprocess.Factory {
+public class JavaSubprocessFactory implements SubprocessFactory {
 
   /**
    * A subprocess backed by a {@link java.lang.Process}.
@@ -135,6 +135,7 @@ public class JavaSubprocessFactory implements Subprocess.Factory {
 
     builder.redirectOutput(getRedirect(params.getStdout(), params.getStdoutFile()));
     builder.redirectError(getRedirect(params.getStderr(), params.getStderrFile()));
+    builder.redirectErrorStream(params.redirectErrorStream());
     builder.directory(params.getWorkingDirectory());
 
     // Deadline is now + given timeout.

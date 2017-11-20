@@ -17,12 +17,13 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ParameterFile.ParameterFileType;
-import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
+import com.google.devtools.build.lib.analysis.actions.ParamFileInfo;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
+import com.google.devtools.build.lib.analysis.configuredtargets.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
@@ -333,7 +334,7 @@ public class AndroidIdlHelper {
             .addOutput(idlClassJar)
             .addOutput(idlSourceJar)
             .setExecutable(ruleContext.getExecutablePrerequisite("$idlclass", Mode.HOST))
-            .setCommandLine(
+            .addCommandLine(
                 CustomCommandLine.builder()
                     .addExecPath("--manifest_proto", manifestProtoOutput)
                     .addExecPath("--class_jar", classJar)
@@ -342,8 +343,8 @@ public class AndroidIdlHelper {
                     .add("--temp_dir")
                     .addPath(idlTempDir)
                     .addExecPaths(ImmutableList.copyOf(generatedIdlJavaFiles))
-                    .build())
-            .useParameterFile(ParameterFileType.SHELL_QUOTED)
+                    .build(),
+                ParamFileInfo.builder(ParameterFileType.SHELL_QUOTED).build())
             .setProgressMessage("Building idl jars %s", idlClassJar.prettyPrint())
             .setMnemonic("AndroidIdlJars")
             .build(ruleContext));
@@ -371,8 +372,8 @@ public class AndroidIdlHelper {
             .addInputs(getIdlPreprocessed(ruleContext))
             .addOutput(output)
             .setProgressMessage("Android IDL generation")
-            .setMnemonic("AndroidIDLGnerate")
-            .setCommandLine(
+            .setMnemonic("AndroidIDLGenerate")
+            .addCommandLine(
                 CustomCommandLine.builder()
                     .add("-b") // Fail if trying to compile a parcelable.
                     .addAll(importArgs)

@@ -15,20 +15,18 @@
 package com.google.devtools.build.lib.analysis.config;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.cmdline.Label;
-import com.google.devtools.build.lib.packages.Attribute.SplitTransition;
 import com.google.devtools.build.lib.runtime.proto.InvocationPolicyOuterClass.InvocationPolicy;
-import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.common.options.InvocationPolicyEnforcer;
 import com.google.devtools.common.options.OptionsBase;
 import com.google.devtools.common.options.OptionsClassProvider;
 import com.google.devtools.common.options.OptionsParser;
 import com.google.devtools.common.options.OptionsParsingException;
 import java.io.Serializable;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
@@ -63,28 +61,13 @@ public final class BuildOptions implements Cloneable, Serializable {
 
   /**
    * Creates a new BuildOptions instance for host.
-   *
-   * @param fallback if true, we have already tried the user specified hostCpu options
-   *                 and it didn't work, so now we try the default options instead.
    */
-  public BuildOptions createHostOptions(boolean fallback) {
+  public BuildOptions createHostOptions() {
     Builder builder = builder();
     for (FragmentOptions options : fragmentOptionsMap.values()) {
-      builder.add(options.getHost(fallback));
+      builder.add(options.getHost());
     }
     return builder.build();
-  }
-
-  /**
-   * Returns a list of potential split configuration transitions by calling {@link
-   * FragmentOptions#getPotentialSplitTransitions} on all the fragments.
-   */
-  public List<SplitTransition<BuildOptions>> getPotentialSplitTransitions() {
-    List<SplitTransition<BuildOptions>> result = new ArrayList<>();
-    for (FragmentOptions options : fragmentOptionsMap.values()) {
-      result.addAll(options.getPotentialSplitTransitions());
-    }
-    return result;
   }
 
   /**

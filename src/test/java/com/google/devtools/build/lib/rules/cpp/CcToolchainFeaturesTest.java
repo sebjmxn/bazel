@@ -282,6 +282,18 @@ public class CcToolchainFeaturesTest {
         .contains("Invalid toolchain configuration: Cannot find variable named 'v'");
   }
 
+  @Test
+  public void testLazySequenceExpansion() throws Exception {
+    assertThat(
+            getCommandLineForFlagGroups(
+                "flag_group { iterate_over: 'lazy' flag: '-lazy-%{lazy}' }",
+                new Variables.Builder()
+                    .addLazyStringSequenceVariable("lazy", () -> ImmutableList.of("a", "b", "c"))
+                    .build()))
+        .containsExactly("-lazy-a", "-lazy-b", "-lazy-c")
+        .inOrder();
+  }
+
   private Variables createStructureSequenceVariables(String name, StructureBuilder... values) {
     SequenceBuilder builder = new SequenceBuilder();
     for (StructureBuilder value : values) {
@@ -1098,7 +1110,15 @@ public class CcToolchainFeaturesTest {
   public void testDefaultFeatures() throws Exception {
     CcToolchainFeatures features =
         buildFeatures("feature { name: 'a' }", "feature { name: 'b' enabled: true }");
-    assertThat(features.getDefaultFeatures()).containsExactly("b");
+    assertThat(features.getDefaultFeaturesAndActionConfigs()).containsExactly("b");
+  }
+
+  @Test
+  public void testDefaultActionConfigs() throws Exception {
+    CcToolchainFeatures features =
+        buildFeatures("action_config { config_name: 'a' action_name: 'a'}",
+            "action_config { config_name: 'b' action_name: 'b' enabled: true }");
+    assertThat(features.getDefaultFeaturesAndActionConfigs()).containsExactly("b");
   }
 
   @Test

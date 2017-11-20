@@ -23,9 +23,12 @@ import com.google.common.io.CharStreams;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
+import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
 /**
@@ -110,6 +113,29 @@ public class AaptCommandBuilder {
     return this;
   }
 
+  /**
+   * Adds a flag to the builder multiple times, once for each value in the given collection. {@code
+   * null} values will be skipped. If the collection is empty, nothing will be added. The values
+   * will be added in the source collection's iteration order. See {@link
+   * AaptCommandBuilder#addRepeated(String, Collection)} for more information. If the collection
+   * exceed 200 items, the values will be written to a file and passed as &lt;flag&gt @&lt;file&gt;.
+   */
+  public AaptCommandBuilder addParameterableRepeated(
+      final String flag, Collection<String> values, Path workingDirectory) throws IOException {
+    Preconditions.checkNotNull(flag);
+    Preconditions.checkNotNull(workingDirectory);
+    if (values.size() > 200) {
+      add(
+          flag,
+          "@" + Files.write(
+              Files.createDirectories(workingDirectory).resolve("params" + flag),
+              ImmutableList.of(values.stream().collect(Collectors.joining(" ")))));
+    } else {
+      addRepeated(flag, values);
+    }
+    return this;
+  }
+
   /** Adds the next flag to the builder only if the condition is true. */
   public ConditionalAaptCommandBuilder when(boolean condition) {
     if (condition) {
@@ -139,6 +165,13 @@ public class AaptCommandBuilder {
     return flags.build();
   }
 
+  public AaptCommandBuilder add(String flag, Optional<Path> optionalPath) {
+    Preconditions.checkNotNull(flag);
+    Preconditions.checkNotNull(optionalPath);
+    optionalPath.map(p -> add(flag, p));
+    return this;
+  }
+
   /** Wrapper for potentially adding flags to an AaptCommandBuilder based on a conditional. */
   public interface ConditionalAaptCommandBuilder {
     /**
@@ -163,6 +196,14 @@ public class AaptCommandBuilder {
      * @see AaptCommandBuilder#add(String,Path)
      */
     AaptCommandBuilder thenAdd(String flag, @Nullable Path value);
+
+    /**
+     * Adds a single flag and associated path value to the builder if the value is non-null and the
+     * condition was true.
+     *
+     * @see AaptCommandBuilder#add(String,Optional)
+     */
+    AaptCommandBuilder thenAdd(String flag, Optional<Path> value);
 
     /**
      * Adds the values in the collection to the builder, each preceded by the given flag, if the
@@ -199,6 +240,11 @@ public class AaptCommandBuilder {
     }
 
     @Override
+    public AaptCommandBuilder thenAdd(String flag, @Nullable Optional<Path> value) {
+      return originalCommandBuilder.add(flag, value);
+    }
+
+    @Override
     public AaptCommandBuilder thenAddRepeated(String flag, Collection<String> values) {
       return originalCommandBuilder.addRepeated(flag, values);
     }
@@ -227,6 +273,13 @@ public class AaptCommandBuilder {
     @Override
     public AaptCommandBuilder thenAdd(String flag, @Nullable Path value) {
       Preconditions.checkNotNull(flag);
+      return originalCommandBuilder;
+    }
+
+    @Override
+    public AaptCommandBuilder thenAdd(String flag, Optional<Path> value) {
+      Preconditions.checkNotNull(flag);
+      Preconditions.checkNotNull(value);
       return originalCommandBuilder;
     }
 

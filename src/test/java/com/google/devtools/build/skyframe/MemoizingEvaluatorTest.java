@@ -24,6 +24,7 @@ import static com.google.devtools.build.skyframe.GraphTester.NODE_TYPE;
 import static com.google.devtools.build.skyframe.GraphTester.skyKey;
 import static org.junit.Assert.fail;
 
+import com.google.common.base.Preconditions;
 import com.google.common.base.Predicates;
 import com.google.common.base.Supplier;
 import com.google.common.collect.ImmutableList;
@@ -41,7 +42,6 @@ import com.google.devtools.build.lib.events.ExtendedEventHandler;
 import com.google.devtools.build.lib.events.Reporter;
 import com.google.devtools.build.lib.testutil.TestThread;
 import com.google.devtools.build.lib.testutil.TestUtils;
-import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.skyframe.GraphTester.NotComparableStringValue;
 import com.google.devtools.build.skyframe.GraphTester.StringValue;
 import com.google.devtools.build.skyframe.GraphTester.TestFunction;
@@ -102,6 +102,10 @@ public class MemoizingEvaluatorTest {
     tester.initialize();
   }
 
+  protected RecordingDifferencer getRecordingDifferencer() {
+    return new SequencedRecordingDifferencer();
+  }
+
   protected MemoizingEvaluator getMemoizingEvaluator(
       Map<SkyFunctionName, ? extends SkyFunction> functions,
       Differencer differencer,
@@ -123,6 +127,10 @@ public class MemoizingEvaluatorTest {
   }
 
   protected boolean cyclesDetected() {
+    return true;
+  }
+
+  protected boolean preciseEvaluationStatusStored() {
     return true;
   }
 
@@ -749,7 +757,9 @@ public class MemoizingEvaluatorTest {
     tester.getOrCreate(leaf, /*markAsModified=*/true);
     tester.invalidate();
     tester.eval(/*keepGoing=*/true, top);
-    assertThat(tester.progressReceiver.evaluated).containsExactly(leaf, top);
+    if (preciseEvaluationStatusStored()) {
+      assertThat(tester.progressReceiver.evaluated).containsExactly(leaf, top);
+    }
   }
 
   @Test
@@ -780,7 +790,7 @@ public class MemoizingEvaluatorTest {
     }
     tester.set("leaf", new StringValue("leaf"));
 
-    EvaluationResult<StringValue> result = tester.eval(/*keep_going=*/false, values);
+    EvaluationResult<StringValue> result = tester.eval(/* keepGoing= */ false, values);
     for (int i = 0; i < values.length; i++) {
       SkyValue actual = result.get(toSkyKey(values[i]));
       assertThat(actual).isEqualTo(new StringValue("leaf"));
@@ -789,7 +799,7 @@ public class MemoizingEvaluatorTest {
     for (int j = 0; j < TESTED_NODES; j++) {
       tester.set("leaf", new StringValue("other" + j));
       tester.invalidate();
-      result = tester.eval(/*keep_going=*/false, values);
+      result = tester.eval(/* keepGoing= */ false, values);
       for (int i = 0; i < values.length; i++) {
         SkyValue actual = result.get(toSkyKey(values[i]));
         assertWithMessage("Run " + j + ", value " + i)
@@ -816,7 +826,7 @@ public class MemoizingEvaluatorTest {
       value.addDependency(values[i]);
     }
 
-    EvaluationResult<StringValue> result = tester.eval(/*keep_going=*/false, rootKey);
+    EvaluationResult<StringValue> result = tester.eval(/* keepGoing= */ false, rootKey);
     assertThat(result.get(rootKey)).isEqualTo(new StringValue(expected.toString()));
 
     for (int j = 0; j < 10; j++) {
@@ -828,7 +838,7 @@ public class MemoizingEvaluatorTest {
       }
       tester.invalidate();
 
-      result = tester.eval(/*keep_going=*/false, rootKey);
+      result = tester.eval(/* keepGoing= */ false, rootKey);
       assertThat(result.get(rootKey)).isEqualTo(new StringValue(expected.toString()));
     }
   }
@@ -864,7 +874,7 @@ public class MemoizingEvaluatorTest {
     String lastLeft = "left-" + (TEST_NODE_COUNT - 1);
     String lastRight = "right-" + (TEST_NODE_COUNT - 1);
 
-    EvaluationResult<StringValue> result = tester.eval(/*keep_going=*/false, lastLeft, lastRight);
+    EvaluationResult<StringValue> result = tester.eval(/* keepGoing= */ false, lastLeft, lastRight);
     assertThat(result.get(toSkyKey(lastLeft))).isEqualTo(new StringValue("leaf"));
     assertThat(result.get(toSkyKey(lastRight))).isEqualTo(new StringValue("leaf"));
 
@@ -872,7 +882,7 @@ public class MemoizingEvaluatorTest {
       String value = "other" + j;
       tester.set("leaf", new StringValue(value));
       tester.invalidate();
-      result = tester.eval(/*keep_going=*/false, lastLeft, lastRight);
+      result = tester.eval(/* keepGoing= */ false, lastLeft, lastRight);
       assertThat(result.get(toSkyKey(lastLeft))).isEqualTo(new StringValue(value));
       assertThat(result.get(toSkyKey(lastRight))).isEqualTo(new StringValue(value));
     }
@@ -1486,6 +1496,51 @@ public class MemoizingEvaluatorTest {
         /*keepGoing=*/true, /*numThreads=*/5, topLevel);
     assertThat(result.hasError()).isFalse();
     assertThat(maxValue[0]).isEqualTo(5);
+  }
+
+  @Test
+  public void nodeIsChangedWithoutBeingEvaluated() throws Exception {
+    SkyKey buildFile = GraphTester.skyKey("buildfile");
+    SkyKey top = GraphTester.skyKey("top");
+    SkyKey dep = GraphTester.skyKey("dep");
+    tester.set(buildFile, new StringValue("depend on dep"));
+    StringValue depVal = new StringValue("this is dep");
+    tester.set(dep, depVal);
+    tester
+        .getOrCreate(top)
+        .setBuilder(
+            new SkyFunction() {
+              @Nullable
+              @Override
+              public SkyValue compute(SkyKey skyKey, Environment env)
+                  throws SkyFunctionException, InterruptedException {
+                StringValue val = (StringValue) env.getValue(buildFile);
+                if (env.valuesMissing()) {
+                  return null;
+                }
+                if (val.getValue().equals("depend on dep")) {
+                  StringValue result = (StringValue) env.getValue(dep);
+                  return env.valuesMissing() ? null : result;
+                }
+                throw new GenericFunctionException(
+                    new SomeErrorException("bork"), Transience.PERSISTENT);
+              }
+
+              @Nullable
+              @Override
+              public String extractTag(SkyKey skyKey) {
+                return null;
+              }
+            });
+    assertThat(tester.evalAndGet("top")).isEqualTo(depVal);
+    StringValue newDepVal = new StringValue("this is new dep");
+    tester.set(dep, newDepVal);
+    tester.set(buildFile, new StringValue("don't depend on dep"));
+    tester.invalidate();
+    tester.eval(/*keepGoing=*/ false, top);
+    tester.set(buildFile, new StringValue("depend on dep"));
+    tester.invalidate();
+    assertThat(tester.evalAndGet("top")).isEqualTo(newDepVal);
   }
 
   /**
@@ -2342,7 +2397,7 @@ public class MemoizingEvaluatorTest {
       tester.getOrCreate(topKey, /*markAsModified=*/false).setHasError(true);
       tester.invalidate();
 
-      result = tester.eval(/*keep_going=*/false, topKey);
+      result = tester.eval(/* keepGoing= */ false, topKey);
       assertThat(result.get(topKey)).isEqualTo(new StringValue(expected.toString()));
     }
   }
@@ -2819,8 +2874,10 @@ public class MemoizingEvaluatorTest {
     tester.invalidate();
     topValue = (StringValue) tester.evalAndGet("top");
     assertThat(topValue.getValue()).isEqualTo("joyce drank whiskey");
-    assertThat(tester.getDirtyKeys()).containsExactly(buildFile, top);
-    assertThat(tester.getDeletedKeys()).isEmpty();
+    if (preciseEvaluationStatusStored()) {
+      assertThat(tester.getDirtyKeys()).containsExactly(buildFile, top);
+      assertThat(tester.getDeletedKeys()).isEmpty();
+    }
   }
 
   @Test
@@ -2842,14 +2899,18 @@ public class MemoizingEvaluatorTest {
     tester.invalidate();
     topValue = (StringValue) tester.evalAndGet("top");
     assertThat(topValue.getValue()).isEqualTo("ignore");
-    assertThat(tester.getDirtyKeys()).containsExactly(leaf);
-    assertThat(tester.getDeletedKeys()).isEmpty();
+    if (preciseEvaluationStatusStored()) {
+      assertThat(tester.getDirtyKeys()).containsExactly(leaf);
+      assertThat(tester.getDeletedKeys()).isEmpty();
+    }
     tester.set(leaf, new StringValue("smushy"));
     tester.invalidate();
     topValue = (StringValue) tester.evalAndGet("top");
     assertThat(topValue.getValue()).isEqualTo("ignore");
-    assertThat(tester.getDirtyKeys()).containsExactly(leaf);
-    assertThat(tester.getDeletedKeys()).isEmpty();
+    if (preciseEvaluationStatusStored()) {
+      assertThat(tester.getDirtyKeys()).containsExactly(leaf);
+      assertThat(tester.getDeletedKeys()).isEmpty();
+    }
   }
 
   private static final SkyFunction INTERRUPT_BUILDER = new SkyFunction() {
@@ -3643,16 +3704,16 @@ public class MemoizingEvaluatorTest {
       try {
         tester.getOrCreate(leftValues[i], /*markAsModified=*/true).setHasError(true);
         tester.invalidate();
-        EvaluationResult<StringValue> result = tester.eval(
-            /*keep_going=*/false, lastLeft, lastRight);
+        EvaluationResult<StringValue> result =
+            tester.eval(/* keepGoing= */ false, lastLeft, lastRight);
         assertThat(result.hasError()).isTrue();
         tester.differencer.invalidate(ImmutableList.of(leftValues[i]));
         tester.invalidate();
-        result = tester.eval(/*keep_going=*/false, lastLeft, lastRight);
+        result = tester.eval(/* keepGoing= */ false, lastLeft, lastRight);
         assertThat(result.hasError()).isTrue();
         tester.getOrCreate(leftValues[i], /*markAsModified=*/true).setHasError(false);
         tester.invalidate();
-        result = tester.eval(/*keep_going=*/false, lastLeft, lastRight);
+        result = tester.eval(/* keepGoing= */ false, lastLeft, lastRight);
         assertThat(result.get(toSkyKey(lastLeft))).isEqualTo(new StringValue("leaf"));
         assertThat(result.get(toSkyKey(lastRight))).isEqualTo(new StringValue("leaf"));
       } catch (Exception e) {
@@ -4275,12 +4336,14 @@ public class MemoizingEvaluatorTest {
     // Then when top is evaluated, its value is as expected,
     tester.invalidate();
     assertThat(tester.evalAndGet(/*keepGoing=*/ true, top)).isEqualTo(topValue);
-    // And there is no value for mid in the graph,
-    assertThat(tester.driver.getExistingValueForTesting(mid)).isNull();
-    assertThat(tester.driver.getExistingErrorForTesting(mid)).isNull();
-    // Or for leaf.
-    assertThat(tester.driver.getExistingValueForTesting(leaf)).isNull();
-    assertThat(tester.driver.getExistingErrorForTesting(leaf)).isNull();
+    if (preciseEvaluationStatusStored()) {
+      // And there is no value for mid in the graph,
+      assertThat(tester.driver.getExistingValueForTesting(mid)).isNull();
+      assertThat(tester.driver.getExistingErrorForTesting(mid)).isNull();
+      // Or for leaf.
+      assertThat(tester.driver.getExistingValueForTesting(leaf)).isNull();
+      assertThat(tester.driver.getExistingErrorForTesting(leaf)).isNull();
+    }
 
     // When top is changed to depend directly on leaf,
     tester
@@ -4291,9 +4354,11 @@ public class MemoizingEvaluatorTest {
     // Then when top is evaluated, its value is as expected,
     tester.invalidate();
     assertThat(tester.evalAndGet(/*keepGoing=*/ true, top)).isEqualTo(leafValue);
-    // and there is no value for mid in the graph,
-    assertThat(tester.driver.getExistingValueForTesting(mid)).isNull();
-    assertThat(tester.driver.getExistingErrorForTesting(mid)).isNull();
+    if (preciseEvaluationStatusStored()) {
+      // and there is no value for mid in the graph,
+      assertThat(tester.driver.getExistingValueForTesting(mid)).isNull();
+      assertThat(tester.driver.getExistingErrorForTesting(mid)).isNull();
+    }
   }
 
   // Tests that a removed and then reinstated node doesn't try to invalidate its erstwhile parent
@@ -4346,10 +4411,11 @@ public class MemoizingEvaluatorTest {
     // Then when top is evaluated, its value is as expected,
     tester.invalidate();
     assertThat(tester.evalAndGet(/*keepGoing=*/ true, top)).isEqualTo(topValue);
-    // And there is no value for leaf in the graph.
-    assertThat(tester.driver.getExistingValueForTesting(leaf)).isNull();
-    assertThat(tester.driver.getExistingErrorForTesting(leaf)).isNull();
-
+    if (preciseEvaluationStatusStored()) {
+      // And there is no value for leaf in the graph.
+      assertThat(tester.driver.getExistingValueForTesting(leaf)).isNull();
+      assertThat(tester.driver.getExistingErrorForTesting(leaf)).isNull();
+    }
     // When leaf is evaluated, so that it is present in the graph again,
     assertThat(tester.evalAndGet(/*keepGoing=*/ true, leaf)).isEqualTo(leafValue);
     // And top is changed to depend on leaf again,
@@ -4437,12 +4503,13 @@ public class MemoizingEvaluatorTest {
 
   /** A graph tester that is specific to the memoizing evaluator, with some convenience methods. */
   protected class MemoizingEvaluatorTester extends GraphTester {
-    private RecordingDifferencer differencer = new RecordingDifferencer();
+    private RecordingDifferencer differencer;
     private MemoizingEvaluator evaluator;
     private BuildDriver driver;
     private TrackingProgressReceiver progressReceiver = new TrackingProgressReceiver();
 
     public void initialize() {
+      this.differencer = getRecordingDifferencer();
       this.evaluator =
           getMemoizingEvaluator(getSkyFunctionMap(), differencer, progressReceiver);
       this.driver = getBuildDriver(evaluator);

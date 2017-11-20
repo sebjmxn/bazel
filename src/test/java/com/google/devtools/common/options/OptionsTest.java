@@ -472,38 +472,8 @@ public class OptionsTest {
     assertThat(options.string).isNull();
   }
 
-  public static class K extends OptionsBase {
-    @Option(
-      name = "1",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.NO_OP},
-      defaultValue = "null"
-    )
-    public int int1;
-  }
   @Test
-  public void nullDefaultForPrimitiveTypeOption() throws Exception {
-    // defaultValue() = "null" is not treated specially for primitive types, so
-    // we get an NumberFormatException from the converter (not a
-    // ClassCastException from casting null to int), just as we would for any
-    // other non-integer-literal string default.
-    try {
-      Options.parse(K.class, NO_ARGS).getOptions();
-      fail();
-    } catch (OptionsParser.ConstructionException e) {
-      assertThat(e).hasCauseThat().isInstanceOf(IllegalStateException.class);
-      assertThat(e)
-          .hasCauseThat()
-          .hasMessageThat()
-          .isEqualTo(
-              "OptionsParsingException while retrieving default for "
-                  + "int1: 'null' is not an int");
-    }
-  }
-
-  @Test
-  public void nullIsntInterpretedSpeciallyExceptAsADefaultValue()
-      throws Exception {
+  public void nullIsNotInterpretedSpeciallyExceptAsADefaultValue() throws Exception {
     HttpOptions options =
         Options.parse(HttpOptions.class,
                       new String[] { "--host", "null" }).getOptions();
@@ -561,23 +531,5 @@ public class OptionsTest {
     Options<TestOptions> options2 =
         Options.parse(TestOptions.class, new String[] {"--specialexp_foo", "--specialexp_bar"});
     assertThat(options1.getOptions()).isEqualTo(options2.getOptions());
-  }
-  @Test
-  public void dynamicExpansionFunctionWorks() throws Exception {
-    Options<TestOptions> options1 =
-        Options.parse(TestOptions.class, new String[] {"--dynamicexp=foo_bar"});
-    Options<TestOptions> options2 =
-        Options.parse(TestOptions.class, new String[] {"--specialexp_foo", "--specialexp_bar"});
-    assertThat(options1.getOptions()).isEqualTo(options2.getOptions());
-  }
-
-  @Test
-  public void dynamicExpansionFunctionUnknowValue() throws Exception {
-    try {
-      Options.parse(TestOptions.class, new String[] {"--dynamicexp=foo"});
-      fail("Unknown expansion argument should cause a failure.");
-    } catch (OptionsParsingException e) {
-      assertThat(e).hasMessage("Unexpected expansion argument: foo");
-    }
   }
 }

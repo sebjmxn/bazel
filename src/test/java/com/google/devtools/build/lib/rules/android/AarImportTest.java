@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.rules.android;
 
+import static com.google.common.collect.Streams.stream;
 import static com.google.common.truth.Truth.assertThat;
 
 import com.google.common.base.Predicates;
@@ -20,11 +21,13 @@ import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.util.ActionsTestUtil;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
-import com.google.devtools.build.lib.analysis.FileConfiguredTarget;
+import com.google.devtools.build.lib.analysis.FilesToRunProvider;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
+import com.google.devtools.build.lib.analysis.configuredtargets.FileConfiguredTarget;
 import com.google.devtools.build.lib.analysis.util.BuildViewTestCase;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.rules.java.JavaCompilationArgsProvider;
+import com.google.devtools.build.lib.rules.java.JavaInfo;
 import com.google.devtools.build.lib.rules.java.JavaRuleOutputJarsProvider;
 import com.google.devtools.build.lib.rules.java.JavaRuleOutputJarsProvider.OutputJar;
 import java.util.Set;
@@ -56,7 +59,7 @@ public class AarImportTest extends BuildViewTestCase {
         ")",
         "android_library(",
         "    name = 'lib',",
-        "    deps = ['//a:bar'],",
+        "    exports = ['//a:bar'],",
         ")",
         "java_import(",
         "    name = 'baz',",
@@ -83,6 +86,31 @@ public class AarImportTest extends BuildViewTestCase {
     Artifact resourceTreeArtifact = resourceArtifacts.iterator().next();
     assertThat(resourceTreeArtifact.isTreeArtifact()).isTrue();
     assertThat(resourceTreeArtifact.getExecPathString()).endsWith("_aar/unzipped/resources/foo");
+  }
+
+  @Test
+  public void testResourcesExtractor() throws Exception {
+    AndroidResourcesProvider resourcesProvider =
+        getConfiguredTarget("//a:foo").getProvider(AndroidResourcesProvider.class);
+
+    Artifact resourceTreeArtifact =
+        stream(resourcesProvider.getDirectAndroidResources())
+            .flatMap(resourceContainer -> resourceContainer.getResources().stream())
+            .findFirst()
+            .get();
+    Artifact aarResourcesExtractor =
+        getHostConfiguredTarget(
+            ruleClassProvider.getToolsRepository() + "//tools/android:aar_resources_extractor")
+        .getProvider(FilesToRunProvider.class)
+        .getExecutable();
+
+    assertThat(getGeneratingSpawnAction(resourceTreeArtifact).getArguments())
+        .containsExactly(
+            aarResourcesExtractor.getExecPathString(),
+            "--input_aar",
+            "a/foo.aar",
+            "--output_res_dir",
+            resourceTreeArtifact.getExecPathString());
   }
 
   @Test
@@ -125,7 +153,7 @@ public class AarImportTest extends BuildViewTestCase {
     ConfiguredTarget aarImportTarget = getConfiguredTarget("//a:foo");
 
     Iterable<OutputJar> outputJars =
-        aarImportTarget.getProvider(JavaRuleOutputJarsProvider.class).getOutputJars();
+        JavaInfo.getProvider(JavaRuleOutputJarsProvider.class, aarImportTarget).getOutputJars();
     assertThat(outputJars).hasSize(1);
 
     Artifact classesJar = outputJars.iterator().next().getClassJar();
@@ -197,8 +225,8 @@ public class AarImportTest extends BuildViewTestCase {
   public void testJavaCompilationArgsProvider() throws Exception {
     ConfiguredTarget aarImportTarget = getConfiguredTarget("//a:bar");
 
-    JavaCompilationArgsProvider provider = aarImportTarget
-        .getProvider(JavaCompilationArgsProvider.class);
+    JavaCompilationArgsProvider provider = JavaInfo
+        .getProvider(JavaCompilationArgsProvider.class, aarImportTarget);
     assertThat(provider).isNotNull();
     assertThat(artifactsToStrings(provider.getJavaCompilationArgs().getRuntimeJars()))
         .containsExactly(
@@ -221,5 +249,28 @@ public class AarImportTest extends BuildViewTestCase {
         "    name = 'aar',",
         "    aar = 'a.aar',",
         ")");
+  }
+
+  @Test
+  public void testExportsManifest() throws Exception {
+    Artifact binaryMergedManifest =
+        getConfiguredTarget("//java:app").getProvider(ApkProvider.class).getMergedManifest();
+    // Compare root relative path strings instead of artifacts due to difference in configuration
+    // caused by the Android split transition.
+    assertThat(
+        Iterables.transform(
+            getGeneratingAction(binaryMergedManifest).getInputs(),
+            Artifact::getRootRelativePathString))
+        .containsAllOf(getAndroidManifest("//a:foo"), getAndroidManifest("//a:bar"));
+  }
+
+  private String getAndroidManifest(String aarImport) throws Exception {
+    return getConfiguredTarget(aarImport)
+        .getProvider(AndroidResourcesProvider.class)
+        .getDirectAndroidResources()
+        .toList()
+        .get(0)
+        .getManifest()
+        .getRootRelativePathString();
   }
 }

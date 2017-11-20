@@ -16,17 +16,19 @@ package com.google.devtools.build.lib.exec.local;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.logging.Level.INFO;
 import static java.util.logging.Level.SEVERE;
+import static java.util.logging.Level.WARNING;
 
 import com.google.common.base.Joiner;
+import com.google.common.base.Preconditions;
 import com.google.common.io.ByteStreams;
 import com.google.devtools.build.lib.actions.ActionExecutionMetadata;
 import com.google.devtools.build.lib.actions.ResourceManager;
 import com.google.devtools.build.lib.actions.ResourceManager.ResourceHandle;
 import com.google.devtools.build.lib.actions.Spawn;
+import com.google.devtools.build.lib.actions.SpawnResult;
+import com.google.devtools.build.lib.actions.SpawnResult.Status;
 import com.google.devtools.build.lib.actions.Spawns;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
-import com.google.devtools.build.lib.exec.SpawnResult;
-import com.google.devtools.build.lib.exec.SpawnResult.Status;
 import com.google.devtools.build.lib.exec.SpawnRunner;
 import com.google.devtools.build.lib.shell.AbnormalTerminationException;
 import com.google.devtools.build.lib.shell.Command;
@@ -35,8 +37,8 @@ import com.google.devtools.build.lib.shell.CommandResult;
 import com.google.devtools.build.lib.util.NetUtil;
 import com.google.devtools.build.lib.util.OS;
 import com.google.devtools.build.lib.util.OsUtils;
-import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.util.io.FileOutErr;
+import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -45,6 +47,7 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.annotation.Nullable;
@@ -90,7 +93,7 @@ public final class LocalSpawnRunner implements SpawnRunner {
     this.execRoot = execRoot;
     this.processWrapper = getProcessWrapper(execRoot, localOs).getPathString();
     this.localExecutionOptions = Preconditions.checkNotNull(localExecutionOptions);
-    this.hostName = NetUtil.findShortHostName();
+    this.hostName = NetUtil.getCachedShortHostName();
     this.resourceManager = resourceManager;
     this.useProcessWrapper = useProcessWrapper;
     this.productName = productName;
@@ -125,6 +128,23 @@ public final class LocalSpawnRunner implements SpawnRunner {
       policy.lockOutputFiles();
       return new SubprocessHandler(spawn, policy).run();
     }
+  }
+
+  private static Path createActionTemp(Path execRoot) throws IOException {
+    String idStr =
+        // Make the name unique among other executor threads.
+        Long.toHexString(Thread.currentThread().getId())
+            + "_"
+            // Make the name unique among other temp directories that this thread has ever created.
+            // On Windows, file and directory deletion is asynchronous, meaning the previous temp
+            // directory name isn't immediately available for the next action that this thread runs.
+            // See https://github.com/bazelbuild/bazel/issues/4035
+            + Long.toHexString(ThreadLocalRandom.current().nextLong());
+    Path result = execRoot.getRelative("tmp" + idStr);
+    if (!result.exists() && !result.createDirectory()) {
+      throw new IOException(String.format("Could not create temp directory '%s'", result));
+    }
+    return result;
   }
 
   private final class SubprocessHandler {
@@ -234,84 +254,111 @@ public final class LocalSpawnRunner implements SpawnRunner {
       stepLog(INFO, "running locally");
       setState(State.LOCAL_ACTION_RUNNING);
 
-      Command cmd;
-      OutputStream stdOut = ByteStreams.nullOutputStream();
-      OutputStream stdErr = ByteStreams.nullOutputStream();
-      if (useProcessWrapper) {
-        // If the process wrapper is enabled, we use its timeout feature, which first interrupts the
-        // subprocess and only kills it after a grace period so that the subprocess can output a
-        // stack trace, test log or similar, which is incredibly helpful for debugging. The process
-        // wrapper also supports output file redirection, so we don't need to stream the output
-        // through this process.
-        List<String> cmdLine = new ArrayList<>();
-        cmdLine.add(processWrapper);
-        cmdLine.add("--timeout=" + policy.getTimeout().getSeconds());
-        cmdLine.add("--kill_delay=" + localExecutionOptions.localSigkillGraceSeconds);
-        cmdLine.add("--stdout=" + getPathOrDevNull(outErr.getOutputPath()));
-        cmdLine.add("--stderr=" + getPathOrDevNull(outErr.getErrorPath()));
-        cmdLine.addAll(spawn.getArguments());
-        cmd = new Command(
-            cmdLine.toArray(new String[0]),
-            localEnvProvider.rewriteLocalEnv(spawn.getEnvironment(), execRoot, productName),
-            execRoot.getPathFile());
-      } else {
-        stdOut = outErr.getOutputStream();
-        stdErr = outErr.getErrorStream();
-        cmd = new Command(
-            spawn.getArguments().toArray(new String[0]),
-            localEnvProvider.rewriteLocalEnv(spawn.getEnvironment(), execRoot, productName),
-            execRoot.getPathFile(),
-            policy.getTimeout());
-      }
-
-      long startTime = System.currentTimeMillis();
-      CommandResult result;
+      Path tmpDir = createActionTemp(execRoot);
       try {
-        result = cmd.execute(stdOut, stdErr);
-        if (Thread.currentThread().isInterrupted()) {
-          throw new InterruptedException();
+        Command cmd;
+        OutputStream stdOut = ByteStreams.nullOutputStream();
+        OutputStream stdErr = ByteStreams.nullOutputStream();
+        if (useProcessWrapper) {
+          // If the process wrapper is enabled, we use its timeout feature, which first interrupts
+          // the subprocess and only kills it after a grace period so that the subprocess can output
+          // a stack trace, test log or similar, which is incredibly helpful for debugging. The
+          // process wrapper also supports output file redirection, so we don't need to stream the
+          // output through this process.
+          List<String> cmdLine = new ArrayList<>();
+          cmdLine.add(processWrapper);
+          cmdLine.add("--timeout=" + policy.getTimeout().getSeconds());
+          cmdLine.add("--kill_delay=" + localExecutionOptions.localSigkillGraceSeconds);
+          cmdLine.add("--stdout=" + getPathOrDevNull(outErr.getOutputPath()));
+          cmdLine.add("--stderr=" + getPathOrDevNull(outErr.getErrorPath()));
+          cmdLine.addAll(spawn.getArguments());
+          cmd =
+              new Command(
+                  cmdLine.toArray(new String[0]),
+                  localEnvProvider.rewriteLocalEnv(
+                      spawn.getEnvironment(), execRoot, tmpDir, productName),
+                  execRoot.getPathFile());
+        } else {
+          stdOut = outErr.getOutputStream();
+          stdErr = outErr.getErrorStream();
+          cmd =
+              new Command(
+                  spawn.getArguments().toArray(new String[0]),
+                  localEnvProvider.rewriteLocalEnv(
+                      spawn.getEnvironment(), execRoot, tmpDir, productName),
+                  execRoot.getPathFile(),
+                  policy.getTimeout());
         }
-      } catch (AbnormalTerminationException e) {
-        if (Thread.currentThread().isInterrupted()) {
-          throw new InterruptedException();
-        }
-        result = e.getResult();
-      } catch (CommandException e) {
-        // At the time this comment was written, this must be a ExecFailedException encapsulating an
-        // IOException from the underlying Subprocess.Factory.
-        String msg = e.getMessage() == null ? e.getClass().getName() : e.getMessage();
-        setState(State.PERMANENT_ERROR);
-        outErr.getErrorStream().write(("Action failed to execute: " + msg + "\n").getBytes(UTF_8));
-        outErr.getErrorStream().flush();
-        return new SpawnResult.Builder()
-            .setStatus(Status.EXECUTION_FAILED)
-            .setExitCode(LOCAL_EXEC_ERROR)
-            .setExecutorHostname(hostName)
-            .build();
-      }
-      setState(State.SUCCESS);
 
-      long wallTimeMillis = System.currentTimeMillis() - startTime;
-      boolean wasTimeout = result.getTerminationStatus().timedout()
-          || (useProcessWrapper && wasTimeout(policy.getTimeout(), wallTimeMillis));
-      Status status = wasTimeout ? Status.TIMEOUT : Status.SUCCESS;
-      int exitCode = status == Status.TIMEOUT
-          ? POSIX_TIMEOUT_EXIT_CODE
-          : result.getTerminationStatus().getRawExitCode();
-      return new SpawnResult.Builder()
-          .setStatus(status)
-          .setExitCode(exitCode)
-          .setExecutorHostname(hostName)
-          .setWallTimeMillis(wallTimeMillis)
-          .build();
+        long startTime = System.currentTimeMillis();
+        CommandResult result = null;
+        try {
+          result = cmd.execute(stdOut, stdErr);
+          if (Thread.currentThread().isInterrupted()) {
+            throw new InterruptedException();
+          }
+        } catch (AbnormalTerminationException e) {
+          if (Thread.currentThread().isInterrupted()) {
+            throw new InterruptedException();
+          }
+          result = e.getResult();
+        } catch (CommandException e) {
+          // At the time this comment was written, this must be a ExecFailedException encapsulating
+          // an IOException from the underlying Subprocess.Factory.
+          String msg = e.getMessage() == null ? e.getClass().getName() : e.getMessage();
+          setState(State.PERMANENT_ERROR);
+          outErr
+              .getErrorStream()
+              .write(("Action failed to execute: " + msg + "\n").getBytes(UTF_8));
+          outErr.getErrorStream().flush();
+          return new SpawnResult.Builder()
+              .setStatus(Status.EXECUTION_FAILED)
+              .setExitCode(LOCAL_EXEC_ERROR)
+              .setExecutorHostname(hostName)
+              .build();
+        }
+        setState(State.SUCCESS);
+        Duration wallTime = Duration.ofMillis(System.currentTimeMillis() - startTime);
+        boolean wasTimeout =
+            result.getTerminationStatus().timedOut()
+                || (useProcessWrapper && wasTimeout(policy.getTimeout(), wallTime));
+        Status status = wasTimeout ? Status.TIMEOUT : Status.SUCCESS;
+        int exitCode =
+            status == Status.TIMEOUT
+                ? POSIX_TIMEOUT_EXIT_CODE
+                : result.getTerminationStatus().getRawExitCode();
+        return new SpawnResult.Builder()
+            .setStatus(status)
+            .setExitCode(exitCode)
+            .setExecutorHostname(hostName)
+            .setWallTime(wallTime)
+            .build();
+      } finally {
+        // Delete the temp directory tree, so the next action that this thread executes will get a
+        // fresh, empty temp directory.
+        // File deletion tends to be slow on Windows, so deleting this tree may take several
+        // seconds. Delete it after having measured the wallTime.
+        try {
+          FileSystemUtils.deleteTree(tmpDir);
+        } catch (IOException ignored) {
+          // We can't handle this exception in any meaningful way, nor should we, but let's log it.
+          stepLog(
+              WARNING,
+              String.format(
+                  "failed to delete temp directory '%s'; this might indicate that the action "
+                      + "created subprocesses that didn't terminate and hold files open in that "
+                      + "directory",
+                  tmpDir));
+        }
+      }
     }
 
     private String getPathOrDevNull(Path path) {
       return path == null ? "/dev/null" : path.getPathString();
     }
 
-    private boolean wasTimeout(Duration timeout, long wallTimeMillis) {
-      return !timeout.isZero() && wallTimeMillis > timeout.toMillis();
+    private boolean wasTimeout(Duration timeout, Duration wallTime) {
+      return !timeout.isZero() && wallTime.compareTo(timeout) > 0;
     }
   }
 

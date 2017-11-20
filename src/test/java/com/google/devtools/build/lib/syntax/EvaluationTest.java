@@ -406,12 +406,10 @@ public class EvaluationTest extends EvaluationTestCase {
   }
 
   @Test
-  public void testListComprehensionModifiesGlobalEnv() throws Exception {
-    new SkylarkTest()
-        .update("x", 42)
-        .testIfErrorContains("Variable x is read only", "[x + 1 for x in [1,2,3]]");
-    new BuildTest().update("x", 42).setUp("y =[x + 1 for x in [1,2,3]]")
-        .testExactOrder("y", 2, 3, 4).testLookup("x", 3); // (x is global)
+  public void testListComprehensionAtTopLevel() throws Exception {
+    // It is allowed to have a loop variable with the same name as a global variable.
+    newTest().update("x", 42).setUp("y = [x + 1 for x in [1,2,3]]")
+        .testExactOrder("y", 2, 3, 4);
   }
 
   @Test
@@ -635,22 +633,14 @@ public class EvaluationTest extends EvaluationTestCase {
       public void repr(SkylarkPrinter printer) {
         printer.append("<str marker>");
       }
-
-      @Override
-      public void reprLegacy(SkylarkPrinter printer) {
-        printer.append("<str legacy marker>");
-      }
     };
   }
 
   @Test
   public void testPercOnObject() throws Exception {
-    newTest("--incompatible_descriptive_string_representations=true")
+    newTest()
         .update("obj", createObjWithStr())
         .testStatement("'%s' % obj", "<str marker>");
-    newTest("--incompatible_descriptive_string_representations=false")
-        .update("obj", createObjWithStr())
-        .testStatement("'%s' % obj", "<str legacy marker>");
     newTest()
         .update("unknown", new Object())
         .testStatement("'%s' % unknown", "<unknown object java.lang.Object>");
@@ -658,12 +648,9 @@ public class EvaluationTest extends EvaluationTestCase {
 
   @Test
   public void testPercOnObjectList() throws Exception {
-    newTest("--incompatible_descriptive_string_representations=true")
+    newTest()
         .update("obj", createObjWithStr())
         .testStatement("'%s %s' % (obj, obj)", "<str marker> <str marker>");
-    newTest("--incompatible_descriptive_string_representations=false")
-        .update("obj", createObjWithStr())
-        .testStatement("'%s %s' % (obj, obj)", "<str legacy marker> <str legacy marker>");
     newTest()
         .update("unknown", new Object())
         .testStatement(
@@ -673,10 +660,7 @@ public class EvaluationTest extends EvaluationTestCase {
 
   @Test
   public void testPercOnObjectInvalidFormat() throws Exception {
-    newTest("--incompatible_descriptive_string_representations=true")
-        .update("obj", createObjWithStr())
-        .testIfExactError("invalid argument <str marker> for format pattern %d", "'%d' % obj");
-    newTest("--incompatible_descriptive_string_representations=false")
+    newTest()
         .update("obj", createObjWithStr())
         .testIfExactError("invalid argument <str marker> for format pattern %d", "'%d' % obj");
   }

@@ -13,6 +13,11 @@ default_toolchain {
 }
 
 default_toolchain {
+  cpu: "x64_windows"
+  toolchain_identifier: "msvc_x64"
+}
+
+default_toolchain {
   cpu: "x64_windows_msvc"
   toolchain_identifier: "msvc_x64"
 }
@@ -133,6 +138,10 @@ toolchain {
     path: "%{msvc_lib_path}"
   }
   tool_path {
+    name: "ml"
+    path: "%{msvc_ml_path}"
+  }
+  tool_path {
     name: "cpp"
     path: "%{msvc_cl_path}"
   }
@@ -166,7 +175,7 @@ toolchain {
   }
   supports_gold_linker: false
   supports_start_end_lib: false
-  supports_interface_shared_objects: false
+  supports_interface_shared_objects: true
   supports_incremental_linker: false
   supports_normalizing_ar: true
   needsPic: false
@@ -238,123 +247,50 @@ toolchain {
     }
   }
 
-  feature {
-    name: "msvc_env"
-    env_set {
-      action: "c-compile"
-      action: "c++-compile"
-      action: "c++-module-compile"
-      action: "c++-module-codegen"
-      action: "c++-header-parsing"
-      action: "c++-header-preprocessing"
-      action: "assemble"
-      action: "preprocess-assemble"
-      action: "c++-link-executable"
-      action: "c++-link-dynamic-library"
-      action: "c++-link-static-library"
-      action: "c++-link-alwayslink-static-library"
-      action: "c++-link-pic-static-library"
-      action: "c++-link-alwayslink-pic-static-library"
-      env_entry {
-        key: "PATH"
-        value: "%{msvc_env_path}"
-      }
-      env_entry {
-        key: "INCLUDE"
-        value: "%{msvc_env_include}"
-      }
-      env_entry {
-        key: "LIB"
-        value: "%{msvc_env_lib}"
-      }
-      env_entry {
-        key: "TMP"
-        value: "%{msvc_env_tmp}"
-      }
-      env_entry {
-        key: "TEMP"
-        value: "%{msvc_env_tmp}"
-      }
-    }
-  }
-
-  feature {
-    name: "use_linker"
-    env_set {
-      action: "c++-link-executable"
-      action: "c++-link-dynamic-library"
-      env_entry {
-        key: "USE_LINKER"
-        value: "1"
-      }
-    }
-  }
-
-  feature {
-    name: 'include_paths'
-    flag_set {
-      action: 'preprocess-assemble'
-      action: 'c-compile'
-      action: 'c++-compile'
-      action: 'c++-header-parsing'
-      action: 'c++-header-preprocessing'
-      action: 'c++-module-compile'
-      flag_group {
-        iterate_over: 'quote_include_paths'
-        flag: '/I%{quote_include_paths}'
-      }
-      flag_group {
-        iterate_over: 'include_paths'
-        flag: '/I%{include_paths}'
-      }
-      flag_group {
-        iterate_over: 'system_include_paths'
-        flag: '/I%{system_include_paths}'
-      }
-    }
-  }
-
-  # Tell Bazel to parse the output of /showIncludes
-  feature {
-    name: 'parse_showincludes'
-    flag_set {
-      action: 'assemble'
-      action: 'preprocess-assemble'
-      action: 'c-compile'
-      action: 'c++-compile'
-      action: 'c++-module-compile'
-      action: 'c++-header-preprocessing'
-      action: 'c++-header-parsing'
-      flag_group {
-        flag: "/showIncludes"
-      }
-    }
-  }
-
   # This feature is just for enabling flag_set in action_config for -c and -o options during the transitional period
   feature {
     name: 'compile_action_flags_in_flag_set'
   }
 
   feature {
-    name: "preprocessor_defines"
-    flag_set {
-      action: "preprocess-assemble"
-      action: "c-compile"
-      action: "c++-compile"
-      action: "c++-header-parsing"
-      action: "c++-header-preprocessing"
-      action: "c++-module-compile"
-      flag_group {
-        flag: "/D%{preprocessor_defines}"
-        iterate_over: "preprocessor_defines"
-      }
-    }
+    name: 'has_configured_linker_path'
   }
+
 
   # This feature indicates strip is not supported, building stripped binary will just result a copy of orignial binary
   feature {
     name: 'no_stripping'
+  }
+
+  # This feature indicates this is a toolchain targeting Windows.
+  feature {
+    name: 'targets_windows'
+    implies: 'copy_dynamic_libraries_to_binary'
+    enabled: true
+  }
+
+  feature {
+    name: 'copy_dynamic_libraries_to_binary'
+  }
+
+  action_config {
+    config_name: 'assemble'
+    action_name: 'assemble'
+    tool {
+      tool_path: '%{msvc_ml_path}'
+    }
+    flag_set {
+      expand_if_all_available: 'output_object_file'
+      flag_group {
+        flag: '/Fo%{output_object_file}'
+        flag: '/Zi'
+        flag: '/c'
+        flag: '%{source_file}'
+      }
+    }
+    implies: 'nologo'
+    implies: 'msvc_env'
+    implies: 'sysroot'
   }
 
   action_config {
@@ -388,10 +324,13 @@ toolchain {
         flag: '/Fi%{output_preprocess_file}'
       }
     }
+    implies: 'legacy_compile_flags'
     implies: 'nologo'
     implies: 'msvc_env'
     implies: 'parse_showincludes'
-    implies: 'copts'
+    implies: 'user_compile_flags'
+    implies: 'sysroot'
+    implies: 'unfiltered_compile_flags'
   }
 
   action_config {
@@ -425,10 +364,13 @@ toolchain {
         flag: '/Fi%{output_preprocess_file}'
       }
     }
+    implies: 'legacy_compile_flags'
     implies: 'nologo'
     implies: 'msvc_env'
     implies: 'parse_showincludes'
-    implies: 'copts'
+    implies: 'user_compile_flags'
+    implies: 'sysroot'
+    implies: 'unfiltered_compile_flags'
   }
 
   action_config {
@@ -466,6 +408,8 @@ toolchain {
     implies: 'msvc_env'
     implies: 'use_linker'
     implies: 'no_stripping'
+    implies: 'has_configured_linker_path'
+    implies: 'def_file'
   }
 
   action_config {
@@ -533,6 +477,137 @@ toolchain {
     implies: 'msvc_env'
   }
 
+  # TODO(b/65151735): Remove legacy_compile_flags feature when legacy fields are
+  # not used in this crosstool
+  feature {
+    name: 'legacy_compile_flags'
+    flag_set {
+      expand_if_all_available: 'legacy_compile_flags'
+      action: 'preprocess-assemble'
+      action: 'c-compile'
+      action: 'c++-compile'
+      action: 'c++-header-parsing'
+      action: 'c++-header-preprocessing'
+      action: 'c++-module-compile'
+      action: 'c++-module-codegen'
+      flag_group {
+        iterate_over: 'legacy_compile_flags'
+        flag: '%{legacy_compile_flags}'
+      }
+    }
+  }
+
+  feature {
+    name: "msvc_env"
+    env_set {
+      action: "c-compile"
+      action: "c++-compile"
+      action: "c++-module-compile"
+      action: "c++-module-codegen"
+      action: "c++-header-parsing"
+      action: "c++-header-preprocessing"
+      action: "assemble"
+      action: "preprocess-assemble"
+      action: "c++-link-executable"
+      action: "c++-link-dynamic-library"
+      action: "c++-link-static-library"
+      action: "c++-link-alwayslink-static-library"
+      action: "c++-link-pic-static-library"
+      action: "c++-link-alwayslink-pic-static-library"
+      env_entry {
+        key: "PATH"
+        value: "%{msvc_env_path}"
+      }
+      env_entry {
+        key: "INCLUDE"
+        value: "%{msvc_env_include}"
+      }
+      env_entry {
+        key: "LIB"
+        value: "%{msvc_env_lib}"
+      }
+      env_entry {
+        key: "TMP"
+        value: "%{msvc_env_tmp}"
+      }
+      env_entry {
+        key: "TEMP"
+        value: "%{msvc_env_tmp}"
+      }
+    }
+  }
+
+  feature {
+    name: "use_linker"
+    env_set {
+      action: "c++-link-executable"
+      action: "c++-link-dynamic-library"
+      env_entry {
+        key: "USE_LINKER"
+        value: "1"
+      }
+    }
+  }
+
+  feature {
+    name: 'include_paths'
+    flag_set {
+      action: "assemble"
+      action: 'preprocess-assemble'
+      action: 'c-compile'
+      action: 'c++-compile'
+      action: 'c++-header-parsing'
+      action: 'c++-header-preprocessing'
+      action: 'c++-module-compile'
+      flag_group {
+        iterate_over: 'quote_include_paths'
+        flag: '/I%{quote_include_paths}'
+      }
+      flag_group {
+        iterate_over: 'include_paths'
+        flag: '/I%{include_paths}'
+      }
+      flag_group {
+        iterate_over: 'system_include_paths'
+        flag: '/I%{system_include_paths}'
+      }
+    }
+  }
+
+  feature {
+    name: "preprocessor_defines"
+    flag_set {
+      action: "assemble"
+      action: "preprocess-assemble"
+      action: "c-compile"
+      action: "c++-compile"
+      action: "c++-header-parsing"
+      action: "c++-header-preprocessing"
+      action: "c++-module-compile"
+      flag_group {
+        flag: "/D%{preprocessor_defines}"
+        iterate_over: "preprocessor_defines"
+      }
+    }
+  }
+
+  # Tell Bazel to parse the output of /showIncludes
+  feature {
+    name: 'parse_showincludes'
+    flag_set {
+      action: 'preprocess-assemble'
+      action: 'c-compile'
+      action: 'c++-compile'
+      action: 'c++-module-compile'
+      action: 'c++-header-preprocessing'
+      action: 'c++-header-parsing'
+      flag_group {
+        flag: "/showIncludes"
+      }
+    }
+  }
+
+
   feature {
     name: 'generate_pdb_file'
     requires: {
@@ -595,12 +670,10 @@ toolchain {
   feature {
     name: 'input_param_flags'
     flag_set {
-      expand_if_all_available: 'library_search_directories'
-      action: 'c++-link-executable'
+      expand_if_all_available: 'interface_library_output_path'
       action: 'c++-link-dynamic-library'
       flag_group {
-        iterate_over: 'library_search_directories'
-        flag: "-L%{library_search_directories}"
+        flag: "/IMPLIB:%{interface_library_output_path}"
       }
     }
     flag_set {
@@ -752,47 +825,85 @@ toolchain {
   }
 
   feature {
-    name: 'link_crt_library'
-    flag_set {
-      action: 'c-compile'
-      action: 'c++-compile'
-      flag_group {
-        # The flag is filled by cc_configure.
-        # The default option is /MT, set USE_DYNAMIC_CRT=1 to change it to /MD
-        flag: "%{crt_option}"
-      }
-    }
-    flag_set {
-      action: 'c++-link-executable'
-      action: 'c++-link-dynamic-library'
-      flag_group {
-      # The flag is filled by cc_configure.
-        # The default value is libcmt.lib, set USE_DYNAMIC_CRT=1 to change it to msvcrt.lib
-        flag: "/DEFAULTLIB:%{crt_library}"
-      }
-    }
+    name: 'static_link_msvcrt'
   }
 
   feature {
-    name: 'link_crt_debug_library'
+    name: 'static_link_msvcrt_no_debug'
     flag_set {
       action: 'c-compile'
       action: 'c++-compile'
       flag_group {
-        # The flag is filled by cc_configure.
-        # The default option is /MTd, set USE_DYNAMIC_CRT=1 to change it to /MDd
-        flag: "%{crt_debug_option}"
+        flag: "/MT"
       }
     }
     flag_set {
       action: 'c++-link-executable'
       action: 'c++-link-dynamic-library'
       flag_group {
-        # The flag is filled by cc_configure.
-        # The default value is libcmtd.lib, set USE_DYNAMIC_CRT=1 to change it to msvcrtd.lib
-        flag: "/DEFAULTLIB:%{crt_debug_library}"
+        flag: "/DEFAULTLIB:libcmt.lib"
       }
     }
+    requires: { feature: 'fastbuild'}
+    requires: { feature: 'opt'}
+  }
+
+  feature {
+    name: 'dynamic_link_msvcrt_no_debug'
+    flag_set {
+      action: 'c-compile'
+      action: 'c++-compile'
+      flag_group {
+        flag: "/MD"
+      }
+    }
+    flag_set {
+      action: 'c++-link-executable'
+      action: 'c++-link-dynamic-library'
+      flag_group {
+        flag: "/DEFAULTLIB:msvcrt.lib"
+      }
+    }
+    requires: { feature: 'fastbuild'}
+    requires: { feature: 'opt'}
+  }
+
+  feature {
+    name: 'static_link_msvcrt_debug'
+    flag_set {
+      action: 'c-compile'
+      action: 'c++-compile'
+      flag_group {
+        flag: "/MTd"
+      }
+    }
+    flag_set {
+      action: 'c++-link-executable'
+      action: 'c++-link-dynamic-library'
+      flag_group {
+        flag: "/DEFAULTLIB:libcmtd.lib"
+      }
+    }
+    requires: { feature: 'dbg'}
+  }
+
+  feature {
+    name: 'dynamic_link_msvcrt_debug'
+    flag_set {
+      action: 'c-compile'
+      action: 'c++-compile'
+      flag_group {
+        flag: "/MDd"
+      }
+    }
+    flag_set {
+      action: 'c++-link-executable'
+      action: 'c++-link-dynamic-library'
+      flag_group {
+        flag: "/DEFAULTLIB:msvcrtd.lib"
+      }
+    }
+    requires: { feature: 'dbg'}
   }
 
   feature {
@@ -813,7 +924,6 @@ toolchain {
         flag: "/INCREMENTAL:NO"
       }
     }
-    implies: 'link_crt_debug_library'
     implies: 'generate_pdb_file'
   }
 
@@ -835,7 +945,6 @@ toolchain {
         flag: "/INCREMENTAL:NO"
       }
     }
-    implies: 'link_crt_library'
     implies: 'generate_pdb_file'
   }
 
@@ -848,14 +957,12 @@ toolchain {
         flag: "/O2"
       }
     }
-    implies: 'link_crt_library'
   }
 
   feature {
-    name: 'copts'
+    name: 'user_compile_flags'
     flag_set {
-      expand_if_all_available: 'copts'
-      action: 'assemble'
+      expand_if_all_available: 'user_compile_flags'
       action: 'preprocess-assemble'
       action: 'c-compile'
       action: 'c++-compile'
@@ -864,11 +971,76 @@ toolchain {
       action: 'c++-module-compile'
       action: 'c++-module-codegen'
       flag_group {
-        iterate_over: 'copts'
-        flag: '%{copts}'
+        iterate_over: 'user_compile_flags'
+        flag: '%{user_compile_flags}'
       }
     }
   }
+
+  feature {
+    name: 'sysroot'
+    flag_set {
+      expand_if_all_available: 'sysroot'
+      action: 'assemble'
+      action: 'preprocess-assemble'
+      action: 'c-compile'
+      action: 'c++-compile'
+      action: 'c++-header-parsing'
+      action: 'c++-header-preprocessing'
+      action: 'c++-module-compile'
+      action: 'c++-module-codegen'
+      action: 'c++-link-executable'
+      action: 'c++-link-dynamic-library'
+      flag_group {
+        iterate_over: 'sysroot'
+        flag: '--sysroot=%{sysroot}'
+      }
+    }
+  }
+
+  feature {
+    name: 'unfiltered_compile_flags'
+    flag_set {
+      expand_if_all_available: 'unfiltered_compile_flags'
+      action: 'preprocess-assemble'
+      action: 'c-compile'
+      action: 'c++-compile'
+      action: 'c++-header-parsing'
+      action: 'c++-header-preprocessing'
+      action: 'c++-module-compile'
+      action: 'c++-module-codegen'
+      flag_group {
+        iterate_over: 'unfiltered_compile_flags'
+        flag: '%{unfiltered_compile_flags}'
+      }
+    }
+  }
+
+  feature {
+    name : 'def_file',
+    flag_set {
+      expand_if_all_available: 'def_file_path'
+      action: 'c++-link-executable'
+      action: 'c++-link-dynamic-library'
+      flag_group {
+        flag: "/DEF:%{def_file_path}"
+        # We can specify a different DLL name in DEF file, /ignore:4070 suppresses
+        # the warning message about DLL name doesn't match the default one.
+        # See https://msdn.microsoft.com/en-us/library/sfkk2fz7.aspx
+        flag: "/ignore:4070"
+      }
+    }
+  }
+
+  feature {
+    name: 'windows_export_all_symbols'
+  }
+
+  feature {
+    name: 'no_windows_export_all_symbols'
+  }
+
+  linking_mode_flags { mode: DYNAMIC }
 
 %{compilation_mode_content}
 

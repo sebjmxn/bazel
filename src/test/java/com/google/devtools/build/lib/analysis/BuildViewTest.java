@@ -33,18 +33,18 @@ import com.google.devtools.build.lib.actions.FailAction;
 import com.google.devtools.build.lib.analysis.BuildView.AnalysisResult;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
+import com.google.devtools.build.lib.analysis.configuredtargets.InputFileConfiguredTarget;
+import com.google.devtools.build.lib.analysis.configuredtargets.OutputFileConfiguredTarget;
 import com.google.devtools.build.lib.analysis.util.BuildViewTestBase;
-import com.google.devtools.build.lib.analysis.util.ExpectedDynamicConfigurationErrors;
+import com.google.devtools.build.lib.analysis.util.ExpectedTrimmedConfigurationErrors;
 import com.google.devtools.build.lib.analysis.util.MockRule;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.Rule;
-import com.google.devtools.build.lib.skyframe.SkyFunctions;
-import com.google.devtools.build.lib.skyframe.TargetPatternValue.TargetPatternKey;
 import com.google.devtools.build.lib.testutil.Suite;
+import com.google.devtools.build.lib.testutil.TestConstants;
 import com.google.devtools.build.lib.testutil.TestSpec;
-import com.google.devtools.build.lib.testutil.TestUtils;
 import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -52,15 +52,12 @@ import com.google.devtools.build.skyframe.NotifyingHelper.EventType;
 import com.google.devtools.build.skyframe.NotifyingHelper.Listener;
 import com.google.devtools.build.skyframe.NotifyingHelper.Order;
 import com.google.devtools.build.skyframe.SkyKey;
-import com.google.devtools.build.skyframe.TrackingAwaiter;
 import com.google.devtools.common.options.Options;
 import com.google.devtools.common.options.OptionsParsingException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -390,7 +387,7 @@ public class BuildViewTest extends BuildViewTestBase {
     update("//package:top");
     ConfiguredTarget top = getConfiguredTarget("//package:top", getTargetConfiguration());
     Iterable<Dependency> targets = getView().getDirectPrerequisiteDependenciesForTesting(
-        reporter, top, getBuildConfigurationCollection()).values();
+        reporter, top, getBuildConfigurationCollection(), /*toolchainContext=*/ null).values();
 
     Dependency innerDependency =
         Dependency.withTransitionAndAspects(
@@ -447,6 +444,10 @@ public class BuildViewTest extends BuildViewTestBase {
   // Regression test: "output_filter broken (but in a different way)"
   @Test
   public void testOutputFilter() throws Exception {
+    if (getInternalTestExecutionMode() != TestConstants.InternalTestExecutionMode.NORMAL) {
+      // TODO(b/67651960): fix or justify disabling.
+      return;
+    }
     runAnalysisWithOutputFilter(Pattern.compile("^//java/c"));
     assertNoEvents();
   }
@@ -466,6 +467,10 @@ public class BuildViewTest extends BuildViewTestBase {
    */
   @Test
   public void testCircularDependencyBelowTwoTargets() throws Exception {
+    if (getInternalTestExecutionMode() != TestConstants.InternalTestExecutionMode.NORMAL) {
+      // TODO(b/67412276): handle cycles properly.
+      return;
+    }
     scratch.file("foo/BUILD",
         "sh_library(name = 'top1', srcs = ['top1.sh'], deps = [':rec1'])",
         "sh_library(name = 'top2', srcs = ['top2.sh'], deps = [':rec1'])",
@@ -483,6 +488,10 @@ public class BuildViewTest extends BuildViewTestBase {
   // Regression test: cycle node depends on error.
   @Test
   public void testErrorBelowCycle() throws Exception {
+    if (getInternalTestExecutionMode() != TestConstants.InternalTestExecutionMode.NORMAL) {
+      // TODO(b/67651960): fix or justify disabling (also b/67412276: handle cycles properly).
+      return;
+    }
     scratch.file("foo/BUILD",
         "sh_library(name = 'top', deps = ['mid'])",
         "sh_library(name = 'mid', deps = ['bad', 'cycle1'])",
@@ -513,6 +522,10 @@ public class BuildViewTest extends BuildViewTestBase {
 
   @Test
   public void testErrorBelowCycleKeepGoing() throws Exception {
+    if (getInternalTestExecutionMode() != TestConstants.InternalTestExecutionMode.NORMAL) {
+      // TODO(b/67412276): handle cycles properly.
+      return;
+    }
     scratch.file("foo/BUILD",
         "sh_library(name = 'top', deps = ['mid'])",
         "sh_library(name = 'mid', deps = ['bad', 'cycle1'])",
@@ -527,10 +540,9 @@ public class BuildViewTest extends BuildViewTestBase {
     assertContainsEvent("and referenced by '//foo:bad'");
     assertContainsEvent("in sh_library rule //foo");
     assertContainsEvent("cycle in dependency graph");
-    // Dynamic configurations trigger this error both in configuration trimming (which visits
-    // the transitive target closure) and in the normal configured target cycle detection path.
-    // So we get an additional instance of this check (which varies depending on whether Skyframe
-    // loading phase is enabled).
+    // This error is triggered both in configuration trimming (which visits the transitive target
+    // closure) and in the normal configured target cycle detection path. So we get an additional
+    // instance of this check (which varies depending on whether Skyframe loading phase is enabled).
     // TODO(gregce): Fix above and uncomment the below. Note that the duplicate doesn't make it into
     // real user output (it only affects tests).
     //  assertEventCount(3, eventCollector);
@@ -650,6 +662,10 @@ public class BuildViewTest extends BuildViewTestBase {
 
   @Test
   public void testDepOnGoodTargetInBadPkgAndTransitiveCycle_Incremental() throws Exception {
+    if (getInternalTestExecutionMode() != TestConstants.InternalTestExecutionMode.NORMAL) {
+      // TODO(b/67412276): handle cycles properly.
+      return;
+    }
     runTestDepOnGoodTargetInBadPkgAndTransitiveCycle(/*incremental=*/true);
   }
 
@@ -659,6 +675,10 @@ public class BuildViewTest extends BuildViewTestBase {
    */
   @Test
   public void testCycleReporting_TargetCycleWhenPackageInError() throws Exception {
+    if (getInternalTestExecutionMode() != TestConstants.InternalTestExecutionMode.NORMAL) {
+      // TODO(b/67412276): handle cycles properly.
+      return;
+    }
     reporter.removeHandler(failFastHandler);
     scratch.file("cycles/BUILD",
         "sh_library(name = 'a', deps = [':b'])",
@@ -671,6 +691,10 @@ public class BuildViewTest extends BuildViewTestBase {
 
   @Test
   public void testTransitiveLoadingDoesntShortCircuitInKeepGoing() throws Exception {
+    if (getInternalTestExecutionMode() != TestConstants.InternalTestExecutionMode.NORMAL) {
+      // TODO(b/67651960): fix or justify disabling.
+      return;
+    }
     reporter.removeHandler(failFastHandler);
     scratch.file("parent/BUILD",
         "sh_library(name = 'a', deps = ['//child:b'])",
@@ -815,23 +839,20 @@ public class BuildViewTest extends BuildViewTestBase {
   /**
    * Regression test for bug when a configured target has missing deps, but also depends
    * transitively on an error. We build //foo:query, which depends on a valid and an invalid target
-   * pattern. We ensure that by the time it requests its dependent target patterns, the invalid one
-   * is ready, and throws (though not before the request is registered). Then, when bubbling the
-   * invalid target pattern error up, we ensure that it bubbles into //foo:query, which must cope
-   * with the combination of an error and a missing dep.
+   * pattern. We first make sure the invalid target pattern is in the graph, so that it throws when
+   * requested by //foo:query. Then, when bubbling the invalid target pattern error up, //foo:query
+   * must cope with the combination of an error and a missing dep.
    */
   @Test
   public void testGenQueryWithBadTargetAndUnfinishedTarget() throws Exception {
     // The target //foo:zquery is used to force evaluation of //foo:nosuchtarget before the target
     // patterns in //foo:query are enqueued for evaluation. That way, //foo:query will depend on one
     // invalid target pattern and two target patterns that haven't been evaluated yet.
-    // It is important that 'query' come before 'zquery' alphabetically, so that when the error is
-    // bubbling up, it goes to the //foo:query node -- we use a graph implementation in which the
-    // reverse deps of each entry are ordered alphabetically. It is also important that a missing
-    // target pattern is requested before the exception is thrown, so we have both //foo:b and
-    // //foo:z missing from the deps, in the hopes that at least one of them will come before
-    // //foo:nosuchtarget.
-    scratch.file("foo/BUILD",
+    // It is important that a missing target pattern is requested before the exception is thrown, so
+    // we have both //foo:b and //foo:z missing from the deps, in the hopes that at least one of
+    // them will come before //foo:nosuchtarget.
+    scratch.file(
+        "foo/BUILD",
         "genquery(name = 'query',",
         "         expression = 'deps(//foo:b) except //foo:nosuchtarget except //foo:z',",
         "         scope = ['//foo:a'])",
@@ -840,63 +861,24 @@ public class BuildViewTest extends BuildViewTestBase {
         "         scope = ['//foo:a'])",
         "sh_library(name = 'a')",
         "sh_library(name = 'b')",
-        "sh_library(name = 'z')"
-    );
-    Listener listener =
-        new Listener() {
-          private final CountDownLatch errorDone = new CountDownLatch(1);
-          private final CountDownLatch realQueryStarted = new CountDownLatch(1);
-
-          @Override
-          public void accept(SkyKey key, EventType type, Order order, Object context) {
-            if (!key.functionName().equals(SkyFunctions.TARGET_PATTERN)) {
-              return;
-            }
-            String label = ((TargetPatternKey) key.argument()).getPattern();
-            if (label.equals("//foo:nosuchtarget")) {
-              if (type == EventType.SET_VALUE) {
-                // Inform //foo:query-dep-registering thread that it may proceed.
-                errorDone.countDown();
-                // Wait to make sure //foo:query-dep-registering process has started.
-                TrackingAwaiter.INSTANCE.awaitLatchAndTrackExceptions(
-                    realQueryStarted, "//foo:query did not request dep in time");
-              } else if (type == EventType.ADD_REVERSE_DEP
-                  && context.toString().contains("foo:query")) {
-                // Make sure that when foo:query requests foo:nosuchtarget, it's already done.
-                TrackingAwaiter.INSTANCE.awaitLatchAndTrackExceptions(
-                    errorDone, "//foo:nosuchtarget did not evaluate in time");
-              }
-            } else if ((label.equals("//foo:b") || label.equals("//foo:z"))
-                && type == EventType.CREATE_IF_ABSENT) {
-              // Inform error-evaluating thread that it may throw an exception.
-              realQueryStarted.countDown();
-              TrackingAwaiter.INSTANCE.awaitLatchAndTrackExceptions(
-                  errorDone, "//foo:nosuchtarget did not evaluate in time");
-              // Don't let the target pattern //foo:{b,z} get enqueued for evaluation until we
-              // receive an interrupt signal from the threadpool. The interrupt means that
-              // evaluation is shutting down, and so //foo:{b,z} definitely won't get evaluated.
-              CountDownLatch waitForInterrupt = new CountDownLatch(1);
-              try {
-                waitForInterrupt.await(TestUtils.WAIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-                throw new IllegalStateException("node was not interrupted in time");
-              } catch (InterruptedException e) {
-                // Expected.
-                Thread.currentThread().interrupt();
-              }
-            }
-          }
-        };
-    injectGraphListenerForTesting(listener, /*deterministic=*/ true);
+        "sh_library(name = 'z')");
     reporter.removeHandler(failFastHandler);
     try {
-      update("//foo:query", "//foo:zquery");
+      update("//foo:zquery");
+      fail();
+    } catch (ViewCreationFailedException e) {
+      assertThat(e)
+          .hasMessageThat()
+          .contains("Analysis of target '//foo:zquery' failed; build aborted");
+    }
+    try {
+      update("//foo:query");
       fail();
     } catch (ViewCreationFailedException e) {
       assertThat(e)
           .hasMessageThat()
           .contains("Analysis of target '//foo:query' failed; build aborted");
     }
-    TrackingAwaiter.INSTANCE.assertNoErrors();
   }
 
   /**
@@ -906,6 +888,10 @@ public class BuildViewTest extends BuildViewTestBase {
    */
   @Test
   public void testPostProcessedConfigurableAttributes() throws Exception {
+    if (getInternalTestExecutionMode() != TestConstants.InternalTestExecutionMode.NORMAL) {
+      // TODO(b/67651960): fix or justify disabling.
+      return;
+    }
     useConfiguration("--cpu=k8");
     reporter.removeHandler(failFastHandler); // Expect errors from action conflicts.
     scratch.file("conflict/BUILD",
@@ -924,10 +910,13 @@ public class BuildViewTest extends BuildViewTestBase {
 
   @Test
   public void testCycleDueToJavaLauncherConfiguration() throws Exception {
-    if (defaultFlags().contains(Flag.DYNAMIC_CONFIGURATIONS)) {
-      // Dynamic configurations don't yet support late-bound attributes. Development testing already
-      // runs all tests with dynamic configurations enabled, so this will still fail for developers
-      // and won't get lost in the fog.
+    if (getInternalTestExecutionMode() != TestConstants.InternalTestExecutionMode.NORMAL) {
+      // TODO(b/67412276): handle cycles properly.
+      return;
+    }
+    if (defaultFlags().contains(Flag.TRIMMED_CONFIGURATIONS)) {
+      // Trimmed configurations don't yet support late-bound attributes.
+      // TODO(gregce): re-enable this when ready.
       return;
     }
     scratch.file("foo/BUILD",
@@ -936,7 +925,7 @@ public class BuildViewTest extends BuildViewTestBase {
     // Everything is fine - the dependency graph is acyclic.
     update("//foo:java", "//foo:cpp");
     if (getTargetConfiguration().trimConfigurations()) {
-      fail(ExpectedDynamicConfigurationErrors.LATE_BOUND_ATTRIBUTES_UNSUPPORTED);
+      fail(ExpectedTrimmedConfigurationErrors.LATE_BOUND_ATTRIBUTES_UNSUPPORTED);
     }
     // Now there will be an analysis-phase cycle because the java_binary now has an implicit dep on
     // the cc_binary launcher.
@@ -976,6 +965,10 @@ public class BuildViewTest extends BuildViewTestBase {
    */
   @Test
   public void testCircularDependency() throws Exception {
+    if (getInternalTestExecutionMode() != TestConstants.InternalTestExecutionMode.NORMAL) {
+      // TODO(b/67412276): handle cycles properly.
+      return;
+    }
     scratch.file("cycle/BUILD",
         "cc_library(name = 'foo', srcs = ['foo.cc'], deps = [':bar'])",
         "cc_library(name = 'bar', srcs = ['bar.cc'], deps = [':foo'])");
@@ -997,6 +990,10 @@ public class BuildViewTest extends BuildViewTestBase {
    */
   @Test
   public void testCircularDependencyWithKeepGoing() throws Exception {
+    if (getInternalTestExecutionMode() != TestConstants.InternalTestExecutionMode.NORMAL) {
+      // TODO(b/67412276): handle cycles properly.
+      return;
+    }
     scratch.file("cycle/BUILD",
         "cc_library(name = 'foo', srcs = ['foo.cc'], deps = [':bar'])",
         "cc_library(name = 'bar', srcs = ['bar.cc'], deps = [':foo'])",
@@ -1029,6 +1026,10 @@ public class BuildViewTest extends BuildViewTestBase {
 
   @Test
   public void testCircularDependencyWithLateBoundLabel() throws Exception {
+    if (getInternalTestExecutionMode() != TestConstants.InternalTestExecutionMode.NORMAL) {
+      // TODO(b/67412276): handle cycles properly.
+      return;
+    }
     scratch.file("cycle/BUILD",
         "cc_library(name = 'foo', deps = [':bar'])",
         "cc_library(name = 'bar')");
@@ -1107,23 +1108,6 @@ public class BuildViewTest extends BuildViewTestBase {
   }
 
   @Test
-  public void testMissingXcodeVersion() throws Exception {
-    // The xcode_version flag uses yet another code path on top of the redirect chaser.
-    // Note that the redirect chaser throws if it can't find a package, but doesn't throw if it
-    // can't find a label in a package - that's why we use an empty package here.
-    scratch.file("xcode/BUILD");
-    useConfiguration("--xcode_version=1.2", "--xcode_version_config=//xcode:does_not_exist");
-    reporter.removeHandler(failFastHandler);
-    try {
-      update(defaultFlags().with(Flag.KEEP_GOING));
-      fail();
-    } catch (InvalidConfigurationException e) {
-      assertThat(e).hasMessageThat().contains("//xcode:does_not_exist");
-    }
-  }
-
-
-  @Test
   public void testVisibilityReferencesNonexistentPackage() throws Exception {
     scratch.file("z/a/BUILD",
         "py_library(name='a', visibility=['//nonexistent:nothing'])");
@@ -1157,6 +1141,10 @@ public class BuildViewTest extends BuildViewTestBase {
 
   @Test
   public void testNonTopLevelErrorsPrintedExactlyOnce() throws Exception {
+    if (getInternalTestExecutionMode() != TestConstants.InternalTestExecutionMode.NORMAL) {
+      // TODO(b/67651960): fix or justify disabling.
+      return;
+    }
     scratch.file("parent/BUILD",
         "sh_library(name = 'a', deps = ['//child:b'])");
     scratch.file("child/BUILD",
@@ -1176,6 +1164,10 @@ public class BuildViewTest extends BuildViewTestBase {
 
   @Test
   public void testNonTopLevelErrorsPrintedExactlyOnce_KeepGoing() throws Exception {
+    if (getInternalTestExecutionMode() != TestConstants.InternalTestExecutionMode.NORMAL) {
+      // TODO(b/67651960): fix or justify disabling.
+      return;
+    }
     scratch.file("parent/BUILD",
         "sh_library(name = 'a', deps = ['//child:b'])");
     scratch.file("child/BUILD",
@@ -1191,6 +1183,10 @@ public class BuildViewTest extends BuildViewTestBase {
 
   @Test
   public void testNonTopLevelErrorsPrintedExactlyOnce_ActionListener() throws Exception {
+    if (getInternalTestExecutionMode() != TestConstants.InternalTestExecutionMode.NORMAL) {
+      // TODO(b/67651960): fix or justify disabling.
+      return;
+    }
     scratch.file("parent/BUILD",
         "sh_library(name = 'a', deps = ['//child:b'])");
     scratch.file("child/BUILD",
@@ -1214,6 +1210,10 @@ public class BuildViewTest extends BuildViewTestBase {
 
   @Test
   public void testNonTopLevelErrorsPrintedExactlyOnce_ActionListener_KeepGoing() throws Exception {
+    if (getInternalTestExecutionMode() != TestConstants.InternalTestExecutionMode.NORMAL) {
+      // TODO(b/67651960): fix or justify disabling.
+      return;
+    }
     scratch.file("parent/BUILD",
         "sh_library(name = 'a', deps = ['//child:b'])");
     scratch.file("child/BUILD",
@@ -1231,15 +1231,15 @@ public class BuildViewTest extends BuildViewTestBase {
   }
 
   @Test
-  public void testTopLevelTargetsAreTrimmedWithDynamicConfigurations() throws Exception {
+  public void testTopLevelTargetsAreTrimmedWithTrimmedConfigurations() throws Exception {
     scratch.file("foo/BUILD",
         "sh_library(name='x', ",
         "        srcs=['x.sh'])");
     useConfiguration("--experimental_dynamic_configs=on");
     AnalysisResult res = update("//foo:x");
     ConfiguredTarget topLevelTarget = Iterables.getOnlyElement(res.getTargetsToBuild());
-    assertThat(topLevelTarget.getConfiguration().getAllFragments().keySet()).containsExactly(
-        ruleClassProvider.getUniversalFragment());
+    assertThat(topLevelTarget.getConfiguration().getAllFragments().keySet())
+        .containsExactly(ruleClassProvider.getUniversalFragment());
   }
 
   @Test
@@ -1389,13 +1389,13 @@ public class BuildViewTest extends BuildViewTestBase {
     }
   }
 
-  /** Runs the same test with dynamic configurations. */
+  /** Runs the same test with trimmed configurations. */
   @TestSpec(size = Suite.SMALL_TESTS)
   @RunWith(JUnit4.class)
-  public static class WithDynamicConfigurations extends BuildViewTest {
+  public static class WithTrimmedConfigurations extends BuildViewTest {
     @Override
     protected FlagBuilder defaultFlags() {
-      return super.defaultFlags().with(Flag.DYNAMIC_CONFIGURATIONS);
+      return super.defaultFlags().with(Flag.TRIMMED_CONFIGURATIONS);
     }
   }
 }

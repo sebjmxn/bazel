@@ -15,6 +15,7 @@
 
 import locale
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -126,17 +127,20 @@ class TestBase(unittest.TestCase):
     Raises:
       ArgumentError: if `path` is absolute or contains uplevel references
       IOError: if an I/O error occurs
+    Returns:
+      The absolute path of the directory created.
     """
     if not path:
-      return
+      return None
     abspath = self.Path(path)
     if os.path.exists(abspath):
       if os.path.isdir(abspath):
-        return
+        return abspath
       raise IOError('"%s" (%s) exists and is not a directory' % (path, abspath))
     os.makedirs(abspath)
+    return abspath
 
-  def ScratchFile(self, path, lines=None):
+  def ScratchFile(self, path, lines=None, executable=False):
     """Creates a file under the test's scratch directory.
 
     Args:
@@ -144,6 +148,7 @@ class TestBase(unittest.TestCase):
         e.g. "foo/bar/BUILD"
       lines: [string]; the contents of the file (newlines are added
         automatically)
+      executable: bool; whether to make the file executable
     Returns:
       The absolute path of the scratch file.
     Raises:
@@ -161,6 +166,8 @@ class TestBase(unittest.TestCase):
         for l in lines:
           f.write(l)
           f.write('\n')
+    if executable:
+      os.chmod(abspath, stat.S_IRWXU)
     return abspath
 
   def RunBazel(self, args, env_remove=None, env_add=None):
@@ -246,19 +253,6 @@ class TestBase(unittest.TestCase):
           # https://github.com/bazelbuild/bazel/issues/3273
           'CC_CONFIGURE_DEBUG': '1'
       }
-
-      # TODO(pcloudy): Remove these hardcoded paths after resolving
-      # https://github.com/bazelbuild/bazel/issues/3273
-      env['BAZEL_VC'] = 'visual-studio-not-found'
-      for p in [
-          (r'C:\Program Files (x86)\Microsoft Visual Studio\2017\Professional'
-           r'\VC'),
-          r'C:\Program Files (x86)\Microsoft Visual Studio\2017\BuildTools\VC',
-          r'C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC'
-      ]:
-        if os.path.exists(p):
-          env['BAZEL_VC'] = p
-          break
     else:
       env = {'HOME': os.path.join(self._temp, 'home')}
 

@@ -32,7 +32,6 @@ import com.google.devtools.build.lib.analysis.BaseRuleClasses;
 import com.google.devtools.build.lib.analysis.ConfiguredAspect;
 import com.google.devtools.build.lib.analysis.ConfiguredAspectFactory;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
-import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTargetFactory;
 import com.google.devtools.build.lib.analysis.RuleContext;
@@ -42,7 +41,7 @@ import com.google.devtools.build.lib.analysis.Runfiles;
 import com.google.devtools.build.lib.analysis.RunfilesProvider;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
 import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
-import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.analysis.configuredtargets.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
@@ -51,15 +50,14 @@ import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.packages.AspectDefinition;
 import com.google.devtools.build.lib.packages.AspectParameters;
-import com.google.devtools.build.lib.packages.Attribute.LateBoundLabel;
-import com.google.devtools.build.lib.packages.Attribute.LateBoundLabelList;
-import com.google.devtools.build.lib.packages.AttributeMap;
+import com.google.devtools.build.lib.packages.Attribute.LateBoundDefault;
 import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.NativeAspectClass;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
 import com.google.devtools.build.lib.packages.SkylarkProviderIdentifier;
+import com.google.devtools.build.lib.rules.java.JavaConfiguration;
 import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.FileTypeSet;
 import java.util.List;
@@ -71,13 +69,6 @@ import java.util.List;
  * and {@link com.google.devtools.build.lib.analysis.AspectTest}.
  */
 public class TestAspects {
-
-  public static final LateBoundLabel EMPTY_LATE_BOUND_LABEL = new LateBoundLabel<Object>() {
-    @Override
-    public Label resolve(Rule rule, AttributeMap attributes, Object configuration) {
-      return null;
-    }
-  };
 
   /**
    * A transitive info provider for collecting aspects in the transitive closure. Created by
@@ -999,14 +990,11 @@ public class TestAspects {
    * Rule with a late-bound dependency.
    */
   public static class LateBoundDepRule implements RuleDefinition {
-    private static final LateBoundLabelList<BuildConfiguration> PLUGINS_LABEL_LIST =
-        new LateBoundLabelList<BuildConfiguration>() {
-          @Override
-          public List<Label> resolve(Rule rule, AttributeMap attributes,
-              BuildConfiguration configuration) {
-            return configuration.getPlugins();
-          }
-        };
+    private static final LateBoundDefault<?, List<Label>> PLUGINS_LABEL_LIST =
+        LateBoundDefault.fromTargetConfiguration(
+            JavaConfiguration.class,
+            ImmutableList.of(),
+            (rule, attributes, javaConfig) -> javaConfig.getPlugins());
 
     @Override
     public RuleClass build(Builder builder, RuleDefinitionEnvironment environment) {

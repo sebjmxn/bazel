@@ -32,6 +32,7 @@ public final class ListLiteral extends Expression {
   /**
    * Types of the ListLiteral.
    */
+  // TODO(laurentlb): This conflicts with Expression.Kind, maybe remove it?
   public enum Kind {LIST, TUPLE}
 
   private final Kind kind;
@@ -97,7 +98,7 @@ public final class ListLiteral extends Expression {
 
   @Override
   Object doEval(Environment env) throws EvalException, InterruptedException {
-    List<Object> result = new ArrayList<>(elements.size());
+    ArrayList<Object> result = new ArrayList<>(elements.size());
     for (Expression element : elements) {
       // Convert NPEs to EvalExceptions.
       if (element == null) {
@@ -105,11 +106,16 @@ public final class ListLiteral extends Expression {
       }
       result.add(element.eval(env));
     }
-    return isTuple() ? Tuple.copyOf(result) : MutableList.copyOf(env, result);
+    return isTuple() ? Tuple.copyOf(result) : MutableList.wrapUnsafe(env, result);
   }
 
   @Override
   public void accept(SyntaxTreeVisitor visitor) {
     visitor.visit(this);
+  }
+
+  @Override
+  public Expression.Kind kind() {
+    return Expression.Kind.LIST_LITERAL;
   }
 }

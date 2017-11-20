@@ -31,13 +31,15 @@ import com.google.devtools.build.lib.actions.ActionInputFileCache;
 import com.google.devtools.build.lib.actions.ActionInputHelper;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Artifact.ArtifactExpander;
-import com.google.devtools.build.lib.actions.EnvironmentalExecException;
+import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.ResourceSet;
 import com.google.devtools.build.lib.actions.SimpleSpawn;
+import com.google.devtools.build.lib.actions.SpawnResult;
+import com.google.devtools.build.lib.analysis.BlazeVersionInfo;
 import com.google.devtools.build.lib.authandtls.AuthAndTLSOptions;
 import com.google.devtools.build.lib.authandtls.GrpcUtils;
+import com.google.devtools.build.lib.exec.SpawnExecException;
 import com.google.devtools.build.lib.exec.SpawnInputExpander;
-import com.google.devtools.build.lib.exec.SpawnResult;
 import com.google.devtools.build.lib.exec.SpawnRunner.ProgressStatus;
 import com.google.devtools.build.lib.exec.SpawnRunner.SpawnExecutionPolicy;
 import com.google.devtools.build.lib.exec.util.FakeOwner;
@@ -60,6 +62,7 @@ import com.google.devtools.remoteexecution.v1test.ExecutionGrpc.ExecutionImplBas
 import com.google.devtools.remoteexecution.v1test.FindMissingBlobsRequest;
 import com.google.devtools.remoteexecution.v1test.FindMissingBlobsResponse;
 import com.google.devtools.remoteexecution.v1test.GetActionResultRequest;
+import com.google.devtools.remoteexecution.v1test.RequestMetadata;
 import com.google.longrunning.Operation;
 import com.google.protobuf.Any;
 import com.google.protobuf.ByteString;
@@ -68,9 +71,15 @@ import com.google.watcher.v1.Change;
 import com.google.watcher.v1.ChangeBatch;
 import com.google.watcher.v1.Request;
 import com.google.watcher.v1.WatcherGrpc.WatcherImplBase;
+import io.grpc.BindableService;
 import io.grpc.CallCredentials;
 import io.grpc.Channel;
+import io.grpc.Metadata;
 import io.grpc.Server;
+import io.grpc.ServerCall;
+import io.grpc.ServerCallHandler;
+import io.grpc.ServerInterceptor;
+import io.grpc.ServerInterceptors;
 import io.grpc.Status;
 import io.grpc.inprocess.InProcessChannelBuilder;
 import io.grpc.inprocess.InProcessServerBuilder;
@@ -228,8 +237,17 @@ public class GrpcRemoteExecutionClientTest {
         GrpcUtils.newCallCredentials(Options.getDefaults(AuthAndTLSOptions.class));
     GrpcRemoteCache remoteCache =
         new GrpcRemoteCache(channel, creds, options, retrier);
-    client = new RemoteSpawnRunner(execRoot, options, null, true, /*cmdlineReporter=*/null,
-        remoteCache, executor);
+    client =
+        new RemoteSpawnRunner(
+            execRoot,
+            options,
+            null,
+            true,
+            /*cmdlineReporter=*/ null,
+            "build-req-id",
+            "command-id",
+            remoteCache,
+            executor);
     inputDigest = fakeFileCache.createScratchInput(simpleSpawn.getInputFiles().get(0), "xyz");
   }
 
@@ -363,22 +381,42 @@ public class GrpcRemoteExecutionClientTest {
     };
   }
 
+  /** Capture the request headers from a client. Useful for testing metadata propagation. */
+  private static class RequestHeadersValidator implements ServerInterceptor {
+    @Override
+    public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(
+        ServerCall<ReqT, RespT> call,
+        Metadata headers,
+        ServerCallHandler<ReqT, RespT> next) {
+      RequestMetadata meta = headers.get(TracingMetadataUtils.METADATA_KEY);
+      assertThat(meta.getCorrelatedInvocationsId()).isEqualTo("build-req-id");
+      assertThat(meta.getToolInvocationId()).isEqualTo("command-id");
+      assertThat(meta.getActionId()).isNotEmpty();
+      assertThat(meta.getToolDetails().getToolName()).isEqualTo("bazel");
+      assertThat(meta.getToolDetails().getToolVersion())
+          .isEqualTo(BlazeVersionInfo.instance().getVersion());
+      return next.startCall(call, headers);
+    }
+  }
+
   @Test
   public void remotelyExecute() throws Exception {
-    serviceRegistry.addService(
+    BindableService actionCache =
         new ActionCacheImplBase() {
           @Override
           public void getActionResult(
               GetActionResultRequest request, StreamObserver<ActionResult> responseObserver) {
             responseObserver.onError(Status.NOT_FOUND.asRuntimeException());
           }
-        });
+        };
+    serviceRegistry.addService(
+        ServerInterceptors.intercept(actionCache, new RequestHeadersValidator()));
     final ActionResult actionResult =
         ActionResult.newBuilder()
             .setStdoutRaw(ByteString.copyFromUtf8("stdout"))
             .setStderrRaw(ByteString.copyFromUtf8("stderr"))
             .build();
-    serviceRegistry.addService(
+    BindableService execService =
         new ExecutionImplBase() {
           @Override
           public void execute(ExecuteRequest request, StreamObserver<Operation> responseObserver) {
@@ -394,7 +432,9 @@ public class GrpcRemoteExecutionClientTest {
                     .build());
             responseObserver.onCompleted();
           }
-        });
+        };
+    serviceRegistry.addService(
+        ServerInterceptors.intercept(execService, new RequestHeadersValidator()));
     final Command command =
         Command.newBuilder()
             .addAllArguments(ImmutableList.of("/bin/echo", "Hi!"))
@@ -405,7 +445,7 @@ public class GrpcRemoteExecutionClientTest {
                     .build())
             .build();
     final Digest cmdDigest = Digests.computeDigest(command);
-    serviceRegistry.addService(
+    BindableService cas =
         new ContentAddressableStorageImplBase() {
           @Override
           public void findMissingBlobs(
@@ -423,13 +463,15 @@ public class GrpcRemoteExecutionClientTest {
             responseObserver.onNext(b.build());
             responseObserver.onCompleted();
           }
-        });
+        };
+    serviceRegistry.addService(ServerInterceptors.intercept(cas, new RequestHeadersValidator()));
 
     ByteStreamImplBase mockByteStreamImpl = Mockito.mock(ByteStreamImplBase.class);
     when(mockByteStreamImpl.write(Mockito.<StreamObserver<WriteResponse>>anyObject()))
         .thenAnswer(blobWriteAnswer(command.toByteArray()))
         .thenAnswer(blobWriteAnswer("xyz".getBytes(UTF_8)));
-    serviceRegistry.addService(mockByteStreamImpl);
+    serviceRegistry.addService(
+        ServerInterceptors.intercept(mockByteStreamImpl, new RequestHeadersValidator()));
 
     SpawnResult result = client.exec(simpleSpawn, simplePolicy);
     assertThat(result.setupSuccess()).isTrue();
@@ -482,33 +524,67 @@ public class GrpcRemoteExecutionClientTest {
     serviceRegistry.addService(mockExecutionImpl);
 
     WatcherImplBase mockWatcherImpl = Mockito.mock(WatcherImplBase.class);
+    Operation operationWithError =
+        Operation.newBuilder()
+            .setName(opName)
+            .setError(com.google.rpc.Status.newBuilder().setCode(Code.INTERNAL.getNumber()).build())
+            .build();
+    Change chOperationWithError =
+        Change.newBuilder()
+            .setState(Change.State.EXISTS)
+            .setData(Any.pack(operationWithError))
+            .build();
+    ExecuteResponse executeResponseWithError =
+        ExecuteResponse.newBuilder()
+            .setStatus(
+                com.google.rpc.Status.newBuilder().setCode(Code.INTERNAL.getNumber()).build())
+            .build();
+    Operation operationWithExecuteError =
+        Operation.newBuilder()
+            .setName(opName)
+            .setDone(true)
+            .setResponse(Any.pack(executeResponseWithError))
+            .build();
+    Change chOperationWithExecuteError =
+        Change.newBuilder()
+            .setState(Change.State.EXISTS)
+            .setData(Any.pack(operationWithExecuteError))
+            .build();
+    Operation opSuccess =
+        Operation.newBuilder()
+            .setName(opName)
+            .setDone(true)
+            .setResponse(Any.pack(ExecuteResponse.newBuilder().setResult(actionResult).build()))
+            .build();
+    Change chSuccess =
+        Change.newBuilder().setState(Change.State.EXISTS).setData(Any.pack(opSuccess)).build();
     Mockito.doAnswer(
             invocationOnMock -> {
-              @SuppressWarnings("unchecked") StreamObserver<ChangeBatch> responseObserver =
+              @SuppressWarnings("unchecked")
+              StreamObserver<ChangeBatch> responseObserver =
                   (StreamObserver<ChangeBatch>) invocationOnMock.getArguments()[1];
               // Retry the execution call as well as the watch call.
               responseObserver.onNext(
-                  ChangeBatch.newBuilder()
-                      .addChanges(
-                          Change.newBuilder()
-                              .setState(Change.State.EXISTS)
-                              .setData(
-                                  Any.pack(
-                                      Operation.newBuilder()
-                                          .setName(opName)
-                                          .setError(
-                                              com.google.rpc.Status.newBuilder()
-                                                  .setCode(Code.INTERNAL.getNumber())
-                                                  .build())
-                                          .build()))
-                              .build())
-                      .build());
+                  ChangeBatch.newBuilder().addChanges(chOperationWithError).build());
+
               responseObserver.onCompleted();
               return null;
             })
         .doAnswer(
             invocationOnMock -> {
-              @SuppressWarnings("unchecked") StreamObserver<ChangeBatch> responseObserver =
+              @SuppressWarnings("unchecked")
+              StreamObserver<ChangeBatch> responseObserver =
+                  (StreamObserver<ChangeBatch>) invocationOnMock.getArguments()[1];
+              // Retry the execution call as well as the watch call.
+              responseObserver.onNext(
+                  ChangeBatch.newBuilder().addChanges(chOperationWithExecuteError).build());
+              responseObserver.onCompleted();
+              return null;
+            })
+        .doAnswer(
+            invocationOnMock -> {
+              @SuppressWarnings("unchecked")
+              StreamObserver<ChangeBatch> responseObserver =
                   (StreamObserver<ChangeBatch>) invocationOnMock.getArguments()[1];
               // Retry the watch call.
               responseObserver.onError(Status.UNAVAILABLE.asRuntimeException());
@@ -516,7 +592,8 @@ public class GrpcRemoteExecutionClientTest {
             })
         .doAnswer(
             invocationOnMock -> {
-              @SuppressWarnings("unchecked") StreamObserver<ChangeBatch> responseObserver =
+              @SuppressWarnings("unchecked")
+              StreamObserver<ChangeBatch> responseObserver =
                   (StreamObserver<ChangeBatch>) invocationOnMock.getArguments()[1];
               // Some optional initial state.
               responseObserver.onNext(
@@ -539,30 +616,14 @@ public class GrpcRemoteExecutionClientTest {
                               .build())
                       .build());
               // Finished executing.
-              responseObserver.onNext(
-                  ChangeBatch.newBuilder()
-                      .addChanges(
-                          Change.newBuilder()
-                              .setState(Change.State.EXISTS)
-                              .setData(
-                                  Any.pack(
-                                      Operation.newBuilder()
-                                          .setName(opName)
-                                          .setDone(true)
-                                          .setResponse(
-                                              Any.pack(
-                                                  ExecuteResponse.newBuilder()
-                                                      .setResult(actionResult)
-                                                      .build()))
-                                          .build()))
-                              .build())
-                      .build());
+              responseObserver.onNext(ChangeBatch.newBuilder().addChanges(chSuccess).build());
               responseObserver.onCompleted();
               return null;
             })
         .when(mockWatcherImpl)
         .watch(Mockito.<Request>anyObject(), Mockito.<StreamObserver<ChangeBatch>>anyObject());
-    serviceRegistry.addService(mockWatcherImpl);
+    serviceRegistry.addService(
+        ServerInterceptors.intercept(mockWatcherImpl, new RequestHeadersValidator()));
     final Command command =
         Command.newBuilder()
             .addAllArguments(ImmutableList.of("/bin/echo", "Hi!"))
@@ -614,10 +675,10 @@ public class GrpcRemoteExecutionClientTest {
     assertThat(result.exitCode()).isEqualTo(0);
     assertThat(outErr.outAsLatin1()).isEqualTo("stdout");
     assertThat(outErr.errAsLatin1()).isEqualTo("stderr");
-    Mockito.verify(mockExecutionImpl, Mockito.times(3))
+    Mockito.verify(mockExecutionImpl, Mockito.times(4))
         .execute(
             Mockito.<ExecuteRequest>anyObject(), Mockito.<StreamObserver<Operation>>anyObject());
-    Mockito.verify(mockWatcherImpl, Mockito.times(3))
+    Mockito.verify(mockWatcherImpl, Mockito.times(4))
         .watch(
             Mockito.<Request>anyObject(), Mockito.<StreamObserver<ChangeBatch>>anyObject());
   }
@@ -636,13 +697,12 @@ public class GrpcRemoteExecutionClientTest {
     try {
       client.exec(simpleSpawn, simplePolicy);
       fail("Expected an exception");
-    } catch (EnvironmentalExecException expected) {
-      assertThat(expected).hasMessageThat().contains("The remote executor/cache is unavailable");
+    } catch (SpawnExecException expected) {
+      assertThat(expected.getSpawnResult().status())
+          .isEqualTo(SpawnResult.Status.CONNECTION_FAILED);
       // Ensure we also got back the stack trace.
       assertThat(expected).hasMessageThat()
           .contains("GrpcRemoteExecutionClientTest.passUnavailableErrorWithStackTrace");
-      Throwable t = expected.getCause();
-      assertThat(t).isInstanceOf(RetryException.class);
     }
   }
 
@@ -660,14 +720,11 @@ public class GrpcRemoteExecutionClientTest {
     try {
       client.exec(simpleSpawn, simplePolicy);
       fail("Expected an exception");
-    } catch (EnvironmentalExecException expected) {
-      assertThat(expected).hasMessageThat().contains("Error in remote cache/executor");
+    } catch (ExecException expected) {
       assertThat(expected).hasMessageThat().contains("whoa"); // Error details.
       // Ensure we also got back the stack trace.
       assertThat(expected).hasMessageThat()
           .contains("GrpcRemoteExecutionClientTest.passInternalErrorWithStackTrace");
-      Throwable t = expected.getCause();
-      assertThat(t).isInstanceOf(RetryException.class);
     }
   }
 
@@ -719,14 +776,13 @@ public class GrpcRemoteExecutionClientTest {
     try {
       client.exec(simpleSpawn, simplePolicy);
       fail("Expected an exception");
-    } catch (EnvironmentalExecException expected) {
-      assertThat(expected).hasMessageThat().contains("Failed to download from remote cache");
+    } catch (SpawnExecException expected) {
+      assertThat(expected.getSpawnResult().status())
+          .isEqualTo(SpawnResult.Status.REMOTE_CACHE_FAILED);
+      assertThat(expected).hasMessageThat().contains(stdOutDigest.getHash());
       // Ensure we also got back the stack trace.
       assertThat(expected).hasMessageThat()
           .contains("GrpcRemoteExecutionClientTest.passCacheMissErrorWithStackTrace");
-      Throwable t = expected.getCause();
-      assertThat(t).isInstanceOf(CacheNotFoundException.class);
-      assertThat(((CacheNotFoundException) t).getMissingDigest()).isEqualTo(stdOutDigest);
     }
   }
 
@@ -800,11 +856,9 @@ public class GrpcRemoteExecutionClientTest {
     try {
       client.exec(simpleSpawn, simplePolicy);
       fail("Expected an exception");
-    } catch (EnvironmentalExecException expected) {
-      assertThat(expected).hasMessageThat().contains("Failed to download from remote cache");
-      Throwable t = expected.getCause();
-      assertThat(t).isInstanceOf(CacheNotFoundException.class);
-      assertThat(((CacheNotFoundException) t).getMissingDigest()).isEqualTo(stdOutDigest);
+    } catch (ExecException expected) {
+      assertThat(expected).hasMessageThat().contains("Missing digest");
+      assertThat(expected).hasMessageThat().contains("476d9ec701e2de6a6c37ab5211117a7cb8333a27");
     }
   }
 }

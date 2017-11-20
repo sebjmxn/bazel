@@ -23,6 +23,9 @@ import java.lang.annotation.Target;
  *
  * <p>The fields of this annotation have matching getters in {@link OptionDefinition}. Please do not
  * access these fields directly, but instead go through that class.
+ *
+ * <p>A number of checks are run on an Option's fields' values at compile time. See
+ * {@link com.google.devtools.common.options.processor.OptionProcessor} for details.
  */
 @Target(ElementType.FIELD)
 @Retention(RetentionPolicy.RUNTIME)
@@ -85,9 +88,6 @@ public @interface Option {
    *
    * <p>For undocumented flags that aren't listed anywhere, set this to
    * OptionDocumentationCategory.UNDOCUMENTED.
-   *
-   * <p>For hidden or internal options, please set this as UNDOCUMENTED and set the specific reason
-   * for this state in the metadataTags() field.
    */
   OptionDocumentationCategory documentationCategory();
 
@@ -107,6 +107,8 @@ public @interface Option {
    *
    * <p>If one or more of the OptionMetadataTag values apply, please include, but otherwise, this
    * list can be left blank.
+   *
+   * <p>Hidden or internal options must be UNDOCUMENTED (set in {@link #documentationCategory()}).
    */
   OptionMetadataTag[] metadataTags() default {};
 
@@ -158,12 +160,17 @@ public @interface Option {
   Class<? extends ExpansionFunction> expansionFunction() default ExpansionFunction.class;
 
   /**
-   * If the option requires that additional options be implicitly appended, this field will contain
-   * the additional options. Implicit dependencies are parsed at the end of each {@link
-   * OptionsParser#parse} invocation, and override options specified in the same call. However, they
-   * can be overridden by options specified in a later call or by options with a higher priority.
+   * Additional options that need to be implicitly added for this option.
    *
-   * @see OptionPriority
+   * <p>Nothing guarantees that these options are not overridden by later or higher-priority values
+   * for the same options, so if this is truly a requirement, the user should check that the correct
+   * set of options is set.
+   *
+   * <p>These requirements are added for ANY mention of this option, so may not work as intended: in
+   * the case where a user is trying to explicitly turn off a flag (say, by setting a boolean flag
+   * to its default value of false), the mention will still turn on its requirements. For this
+   * reason, it is best not to use this feature, and rely on expansion flags if multi-flag groupings
+   * are needed.
    */
   String[] implicitRequirements() default {};
 
@@ -195,5 +202,6 @@ public @interface Option {
    * expansion flags to other flags, or as implicit requirements to other flags. Use the inner flags
    * instead.
    */
+  @Deprecated
   boolean wrapperOption() default false;
 }

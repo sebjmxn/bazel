@@ -27,7 +27,7 @@ import static com.google.devtools.build.lib.syntax.Type.INTEGER;
 import static com.google.devtools.build.lib.syntax.Type.STRING;
 import static com.google.devtools.build.lib.syntax.Type.STRING_LIST;
 
-import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
@@ -39,7 +39,6 @@ import com.google.devtools.build.lib.analysis.ActionsProvider;
 import com.google.devtools.build.lib.analysis.BaseRuleClasses;
 import com.google.devtools.build.lib.analysis.DefaultInfo;
 import com.google.devtools.build.lib.analysis.OutputGroupProvider;
-import com.google.devtools.build.lib.analysis.PlatformSemantics;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
 import com.google.devtools.build.lib.analysis.skylark.SkylarkAttr.Descriptor;
 import com.google.devtools.build.lib.analysis.test.TestConfiguration;
@@ -68,12 +67,14 @@ import com.google.devtools.build.lib.packages.RuleClass.Builder.RuleClassType;
 import com.google.devtools.build.lib.packages.RuleFactory;
 import com.google.devtools.build.lib.packages.RuleFactory.BuildLangTypedAttributeValuesMap;
 import com.google.devtools.build.lib.packages.RuleFactory.InvalidRuleException;
+import com.google.devtools.build.lib.packages.RuleFunction;
 import com.google.devtools.build.lib.packages.SkylarkAspect;
 import com.google.devtools.build.lib.packages.SkylarkExportable;
 import com.google.devtools.build.lib.packages.SkylarkProvider;
 import com.google.devtools.build.lib.packages.TargetUtils;
 import com.google.devtools.build.lib.packages.TestSize;
 import com.google.devtools.build.lib.skylarkinterface.Param;
+import com.google.devtools.build.lib.skylarkinterface.ParamType;
 import com.google.devtools.build.lib.skylarkinterface.SkylarkPrinter;
 import com.google.devtools.build.lib.skylarkinterface.SkylarkSignature;
 import com.google.devtools.build.lib.syntax.BaseFunction;
@@ -90,11 +91,11 @@ import com.google.devtools.build.lib.syntax.SkylarkDict;
 import com.google.devtools.build.lib.syntax.SkylarkList;
 import com.google.devtools.build.lib.syntax.SkylarkNestedSet;
 import com.google.devtools.build.lib.syntax.SkylarkSignatureProcessor;
+import com.google.devtools.build.lib.syntax.SkylarkType;
 import com.google.devtools.build.lib.syntax.SkylarkUtils;
 import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.syntax.Type.ConversionException;
 import com.google.devtools.build.lib.util.Pair;
-import com.google.devtools.build.lib.util.Preconditions;
 import com.google.protobuf.TextFormat;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -127,10 +128,9 @@ public class SkylarkRuleClassFunctions {
   /** Parent rule class for non-executable non-test Skylark rules. */
   public static final RuleClass baseRule =
       BaseRuleClasses.commonCoreAndSkylarkAttributes(
-              PlatformSemantics.platformAttributes(
-                  BaseRuleClasses.nameAttribute(
-                          new RuleClass.Builder("$base_rule", RuleClassType.ABSTRACT, true))
-                      .add(attr("expect_failure", STRING))))
+              BaseRuleClasses.nameAttribute(
+                      new RuleClass.Builder("$base_rule", RuleClassType.ABSTRACT, true))
+                  .add(attr("expect_failure", STRING)))
           .build();
 
   /** Parent rule class for executable non-test Skylark rules. */
@@ -222,6 +222,7 @@ public class SkylarkRuleClassFunctions {
         "A provider that is provided by every rule, even if it is not returned explicitly. "
             + "A <code>DefaultInfo</code> accepts the following parameters:"
             + "<ul>"
+            + "<li><code>executable</code></li>"
             + "<li><code>files</code></li>"
             + "<li><code>runfiles</code></li>"
             + "<li><code>data_runfiles</code></li>"
@@ -288,15 +289,53 @@ public class SkylarkRuleClassFunctions {
         defaultValue = "''",
         doc =
             "A description of the provider that can be extracted by documentation generating tools."
+      ),
+      @Param(
+        name = "fields",
+        doc = "If specified, restricts the set of allowed fields. <br>"
+            + "Possible values are:"
+            + "<ul>"
+            + "  <li> list of fields:<br>"
+            + "       <pre class=\"language-python\">provider(fields = ['a', 'b'])</pre><p>"
+            + "  <li> dictionary field name -> documentation:<br>"
+            + "       <pre class=\"language-python\">provider(\n"
+            + "       fields = { 'a' : 'Documentation for a', 'b' : 'Documentation for b' })</pre>"
+            + "</ul>"
+            + "All fields are optional.",
+        allowedTypes = {
+            @ParamType(type = SkylarkList.class, generic1 = String.class),
+            @ParamType(type = SkylarkDict.class)
+        },
+        noneable = true,
+        named = true,
+        positional = false,
+        defaultValue = "None"
       )
     },
     useLocation = true
   )
   private static final BuiltinFunction provider =
       new BuiltinFunction("provider") {
-        public Provider invoke(String doc, Location location) {
+        public Provider invoke(String doc, Object fields, Location location) throws EvalException {
+          Iterable<String> fieldNames = null;
+          if (fields instanceof SkylarkList<?>) {
+            @SuppressWarnings("unchecked")
+            SkylarkList<String> list = (SkylarkList<String>)
+                    SkylarkType.cast(
+                        fields,
+                        SkylarkList.class, String.class, location,
+                        "Expected list of strings or dictionary of string -> string for 'fields'");
+            fieldNames = list;
+          }  else  if (fields instanceof SkylarkDict) {
+            Map<String, String> dict = SkylarkType.castMap(
+                fields,
+                String.class, String.class,
+                "Expected list of strings or dictionary of string -> string for 'fields'");
+            fieldNames = dict.keySet();
+          }
           return new SkylarkProvider(
               "<no name>", // name is set on export.
+              fieldNames,
               location);
         }
       };
@@ -342,7 +381,7 @@ public class SkylarkRuleClassFunctions {
                 + "implicitly added and must not be specified. Attributes "
                 + "<code>visibility</code>, <code>deprecation</code>, <code>tags</code>, "
                 + "<code>testonly</code>, and <code>features</code> are implicitly added and "
-                + "cannot be overriden."
+                + "cannot be overridden."
       ),
       // TODO(bazel-team): need to give the types of these builtin attributes
       @Param(
@@ -477,7 +516,7 @@ public class SkylarkRuleClassFunctions {
                     .value(true)
                     .nonconfigurable("Called from RunCommand.isExecutable, which takes a Target")
                     .build());
-            builder.setOutputsDefaultExecutable();
+            builder.setExecutableSkylark();
           }
 
           if (implicitOutputs != Runtime.NONE) {
@@ -510,7 +549,7 @@ public class SkylarkRuleClassFunctions {
           builder.setRuleDefinitionEnvironment(funcallEnv);
           builder.addRequiredToolchains(collectToolchainLabels(toolchains, ast));
 
-          return new RuleFunction(builder, type, attributes, ast.getLocation());
+          return new SkylarkRuleFunction(builder, type, attributes, ast.getLocation());
         }
       };
 
@@ -606,15 +645,25 @@ public class SkylarkRuleClassFunctions {
         name = "required_aspect_providers",
         type = SkylarkList.class,
         defaultValue = "[]",
-        // todo(dslomov): Document once it works.
-        doc = "<not available>"
+        doc =
+            "Allow the aspect to inspect other aspects. If the aspect propagates along "
+                + "a dependency, and the underlying rule sends a different aspect along that "
+                + "dependency, and that aspect provides one of the providers listed here, this "
+                + "aspect will see the providers provided by that aspect. "
+                + "<p>The value should be either a list of providers, or a "
+                + "list of lists of providers. This aspect will 'see'  the underlying aspects that "
+                + "provide  ALL providers from at least ONE of these lists. A single list of "
+                + "providers will be automatically converted to a list containing one list of "
+                + "providers."
       ),
       @Param(
         name = "provides",
         type = SkylarkList.class,
         defaultValue = "[]",
-        // todo(dslomov): Document once it works.
-        doc = "<not available>"
+        doc =
+            "A list of providers this aspect is guaranteed to provide. "
+                + "It is an error if a provider is listed here and the aspect "
+                + "implementation function does not return it."
       ),
       @Param(
         name = "fragments",
@@ -761,7 +810,8 @@ public class SkylarkRuleClassFunctions {
       };
 
   /** The implementation for the magic function "rule" that creates Skylark rule classes */
-  public static final class RuleFunction extends BaseFunction implements SkylarkExportable {
+  public static final class SkylarkRuleFunction extends BaseFunction
+      implements SkylarkExportable, RuleFunction {
     private RuleClass.Builder builder;
 
     private RuleClass ruleClass;
@@ -770,7 +820,9 @@ public class SkylarkRuleClassFunctions {
     private final Location definitionLocation;
     private Label skylarkLabel;
 
-    public RuleFunction(Builder builder, RuleClassType type,
+    public SkylarkRuleFunction(
+        Builder builder,
+        RuleClassType type,
         ImmutableList<Pair<String, SkylarkAttr.Descriptor>> attributes,
         Location definitionLocation) {
       super("rule", FunctionSignature.KWARGS);
@@ -846,13 +898,12 @@ public class SkylarkRuleClassFunctions {
         addAttribute(definitionLocation, builder,
             descriptor.build(attribute.getFirst()));
       }
-      this.ruleClass = builder.build(ruleClassName);
+      this.ruleClass = builder.build(ruleClassName, skylarkLabel + "%" + ruleClassName);
 
       this.builder = null;
       this.attributes = null;
     }
 
-    @VisibleForTesting
     public RuleClass getRuleClass() {
       Preconditions.checkState(ruleClass != null && builder == null);
       return ruleClass;
@@ -874,10 +925,10 @@ public class SkylarkRuleClassFunctions {
    * file.
    *
    * <p>Order in list is significant: all {@link SkylarkAspect}s need to be exported before {@link
-   * RuleFunction}s etc.
+   * SkylarkRuleFunction}s etc.
    */
   private static final ImmutableList<Class<? extends SkylarkExportable>> EXPORTABLES =
-      ImmutableList.of(SkylarkProvider.class, SkylarkAspect.class, RuleFunction.class);
+      ImmutableList.of(SkylarkProvider.class, SkylarkAspect.class, SkylarkRuleFunction.class);
 
   @SkylarkSignature(
     name = "Label",

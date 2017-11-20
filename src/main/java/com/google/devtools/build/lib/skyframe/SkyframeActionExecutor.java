@@ -15,6 +15,7 @@ package com.google.devtools.build.lib.skyframe;
 
 import static com.google.devtools.build.lib.vfs.FileSystemUtils.createDirectoryAndParents;
 
+import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
@@ -41,6 +42,8 @@ import com.google.devtools.build.lib.actions.ActionLogBufferPathGenerator;
 import com.google.devtools.build.lib.actions.ActionLookupData;
 import com.google.devtools.build.lib.actions.ActionLookupValue;
 import com.google.devtools.build.lib.actions.ActionMiddlemanEvent;
+import com.google.devtools.build.lib.actions.ActionResult;
+import com.google.devtools.build.lib.actions.ActionResultReceivedEvent;
 import com.google.devtools.build.lib.actions.ActionStartedEvent;
 import com.google.devtools.build.lib.actions.ActionStatusMessage;
 import com.google.devtools.build.lib.actions.Actions;
@@ -70,7 +73,6 @@ import com.google.devtools.build.lib.events.Reporter;
 import com.google.devtools.build.lib.profiler.Profiler;
 import com.google.devtools.build.lib.profiler.ProfilerTask;
 import com.google.devtools.build.lib.util.Pair;
-import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.util.io.FileOutErr;
 import com.google.devtools.build.lib.util.io.OutErr;
 import com.google.devtools.build.lib.vfs.Path;
@@ -779,7 +781,7 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
     // Delete the outputs before executing the action, just to ensure that
     // the action really does produce the outputs.
     try {
-      action.prepare(context.getExecRoot());
+      action.prepare(context.getFileSystem(), context.getExecRoot());
       createOutputDirectories(action);
     } catch (IOException e) {
       reportError("failed to delete output files before executing action", e, action, null);
@@ -847,7 +849,10 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
     // instead.
     FileOutErr outErrBuffer = actionExecutionContext.getFileOutErr();
     try {
-      action.execute(actionExecutionContext);
+      ActionResult actionResult = action.execute(actionExecutionContext);
+      if (actionResult != ActionResult.EMPTY) {
+        postEvent(new ActionResultReceivedEvent(action, actionResult));
+      }
 
       // Action terminated fine, now report the output.
       // The .showOutput() method is not necessarily a quick check: in its

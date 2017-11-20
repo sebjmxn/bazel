@@ -17,18 +17,10 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 
 import com.android.dex.Dex;
-import com.android.dex.DexFormat;
-import com.android.dex.FieldId;
-import com.android.dex.MethodId;
-import com.android.dex.ProtoId;
-import com.android.dex.TypeList;
 import com.android.dx.command.dexer.DxContext;
 import com.android.dx.merge.CollisionPolicy;
 import com.android.dx.merge.DexMerger;
-import com.google.auto.value.AutoValue;
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
-import com.google.common.collect.ImmutableList;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListeningExecutorService;
@@ -37,7 +29,6 @@ import java.io.IOException;
 import java.nio.BufferOverflowException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashSet;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.zip.ZipEntry;
@@ -53,21 +44,15 @@ class DexFileAggregator implements Closeable {
    */
   private static final String DEX_EXTENSION = ".dex";
 
-  /**
-   * File name prefix of a {@code .dex} file automatically loaded in an
-   * archive.
-   */
-  private static final String DEX_PREFIX = "classes";
-
   private final ArrayList<Dex> currentShard = new ArrayList<>();
-  private final HashSet<FieldDescriptor> fieldsInCurrentShard = new HashSet<>();
-  private final HashSet<MethodDescriptor> methodsInCurrentShard = new HashSet<>();
-  private final int maxNumberOfIdxPerDex;
+  private final boolean forceJumbo;
   private final int wasteThresholdPerDex;
   private final MultidexStrategy multidex;
   private final DxContext context;
   private final ListeningExecutorService executor;
   private final DexFileArchive dest;
+  private final String dexPrefix;
+  private final DexLimitTracker tracker;
 
   private int nextDexFileIndex = 0;
   private ListenableFuture<Void> lastWriter = Futures.<Void>immediateFuture(null);
@@ -77,47 +62,34 @@ class DexFileAggregator implements Closeable {
       DexFileArchive dest,
       ListeningExecutorService executor,
       MultidexStrategy multidex,
+      boolean forceJumbo,
       int maxNumberOfIdxPerDex,
-      int wasteThresholdPerDex) {
+      int wasteThresholdPerDex,
+      String dexPrefix) {
     this.context = context;
     this.dest = dest;
     this.executor = executor;
     this.multidex = multidex;
-    this.maxNumberOfIdxPerDex = maxNumberOfIdxPerDex;
+    this.forceJumbo = forceJumbo;
     this.wasteThresholdPerDex = wasteThresholdPerDex;
+    this.dexPrefix = dexPrefix;
+    tracker = new DexLimitTracker(maxNumberOfIdxPerDex);
   }
 
   public DexFileAggregator add(Dex dexFile) {
     if (multidex.isMultidexAllowed()) {
       // To determine whether currentShard is "full" we track unique field and method signatures,
       // which predicts precisely the number of field and method indices.
-      // Update xxxInCurrentShard first, then check if we overflowed.
-      // This can yield slightly larger .dex files than checking first, at the price of having to
-      // process the class that put us over the edge twice.
-      trackFieldsAndMethods(dexFile);
-      if (!currentShard.isEmpty()
-          && (fieldsInCurrentShard.size() > maxNumberOfIdxPerDex
-              || methodsInCurrentShard.size() > maxNumberOfIdxPerDex)) {
+      if (tracker.track(dexFile) && !currentShard.isEmpty()) {
         // For simplicity just start a new shard to fit the given file.
         // Don't bother with waiting for a later file that might fit the old shard as in the extreme
         // we'd have to wait until the end to write all shards.
         rotateDexFile();
-        trackFieldsAndMethods(dexFile);
+        tracker.track(dexFile);
       }
     }
     currentShard.add(dexFile);
     return this;
-  }
-
-  private void trackFieldsAndMethods(Dex dexFile) {
-    int fieldCount = dexFile.fieldIds().size();
-    for (int fieldIndex = 0; fieldIndex < fieldCount; ++fieldIndex) {
-      fieldsInCurrentShard.add(FieldDescriptor.fromDex(dexFile, fieldIndex));
-    }
-    int methodCount = dexFile.methodIds().size();
-    for (int methodIndex = 0; methodIndex < methodCount; ++methodIndex) {
-      methodsInCurrentShard.add(MethodDescriptor.fromDex(dexFile, methodIndex));
-    }
   }
 
   @Override
@@ -153,8 +125,7 @@ class DexFileAggregator implements Closeable {
   private void rotateDexFile() {
     writeMergedFile(currentShard.toArray(/* apparently faster than pre-sized array */ new Dex[0]));
     currentShard.clear();
-    fieldsInCurrentShard.clear();
-    methodsInCurrentShard.clear();
+    tracker.clear();
   }
 
   private void writeMergedFile(Dex... dexes) {
@@ -162,7 +133,7 @@ class DexFileAggregator implements Closeable {
     checkState(multidex.isMultidexAllowed() || nextDexFileIndex == 0);
     String filename = getDexFileName(nextDexFileIndex++);
     ListenableFuture<Dex> merged =
-        dexes.length == 1
+        dexes.length == 1 && !forceJumbo
             ? Futures.immediateFuture(dexes[0])
             : executor.submit(new RunDexMerger(dexes));
     lastWriter =
@@ -175,84 +146,50 @@ class DexFileAggregator implements Closeable {
       case 0:
         return new Dex(0);
       case 1:
-        return dexes[0];
-      default:
-        try {
-          DexMerger dexMerger = new DexMerger(dexes, CollisionPolicy.FAIL, context);
-          dexMerger.setCompactWasteThreshold(wasteThresholdPerDex);
-          return dexMerger.merge();
-        } catch (BufferOverflowException e) {
-          if (dexes.length <= 2) {
-            throw e;
-          }
-          // Bug in dx can cause this for ~1500 or more classes
-          Dex[] left = Arrays.copyOf(dexes, dexes.length / 2);
-          Dex[] right = Arrays.copyOfRange(dexes, left.length, dexes.length);
-          System.err.printf("Couldn't merge %d classes, trying %d%n", dexes.length, left.length);
-          try {
-            return merge(merge(left), merge(right));
-          } catch (RuntimeException e2) {
-            e2.addSuppressed(e);
-            throw e2;
-          }
-        }
+        // Need to actually process the single given file for forceJumbo :(
+        return forceJumbo ? merge(dexes[0], new Dex(0)) : dexes[0];
+      default: // fall out
+    }
+    DexMerger dexMerger = new DexMerger(dexes, CollisionPolicy.FAIL, context);
+    dexMerger.setCompactWasteThreshold(wasteThresholdPerDex);
+    if (forceJumbo) {
+      try {
+        DexMerger.class.getMethod("setForceJumbo", Boolean.TYPE).invoke(dexMerger, true);
+      } catch (ReflectiveOperationException e) {
+        throw new IllegalStateException("--forceJumbo flag not supported", e);
+      }
+    }
+
+    try {
+      return dexMerger.merge();
+    } catch (BufferOverflowException e) {
+      if (dexes.length <= 2) {
+        throw e;
+      }
+      // Bug in dx can cause this for ~1500 or more classes
+      Dex[] left = Arrays.copyOf(dexes, dexes.length / 2);
+      Dex[] right = Arrays.copyOfRange(dexes, left.length, dexes.length);
+      System.err.printf("Couldn't merge %d classes, trying %d%n", dexes.length, left.length);
+      try {
+        return merge(merge(left), merge(right));
+      } catch (RuntimeException e2) {
+        e2.addSuppressed(e);
+        throw e2;
+      }
     }
   }
 
   // More or less copied from from com.android.dx.command.dexer.Main
-  @VisibleForTesting
-  static String getDexFileName(int i) {
-    return i == 0 ? DexFormat.DEX_IN_JAR_NAME : DEX_PREFIX + (i + 1) + DEX_EXTENSION;
+  private String getDexFileName(int i) {
+    return dexPrefix + (i == 0 ? "" : i + 1) + DEX_EXTENSION;
   }
 
-  private static String typeName(Dex dex, int typeIndex) {
-    return dex.typeNames().get(typeIndex);
-  }
-
-  @AutoValue
-  abstract static class FieldDescriptor {
-    static FieldDescriptor fromDex(Dex dex, int fieldIndex) {
-      FieldId field = dex.fieldIds().get(fieldIndex);
-      String name = dex.strings().get(field.getNameIndex());
-      String declaringClass = typeName(dex, field.getDeclaringClassIndex());
-      String type = typeName(dex, field.getTypeIndex());
-      return new AutoValue_DexFileAggregator_FieldDescriptor(declaringClass, name, type);
-    }
-
-    abstract String declaringClass();
-    abstract String fieldName();
-    abstract String fieldType();
-  }
-
-  @AutoValue
-  abstract static class MethodDescriptor {
-    static MethodDescriptor fromDex(Dex dex, int methodIndex) {
-      MethodId method = dex.methodIds().get(methodIndex);
-      ProtoId proto = dex.protoIds().get(method.getProtoIndex());
-      String name = dex.strings().get(method.getNameIndex());
-      String declaringClass = typeName(dex, method.getDeclaringClassIndex());
-      String returnType = typeName(dex, proto.getReturnTypeIndex());
-      TypeList parameterTypeIndices = dex.readTypeList(proto.getParametersOffset());
-      ImmutableList.Builder<String> parameterTypes = ImmutableList.builder();
-      for (short parameterTypeIndex : parameterTypeIndices.getTypes()) {
-        parameterTypes.add(typeName(dex, parameterTypeIndex & 0xFFFF));
-      }
-      return new AutoValue_DexFileAggregator_MethodDescriptor(
-          declaringClass, name, parameterTypes.build(), returnType);
-    }
-
-    abstract String declaringClass();
-    abstract String methodName();
-    abstract ImmutableList<String> parameterTypes();
-    abstract String returnType();
-  }
 
   private class RunDexMerger implements Callable<Dex> {
 
     private final Dex[] dexes;
 
     public RunDexMerger(Dex... dexes) {
-      checkArgument(dexes.length >= 2, "Only got %s dex files to merge", dexes.length);
       this.dexes = dexes;
     }
 
@@ -274,7 +211,7 @@ class DexFileAggregator implements Closeable {
 
     private final ListenableFuture<Dex> dex;
     private final String filename;
-    private final DexFileArchive dest;
+    @SuppressWarnings ("hiding") private final DexFileArchive dest;
 
     public WriteFile(String filename, ListenableFuture<Dex> dex, DexFileArchive dest) {
       this.filename = filename;

@@ -53,14 +53,6 @@ public final class ReturnStatement extends Statement {
     this.returnExpression = returnExpression;
   }
 
-  @Override
-  void doExec(Environment env) throws EvalException, InterruptedException {
-    if (returnExpression == null) {
-      throw new ReturnException(getLocation(), Runtime.NONE);
-    }
-    throw new ReturnException(returnExpression.getLocation(), returnExpression.eval(env));
-  }
-
   @Nullable
   public Expression getReturnExpression() {
     return returnExpression;
@@ -80,5 +72,10 @@ public final class ReturnStatement extends Statement {
   @Override
   public void accept(SyntaxTreeVisitor visitor) {
     visitor.visit(this);
+  }
+
+  @Override
+  public Kind kind() {
+    return Kind.RETURN;
   }
 }

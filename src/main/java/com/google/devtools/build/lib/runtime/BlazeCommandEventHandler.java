@@ -27,12 +27,12 @@ import com.google.devtools.common.options.OptionsBase;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.EnumSet;
 import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import org.joda.time.format.DateTimeFormat;
-import org.joda.time.format.DateTimeFormatter;
 
 /**
  * BlazeCommandEventHandler: an event handler established for the duration of a
@@ -40,7 +40,7 @@ import org.joda.time.format.DateTimeFormatter;
  */
 public class BlazeCommandEventHandler implements EventHandler {
 
-  private static final Logger LOG = Logger.getLogger(BlazeCommandEventHandler.class.getName());
+  private static final Logger logger = Logger.getLogger(BlazeCommandEventHandler.class.getName());
 
   public enum UseColor { YES, NO, AUTO }
   public enum UseCurses { YES, NO, AUTO }
@@ -81,7 +81,7 @@ public class BlazeCommandEventHandler implements EventHandler {
 
     @Option(
       name = "show_progress_rate_limit",
-      defaultValue = "0.03", // A nice middle ground; snappy but not too spammy in logs.
+      defaultValue = "0.2", // A nice middle ground; snappy but not too spammy in logs.
       category = "verbosity",
       documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
       effectTags = {OptionEffectTag.UNKNOWN},
@@ -194,7 +194,7 @@ public class BlazeCommandEventHandler implements EventHandler {
 
     @Option(
       name = "experimental_ui",
-      defaultValue = "false",
+      defaultValue = "true",
       category = "verbosity",
       documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
       effectTags = {OptionEffectTag.UNKNOWN},
@@ -216,7 +216,7 @@ public class BlazeCommandEventHandler implements EventHandler {
 
     @Option(
       name = "experimental_ui_actions_shown",
-      defaultValue = "3",
+      defaultValue = "8",
       category = "verbosity",
       documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
       effectTags = {OptionEffectTag.UNKNOWN},
@@ -237,7 +237,7 @@ public class BlazeCommandEventHandler implements EventHandler {
       help =
           "Number of bytes to which the experimental UI will limit its output (non-positive "
               + "values indicate unlimited). Once the limit is approaching, the experimental UI "
-              + "will try hard to limit in a meaningful way, but will ultimately just drop all  "
+              + "will try hard to limit in a meaningful way, but will ultimately just drop all "
               + "output."
     )
     public int experimentalUiLimitConsoleOutput;
@@ -252,7 +252,7 @@ public class BlazeCommandEventHandler implements EventHandler {
   }
 
   private static final DateTimeFormatter TIMESTAMP_FORMAT =
-      DateTimeFormat.forPattern("(MM-dd HH:mm:ss.SSS) ");
+      DateTimeFormatter.ofPattern("(MM-dd HH:mm:ss.SSS) ");
 
   protected final OutErr outErr;
 
@@ -351,7 +351,7 @@ public class BlazeCommandEventHandler implements EventHandler {
       // This can happen in server mode if the blaze client has exited, or if output is redirected
       // to a file and the disk is full, etc. May be moot in the case of full disk, or useful in
       // the case of real bug in our handling of streams.
-      LOG.log(Level.WARNING, "Failed to write event", e);
+      logger.log(Level.WARNING, "Failed to write event", e);
     }
   }
 
@@ -359,6 +359,6 @@ public class BlazeCommandEventHandler implements EventHandler {
    * @return a string representing the current time, eg "04-26 13:47:32.124".
    */
   protected String timestamp() {
-    return TIMESTAMP_FORMAT.print(System.currentTimeMillis());
+    return TIMESTAMP_FORMAT.format(ZonedDateTime.now());
   }
 }

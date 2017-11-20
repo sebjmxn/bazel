@@ -33,7 +33,7 @@ Build and test software of any size, quickly and reliably.
 
 ## Documentation
 
-  * [Bazel command line](https://docs.bazel.build/bazel-user-manual.html)
+  * [Bazel command line](https://docs.bazel.build/user-manual.html)
   * [Rule reference](https://docs.bazel.build/be/overview.html)
   * [Use the query command](https://docs.bazel.build/query.html)
   * [Extend Bazel](https://docs.bazel.build/skylark/index.html)
@@ -45,7 +45,7 @@ Build and test software of any size, quickly and reliably.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md)
 
-[![Build Status](http://ci.bazel.io/buildStatus/icon?job=bazel-tests)](http://ci.bazel.io/job/bazel-tests)
+[![Build Status](https://ci.bazel.io/buildStatus/icon?job=bazel-tests)](https://ci.bazel.io/job/bazel-tests)
 
 Bazel is released in 'Beta'.
 See the [product roadmap](https://bazel.build/roadmap.html) to learn about the

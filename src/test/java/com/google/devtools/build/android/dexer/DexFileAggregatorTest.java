@@ -66,8 +66,10 @@ public class DexFileAggregatorTest {
             dest,
             newDirectExecutorService(),
             MultidexStrategy.MINIMAL,
+            /*forceJumbo=*/ false,
             DEX_LIMIT,
-            WASTE);
+            WASTE,
+            DexFileMergerTest.DEX_PREFIX);
     dexer.close();
     verify(dest, times(0)).addFile(any(ZipEntry.class), any(Dex.class));
   }
@@ -76,10 +78,44 @@ public class DexFileAggregatorTest {
   public void testAddAndClose_singleInputWritesThatInput() throws Exception {
     DexFileAggregator dexer =
         new DexFileAggregator(
-            new DxContext(), dest, newDirectExecutorService(), MultidexStrategy.MINIMAL, 0, WASTE);
+            new DxContext(),
+            dest,
+            newDirectExecutorService(),
+            MultidexStrategy.MINIMAL,
+            /*forceJumbo=*/ false,
+            0,
+            WASTE,
+            DexFileMergerTest.DEX_PREFIX);
     dexer.add(dex);
     dexer.close();
     verify(dest).addFile(any(ZipEntry.class), eq(dex));
+  }
+
+  @Test
+  public void testAddAndClose_forceJumboRewrites() throws Exception {
+    DexFileAggregator dexer =
+        new DexFileAggregator(
+            new DxContext(),
+            dest,
+            newDirectExecutorService(),
+            MultidexStrategy.MINIMAL,
+            /*forceJumbo=*/ true,
+            0,
+            WASTE,
+            DexFileMergerTest.DEX_PREFIX);
+    dexer.add(dex);
+    try {
+      dexer.close();
+    } catch (IllegalStateException e) {
+      assertThat(e).hasMessage("--forceJumbo flag not supported");
+      System.err.println("Skipping this test due to missing --forceJumbo support in Android SDK.");
+      e.printStackTrace();
+      return;
+    }
+
+    verify(dest).addFile(any(ZipEntry.class), written.capture());
+    assertThat(written.getValue()).isNotEqualTo(dex);
+    assertThat(written.getValue().getLength()).isGreaterThan(dex.getLength());
   }
 
   @Test
@@ -90,8 +126,10 @@ public class DexFileAggregatorTest {
             dest,
             newDirectExecutorService(),
             MultidexStrategy.BEST_EFFORT,
+            /*forceJumbo=*/ false,
             DEX_LIMIT,
-            WASTE);
+            WASTE,
+            DexFileMergerTest.DEX_PREFIX);
     Dex dex2 = DexFiles.toDex(convertClass(ByteStreams.class));
     dexer.add(dex);
     dexer.add(dex2);
@@ -109,8 +147,10 @@ public class DexFileAggregatorTest {
             dest,
             newDirectExecutorService(),
             MultidexStrategy.BEST_EFFORT,
+            /*forceJumbo=*/ false,
             2 /* dex has more than 2 methods and fields */,
-            WASTE);
+            WASTE,
+            DexFileMergerTest.DEX_PREFIX);
     Dex dex2 = DexFiles.toDex(convertClass(ByteStreams.class));
     dexer.add(dex);   // classFile is already over limit but we take anything in empty shard
     dexer.add(dex2);  // this should start a new shard
@@ -129,8 +169,10 @@ public class DexFileAggregatorTest {
             dest,
             newDirectExecutorService(),
             MultidexStrategy.OFF,
+            /*forceJumbo=*/ false,
             2 /* dex has more than 2 methods and fields */,
-            WASTE);
+            WASTE,
+            DexFileMergerTest.DEX_PREFIX);
     Dex dex2 = DexFiles.toDex(convertClass(ByteStreams.class));
     dexer.add(dex);
     dexer.add(dex2);

@@ -24,12 +24,12 @@ import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.FilesToRunProvider;
-import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
 import com.google.devtools.build.lib.analysis.actions.FileWriteAction;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
+import com.google.devtools.build.lib.analysis.configuredtargets.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
@@ -198,6 +198,7 @@ public abstract class ProguardHelper {
         /* proguardSeeds */ (Artifact) null,
         /* proguardUsage */ (Artifact) null,
         /* proguardMapping */ (Artifact) null,
+        /* proguardDictionary */ (Artifact) null,
         bootclasspath,
         deployJar,
         semantics,
@@ -363,6 +364,7 @@ public abstract class ProguardHelper {
    * @param proguard Proguard executable to use
    * @param proguardSpecs Proguard specification files to pass to Proguard
    * @param proguardMapping optional mapping file for Proguard to apply
+   * @param proguardDictionary Optional dictionary file for Proguard to apply
    * @param libraryJars any other Jar files that the {@code programJar} will run against
    * @param optimizationPasses if not null specifies to break proguard up into multiple passes with
    *     the given number of optimization passes.
@@ -376,6 +378,7 @@ public abstract class ProguardHelper {
       @Nullable Artifact proguardSeeds,
       @Nullable Artifact proguardUsage,
       @Nullable Artifact proguardMapping,
+      @Nullable Artifact proguardDictionary,
       Iterable<Artifact> libraryJars,
       Artifact proguardOutputJar,
       JavaSemantics semantics,
@@ -419,6 +422,7 @@ public abstract class ProguardHelper {
           programJar,
           proguardSpecs,
           proguardMapping,
+          proguardDictionary,
           libraryJars,
           output.getOutputJar(),
           output.getMapping(),
@@ -430,7 +434,7 @@ public abstract class ProguardHelper {
       proguardAction
           .setProgressMessage("Trimming binary with Proguard")
           .addOutput(proguardOutputJar);
-      proguardAction.setCommandLine(commandLine.build());
+      proguardAction.addCommandLine(commandLine.build());
       ruleContext.registerAction(proguardAction.build(ruleContext));
     } else {
       // Optimization passes have been specified, so run proguard in multiple phases.
@@ -446,6 +450,7 @@ public abstract class ProguardHelper {
           programJar,
           proguardSpecs,
           proguardMapping,
+          proguardDictionary,
           libraryJars,
           output.getOutputJar(),
           /* proguardOutputMap */ null,
@@ -458,7 +463,7 @@ public abstract class ProguardHelper {
           .setProgressMessage("Trimming binary with Proguard: Verification/Shrinking Pass")
           .addOutput(lastStageOutput);
       initialCommandLine.add("-runtype INITIAL").addExecPath("-nextstageoutput", lastStageOutput);
-      initialAction.setCommandLine(initialCommandLine.build());
+      initialAction.addCommandLine(initialCommandLine.build());
       ruleContext.registerAction(initialAction.build(ruleContext));
 
       for (int i = 1; i <= optimizationPasses; i++) {
@@ -494,6 +499,7 @@ public abstract class ProguardHelper {
               programJar,
               proguardSpecs,
               proguardMapping,
+              proguardDictionary,
               libraryJars,
               output.getOutputJar(),
               /* proguardOutputMap */ null,
@@ -511,7 +517,7 @@ public abstract class ProguardHelper {
               .add("-runtype OPTIMIZATION")
               .addExecPath("-laststageoutput", lastStageOutput)
               .addExecPath("-nextstageoutput", optimizationOutput);
-          optimizationAction.setCommandLine(optimizationCommandLine.build());
+          optimizationAction.addCommandLine(optimizationCommandLine.build());
           ruleContext.registerAction(optimizationAction.build(ruleContext));
           lastStageOutput = optimizationOutput;
         }
@@ -526,6 +532,7 @@ public abstract class ProguardHelper {
           programJar,
           proguardSpecs,
           proguardMapping,
+          proguardDictionary,
           libraryJars,
           output.getOutputJar(),
           output.getMapping(),
@@ -539,7 +546,7 @@ public abstract class ProguardHelper {
           .addInput(lastStageOutput)
           .addOutput(proguardOutputJar);
       finalCommandLine.add("-runtype FINAL").addExecPath("-laststageoutput", lastStageOutput);
-      finalAction.setCommandLine(finalCommandLine.build());
+      finalAction.addCommandLine(finalCommandLine.build());
       ruleContext.registerAction(finalAction.build(ruleContext));
     }
 
@@ -553,6 +560,7 @@ public abstract class ProguardHelper {
       Artifact programJar,
       ImmutableList<Artifact> proguardSpecs,
       @Nullable Artifact proguardMapping,
+      @Nullable Artifact proguardDictionary,
       Iterable<Artifact> libraryJars,
       Artifact proguardOutputJar,
       @Nullable Artifact proguardOutputMap,
@@ -587,6 +595,13 @@ public abstract class ProguardHelper {
     if (proguardMapping != null) {
       builder.addInput(proguardMapping);
       commandLine.addExecPath("-applymapping", proguardMapping);
+    }
+
+    if (proguardDictionary != null) {
+      builder.addInput(proguardDictionary);
+      commandLine.addExecPath("-obfuscationdictionary", proguardDictionary)
+          .addExecPath("-classobfuscationdictionary", proguardDictionary)
+          .addExecPath("-packageobfuscationdictionary", proguardDictionary);
     }
 
     for (Artifact proguardSpec : proguardSpecs) {

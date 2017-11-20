@@ -145,15 +145,14 @@ py_binary(
         "//third_party/java/j2objc:embedded_tools_srcs",
         "//third_party/java/jarjar:embedded_tools_srcs",
         "//third_party/java/jdk/langtools:test-srcs",
+        "//third_party/java/proguard:embedded_tools",
         "//third_party/py/concurrent:srcs",
         "//third_party/py/gflags:srcs",
         "//third_party/py/six:srcs",
         "//src/java_tools/buildjar/java/com/google/devtools/build/buildjar/jarhelper:srcs",
         "//src/tools/android/java/com/google/devtools/build/android:embedded_tools",
-        "//src/tools/android/java/com/google/devtools/build/android/idlclass:embedded_tools",
-        "//src/tools/android/java/com/google/devtools/build/android/dexer:embedded_tools",
-        "//src/tools/android/java/com/google/devtools/build/android/ziputils:embedded_tools",
         "//src/tools/launcher:srcs",
+        "//src/tools/runfiles:srcs",
         "//src/tools/singlejar:embedded_tools",
         "//src/main/cpp/util:embedded_tools",
         "//src/main/native:embedded_tools",
@@ -164,22 +163,22 @@ py_binary(
         "//src/java_tools/junitrunner/java/com/google/testing/junit/runner:Runner_deploy.jar",
         "//src/java_tools/junitrunner/java/com/google/testing/junit/runner:ExperimentalRunner_deploy.jar",
         "//src/java_tools/junitrunner/java/com/google/testing/coverage:embedded_tools",
+        "//third_party/def_parser:srcs",
         "//third_party/ijar",
+        "//third_party/ijar:zipper",
         "//third_party/ijar:embedded_tools",
+        "//src/java_tools/buildjar/java/com/google/devtools/build/java/turbine:turbine_deploy.jar",
         "//third_party/java/jacoco:srcs",
         "//third_party/zlib:embedded_tools",
     ] + select({
         ":darwin": [
             ":darwin_tools",
-            "//third_party/ijar:zipper",
         ],
         ":darwin_x86_64": [
             ":darwin_tools",
-            "//third_party/ijar:zipper",
         ],
         "//conditions:default": [
             ":dummy_darwin_tools",
-            "//third_party/ijar:zipper",
         ],
     }) + select({
         # TODO(bazel-team): Once https://github.com/bazelbuild/bazel/issues/2241
@@ -187,25 +186,23 @@ py_binary(
         ":windows": [
             "//src/java_tools/singlejar:SingleJar_deploy.jar",
             "//src/tools/launcher:launcher",
+            "//third_party/def_parser:def_parser",
         ],
         ":windows_msys": [
             "//src/java_tools/singlejar:SingleJar_deploy.jar",
             "//src/tools/launcher:launcher",
+            "//third_party/def_parser:def_parser",
         ],
         ":windows_msvc": [
             "//src/java_tools/singlejar:SingleJar_deploy.jar",
             "//src/tools/launcher:launcher",
+            "//third_party/def_parser:def_parser",
         ],
         ":arm": [
             "//src/java_tools/singlejar:SingleJar_deploy.jar",
         ],
         "//conditions:default": [
             "//src/tools/singlejar:singlejar",
-        ],
-    }) + select({
-        "//tools/jdk:jdk7": [],
-        "//conditions:default": [
-            "//src/java_tools/buildjar/java/com/google/devtools/build/java/turbine:turbine_deploy.jar",
         ],
     }) + (select({
         ":darwin": [
@@ -227,6 +224,9 @@ py_binary(
             "@openjdk_linux//file",
         ],
     }) if (suffix == "_with_jdk") else []),
+    visibility = [
+        "//src/test:__subpackages__",  # For integration tests
+    ],
 ) for suffix in [
     "",
     "_with_jdk",
@@ -271,7 +271,6 @@ genrule(
         # third
         "//src/main/java/com/google/devtools/build/lib:bazel/BazelServer_deploy.jar",
         "install_base_key" + suffix,
-        "//src/main/cpp:client",
         ":libunix",
         "//src/main/tools:build-runfiles",
         "//src/main/tools:process-wrapper",
@@ -389,27 +388,21 @@ config_setting(
     visibility = ["//visibility:public"],
 )
 
+config_setting(
+    name = "remote",
+    values = {"define": "EXECUTOR=remote"},
+    visibility = ["//visibility:public"],
+)
+
 filegroup(
     name = "srcs",
     srcs = glob(["**"]) + [
         "//src/java_tools/buildjar:srcs",
-        "//src/java_tools/junitrunner/java/com/google/testing/coverage:srcs",
-        "//src/java_tools/junitrunner/java/com/google/testing/junit/junit4:srcs",
-        "//src/java_tools/junitrunner/java/com/google/testing/junit/runner:srcs",
-        "//src/java_tools/junitrunner/java/com/google/testing/junit/runner/internal:srcs",
-        "//src/java_tools/junitrunner/java/com/google/testing/junit/runner/junit4:srcs",
-        "//src/java_tools/junitrunner/java/com/google/testing/junit/runner/model:srcs",
-        "//src/java_tools/junitrunner/java/com/google/testing/junit/runner/sharding:srcs",
-        "//src/java_tools/junitrunner/java/com/google/testing/junit/runner/sharding/api:srcs",
-        "//src/java_tools/junitrunner/java/com/google/testing/junit/runner/sharding/testing:srcs",
-        "//src/java_tools/junitrunner/java/com/google/testing/junit/runner/util:srcs",
-        "//src/java_tools/junitrunner/javatests/com/google/testing/junit/runner:srcs",
-        "//src/java_tools/junitrunner/javatests/com/google/testing/junit/runner/testbed:srcs",
+        "//src/java_tools/junitrunner:srcs",
         "//src/java_tools/singlejar:srcs",
         "//src/main/cpp:srcs",
         "//src/main/java/com/google/devtools/build/docgen:srcs",
         "//src/main/java/com/google/devtools/build/lib:srcs",
-        "//src/main/java/com/google/devtools/build/lib/causes:srcs",
         "//src/main/java/com/google/devtools/build/skyframe:srcs",
         "//src/main/java/com/google/devtools/common/options:srcs",
         "//src/main/java/com/google/devtools/skylark:srcs",
@@ -422,6 +415,7 @@ filegroup(
         "//src/test/docker:srcs",
         "//src/test/gen:srcs",
         "//src/test/native:srcs",
+        "//src/test/skylark:srcs",
         "//src/test/java/com/google/devtools/build/android:srcs",
         "//src/test/java/com/google/devtools/build/docgen:srcs",
         "//src/test/java/com/google/devtools/build/lib:srcs",
@@ -430,8 +424,8 @@ filegroup(
         "//src/test/py/bazel:srcs",
         "//src/test/shell:srcs",
         "//src/tools/android/java/com/google/devtools/build/android:srcs",
-        "//src/tools/benchmark:srcs",
         "//src/tools/launcher:srcs",
+        "//src/tools/runfiles:srcs",
         "//src/tools/skylark/java/com/google/devtools/skylark/skylint:srcs",
         "//src/tools/skylark/javatests/com/google/devtools/skylark/skylint:srcs",
         "//src/tools/xcode/actoolwrapper:srcs",
@@ -460,4 +454,33 @@ genrule(
     cmd = "$(location :combine_derived_java_srcs.sh) $(JAVABASE) $@ $(SRCS)",
     tools = ["combine_derived_java_srcs.sh"],
     visibility = ["//:__pkg__"],
+)
+
+test_suite(
+    name = "windows_tests",
+    tags = [
+        "-no_windows",
+        "-slow",
+    ],
+    visibility = ["//visibility:private"],
+)
+
+test_suite(
+    name = "all_windows_tests",
+    tests = [
+        ":windows_tests",
+        "//src/test/cpp:all_windows_tests",
+        "//src/test/java/com/google/devtools/build/android:all_windows_tests",
+        "//src/test/java/com/google/devtools/build/docgen:all_windows_tests",
+        "//src/test/java/com/google/devtools/build/lib:all_windows_tests",
+        "//src/test/java/com/google/devtools/build/skyframe:all_windows_tests",
+        "//src/test/java/com/google/devtools/common/options:all_windows_tests",
+        "//src/test/native:all_windows_tests",
+        "//src/test/py/bazel:all_windows_tests",
+        "//src/test/shell/bazel:bazel_bootstrap_distfile_test",
+        "//src/test/shell/bazel:bazel_windows_example_test",
+        "//src/tools/launcher:all_windows_tests",
+        "//src/tools/runfiles:all_windows_tests",
+        "//third_party/def_parser:all_windows_tests",
+    ],
 )

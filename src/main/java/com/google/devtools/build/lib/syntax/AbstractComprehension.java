@@ -269,12 +269,17 @@ public abstract class AbstractComprehension extends Expression {
   }
 
   @Override
+  public Kind kind() {
+    return Kind.COMPREHENSION;
+  }
+
+  @Override
   Object doEval(Environment env) throws EvalException, InterruptedException {
     OutputCollector collector = createCollector(env);
     evalStep(env, collector, 0);
     Object result = collector.getResult(env);
 
-    if (!env.getSemantics().incompatibleComprehensionVariablesDoNotLeak) {
+    if (!env.getSemantics().incompatibleComprehensionVariablesDoNotLeak()) {
       return result;
     }
 
@@ -286,8 +291,8 @@ public abstract class AbstractComprehension extends Expression {
       // Check if a loop variable conflicts with another local variable.
       LValue lvalue = clause.getLValue();
       if (lvalue != null) {
-        for (String name : lvalue.boundNames()) {
-          env.removeLocalBinding(name);
+        for (Identifier ident : lvalue.boundIdentifiers()) {
+          env.removeLocalBinding(ident.getName());
         }
       }
     }

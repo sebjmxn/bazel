@@ -18,6 +18,7 @@ import static org.junit.Assert.fail;
 
 import com.google.common.base.Functions;
 import com.google.common.base.Joiner;
+import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
@@ -27,6 +28,7 @@ import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.BuildView;
 import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
+import com.google.devtools.build.lib.analysis.ServerDirectories;
 import com.google.devtools.build.lib.analysis.util.AnalysisMock;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.TargetParsingException;
@@ -36,19 +38,17 @@ import com.google.devtools.build.lib.events.ExtendedEventHandler.Postable;
 import com.google.devtools.build.lib.events.StoredEventHandler;
 import com.google.devtools.build.lib.packages.ConstantRuleVisibility;
 import com.google.devtools.build.lib.packages.PackageFactory;
+import com.google.devtools.build.lib.packages.SkylarkSemanticsOptions;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.packages.util.MockToolsConfig;
 import com.google.devtools.build.lib.skyframe.BazelSkyframeExecutorConstants;
 import com.google.devtools.build.lib.skyframe.DiffAwareness;
-import com.google.devtools.build.lib.skyframe.PrecomputedValue;
 import com.google.devtools.build.lib.skyframe.SequencedSkyframeExecutor;
 import com.google.devtools.build.lib.skyframe.SkyValueDirtinessChecker;
 import com.google.devtools.build.lib.skyframe.SkyframeExecutor;
-import com.google.devtools.build.lib.syntax.SkylarkSemanticsOptions;
 import com.google.devtools.build.lib.testutil.ManualClock;
 import com.google.devtools.build.lib.testutil.MoreAsserts;
 import com.google.devtools.build.lib.testutil.TestConstants;
-import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.util.io.TimestampGranularityMonitor;
 import com.google.devtools.build.lib.vfs.FileSystem;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
@@ -588,6 +588,7 @@ public class LoadingPhaseRunnerTest {
 
     private final List<Path> changes = new ArrayList<>();
     private final LoadingPhaseRunner loadingPhaseRunner;
+    private final BlazeDirectories directories;
 
     private LoadingOptions options;
     private final StoredEventHandler storedErrors;
@@ -605,33 +606,30 @@ public class LoadingPhaseRunnerTest {
       mockToolsConfig = new MockToolsConfig(workspace);
       analysisMock = AnalysisMock.get();
       analysisMock.setupMockClient(mockToolsConfig);
+      directories =
+          new BlazeDirectories(
+              new ServerDirectories(fs.getPath("/install"), fs.getPath("/output")),
+              workspace,
+              analysisMock.getProductName());
       FileSystemUtils.deleteTree(workspace.getRelative("base"));
 
       ConfiguredRuleClassProvider ruleClassProvider = analysisMock.createRuleClassProvider();
       PackageFactory pkgFactory =
-          analysisMock.getPackageFactoryBuilderForTesting().build(ruleClassProvider, fs);
+          analysisMock.getPackageFactoryBuilderForTesting(directories).build(ruleClassProvider, fs);
       PackageCacheOptions options = Options.getDefaults(PackageCacheOptions.class);
       storedErrors = new StoredEventHandler();
-      BlazeDirectories directories =
-          new BlazeDirectories(
-              fs.getPath("/install"),
-              fs.getPath("/output"),
-              workspace,
-              analysisMock.getProductName());
       skyframeExecutor =
           SequencedSkyframeExecutor.create(
               pkgFactory,
+              fs,
               directories,
-              null, /* binTools -- not used */
               null, /* workspaceStatusActionFactory -- not used */
               ruleClassProvider.getBuildInfoFactories(),
               ImmutableList.<DiffAwareness.Factory>of(),
               Predicates.<PathFragment>alwaysFalse(),
-              analysisMock.getSkyFunctions(),
-              ImmutableList.<PrecomputedValue.Injected>of(),
+              analysisMock.getSkyFunctions(directories),
               ImmutableList.<SkyValueDirtinessChecker>of(),
               PathFragment.EMPTY_FRAGMENT,
-              analysisMock.getProductName(),
               BazelSkyframeExecutorConstants.CROSS_REPOSITORY_LABEL_VIOLATION_STRATEGY,
               BazelSkyframeExecutorConstants.BUILD_FILES_BY_PRIORITY,
               BazelSkyframeExecutorConstants.ACTION_ON_IO_EXCEPTION_READING_BUILD_FILE);

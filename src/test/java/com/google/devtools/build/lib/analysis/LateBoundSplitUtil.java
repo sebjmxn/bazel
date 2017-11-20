@@ -27,9 +27,7 @@ import com.google.devtools.build.lib.analysis.config.InvalidConfigurationExcepti
 import com.google.devtools.build.lib.analysis.util.MockRule;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.packages.Attribute;
-import com.google.devtools.build.lib.packages.AttributeMap;
 import com.google.devtools.build.lib.packages.BuildType;
-import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.testutil.TestRuleClassProvider;
 import com.google.devtools.build.lib.util.FileTypeSet;
 import com.google.devtools.common.options.Option;
@@ -52,11 +50,6 @@ public class LateBoundSplitUtil {
       defaultValue = ""
     )
     public String fooFlag;
-
-    @Override
-    public List<Attribute.SplitTransition<BuildOptions>> getPotentialSplitTransitions() {
-      return ImmutableList.<Attribute.SplitTransition<BuildOptions>>of(SIMPLE_SPLIT);
-    }
   }
 
   /**
@@ -71,11 +64,6 @@ public class LateBoundSplitUtil {
       BuildOptions split2 = buildOptions.clone();
       split2.get(TestOptions.class).fooFlag = "two";
       return ImmutableList.<BuildOptions>of(split1, split2);
-    }
-
-    @Override
-    public boolean defaultsToSelf() {
-      return false;
     }
   };
 
@@ -107,32 +95,24 @@ public class LateBoundSplitUtil {
     }
   }
 
-  /**
-   * The resolver that chooses the late-bound attribute's value.
-   */
-  private static final Attribute.LateBoundLabel<BuildConfiguration> SIMPLE_LATEBOUND_RESOLVER =
-      new Attribute.LateBoundLabel<BuildConfiguration>() {
-        @Override
-        public Label resolve(Rule rule, AttributeMap attributes, BuildConfiguration configuration) {
-          return Label.parseAbsoluteUnchecked("//foo:latebound_dep");
-        }
-      };
-
-  /**
-   * A custom rule that applies a late-bound split attribute.
-   */
-  static final RuleDefinition RULE_WITH_LATEBOUND_SPLIT_ATTR = (MockRule) () -> MockRule.define(
-      "rule_with_latebound_split",
-      (builder, env) -> {
-        builder
-            .add(
-                attr(":latebound_split_attr", BuildType.LABEL)
-                    .allowedFileTypes(FileTypeSet.ANY_FILE)
-                    .allowedRuleClasses(Attribute.ANY_RULE)
-                    .cfg(SIMPLE_SPLIT)
-                    .value(SIMPLE_LATEBOUND_RESOLVER))
-            .requiresConfigurationFragments(TestFragment.class);
-      });
+  /** A custom rule that applies a late-bound split attribute. */
+  static final RuleDefinition RULE_WITH_LATEBOUND_SPLIT_ATTR =
+      (MockRule)
+          () ->
+              MockRule.define(
+                  "rule_with_latebound_split",
+                  (builder, env) -> {
+                    builder
+                        .add(
+                            attr(":latebound_split_attr", BuildType.LABEL)
+                                .allowedFileTypes(FileTypeSet.ANY_FILE)
+                                .allowedRuleClasses(Attribute.ANY_RULE)
+                                .cfg(SIMPLE_SPLIT)
+                                .value(
+                                    Attribute.LateBoundDefault.fromConstant(
+                                        Label.parseAbsoluteUnchecked("//foo:latebound_dep"))))
+                        .requiresConfigurationFragments(TestFragment.class);
+                  });
 
   /**
    * A custom rule that requires {@link TestFragment}.

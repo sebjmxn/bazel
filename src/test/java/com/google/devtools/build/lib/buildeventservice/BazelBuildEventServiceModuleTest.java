@@ -20,6 +20,7 @@ import static org.mockito.Mockito.when;
 
 import com.google.common.base.Function;
 import com.google.common.collect.FluentIterable;
+import com.google.common.collect.ImmutableList;
 import com.google.common.eventbus.EventBus;
 import com.google.devtools.build.lib.authandtls.AuthAndTLSOptions;
 import com.google.devtools.build.lib.buildeventstream.PathConverter;
@@ -27,12 +28,12 @@ import com.google.devtools.build.lib.buildeventstream.transports.BinaryFormatFil
 import com.google.devtools.build.lib.buildeventstream.transports.BuildEventStreamOptions;
 import com.google.devtools.build.lib.buildeventstream.transports.JsonFormatFileTransport;
 import com.google.devtools.build.lib.buildeventstream.transports.TextFormatFileTransport;
+import com.google.devtools.build.lib.clock.Clock;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.Reporter;
 import com.google.devtools.build.lib.runtime.BlazeModule.ModuleEnvironment;
 import com.google.devtools.build.lib.runtime.BuildEventStreamer;
 import com.google.devtools.build.lib.runtime.Command;
-import com.google.devtools.build.lib.util.Clock;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.common.options.Options;
 import com.google.devtools.common.options.OptionsBase;
@@ -249,5 +250,13 @@ public class BazelBuildEventServiceModuleTest {
             "bar",
             "fetch");
     assertThat(buildEventStreamer).isNull();
+  }
+
+  @Test
+  public void testKeywords() throws Exception {
+    besOptions.besKeywords = ImmutableList.of("keyword0", "keyword1", "keyword0");
+    BazelBuildEventServiceModule module = new BazelBuildEventServiceModule();
+    assertThat(module.keywords(besOptions))
+        .containsExactly("user_keyword=keyword0", "user_keyword=keyword1");
   }
 }

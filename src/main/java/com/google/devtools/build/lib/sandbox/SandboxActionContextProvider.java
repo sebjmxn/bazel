@@ -19,8 +19,8 @@ import com.google.devtools.build.lib.actions.ActionContext;
 import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.ResourceManager;
 import com.google.devtools.build.lib.actions.Spawn;
+import com.google.devtools.build.lib.actions.SpawnResult;
 import com.google.devtools.build.lib.exec.ActionContextProvider;
-import com.google.devtools.build.lib.exec.SpawnResult;
 import com.google.devtools.build.lib.exec.SpawnRunner;
 import com.google.devtools.build.lib.exec.apple.XCodeLocalEnvProvider;
 import com.google.devtools.build.lib.exec.local.LocalEnvProvider;
@@ -66,7 +66,8 @@ final class SandboxActionContextProvider extends ActionContextProvider {
     if (LinuxSandboxedSpawnRunner.isSupported(cmdEnv)) {
       SpawnRunner spawnRunner =
           withFallback(
-              cmdEnv, LinuxSandboxedStrategy.create(cmdEnv, sandboxBase, timeoutGraceSeconds));
+              cmdEnv,
+              LinuxSandboxedStrategy.create(cmdEnv, sandboxBase, productName, timeoutGraceSeconds));
       contexts.add(new LinuxSandboxedStrategy(spawnRunner));
     }
 
@@ -90,9 +91,10 @@ final class SandboxActionContextProvider extends ActionContextProvider {
   private static SpawnRunner createFallbackRunner(CommandEnvironment env) {
     LocalExecutionOptions localExecutionOptions =
         env.getOptions().getOptions(LocalExecutionOptions.class);
-    LocalEnvProvider localEnvProvider = OS.getCurrent() == OS.DARWIN
-        ? new XCodeLocalEnvProvider()
-        : LocalEnvProvider.UNMODIFIED;
+    LocalEnvProvider localEnvProvider =
+        OS.getCurrent() == OS.DARWIN
+            ? new XCodeLocalEnvProvider()
+            : LocalEnvProvider.ADD_TEMP_POSIX;
     return
         new LocalSpawnRunner(
             env.getExecRoot(),

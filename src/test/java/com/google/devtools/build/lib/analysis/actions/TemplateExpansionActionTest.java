@@ -26,6 +26,7 @@ import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.actions.Root;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
+import com.google.devtools.build.lib.analysis.ServerDirectories;
 import com.google.devtools.build.lib.analysis.actions.TemplateExpansionAction.Substitution;
 import com.google.devtools.build.lib.analysis.actions.TemplateExpansionAction.Template;
 import com.google.devtools.build.lib.analysis.config.BinTools;
@@ -67,8 +68,7 @@ public class TemplateExpansionActionTest extends FoundationTestCase {
     substitutions.add(Substitution.of("%value%", "bar"));
     directories =
         new BlazeDirectories(
-            scratch.resolve("/install"),
-            scratch.resolve("/base"),
+            new ServerDirectories(scratch.resolve("/install"), scratch.resolve("/base")),
             scratch.resolve("/workspace"),
             "mock-product-name");
     binTools = BinTools.empty(directories);
@@ -101,7 +101,7 @@ public class TemplateExpansionActionTest extends FoundationTestCase {
 
   @Test
   public void testExpansion() throws Exception {
-    Executor executor = new TestExecutorBuilder(directories, binTools).build();
+    Executor executor = new TestExecutorBuilder(fileSystem, directories, binTools).build();
     create().execute(createContext(executor));
     String content = new String(FileSystemUtils.readContentAsLatin1(output));
     String expected = Joiner.on('\n').join("key=foo", "value=bar");
@@ -181,7 +181,7 @@ public class TemplateExpansionActionTest extends FoundationTestCase {
 
   private void executeTemplateExpansion(String expected, List<Substitution> substitutions)
       throws Exception {
-    Executor executor = new TestExecutorBuilder(directories, binTools).build();
+    Executor executor = new TestExecutorBuilder(fileSystem, directories, binTools).build();
     createWithArtifact(substitutions).execute(createContext(executor));
     String actual = FileSystemUtils.readContent(output, StandardCharsets.UTF_8);
     assertThat(actual).isEqualTo(expected);

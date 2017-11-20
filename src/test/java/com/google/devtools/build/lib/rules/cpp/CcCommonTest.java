@@ -160,7 +160,6 @@ public class CcCommonTest extends BuildViewTestCase {
         "    copts = ['-Wmy-warning -frun-faster'])");
     List<String> copts = getCopts("//copts:c_lib");
     assertThat(copts).containsAllOf("-Wmy-warning", "-frun-faster");
-    assertContainsEvent("each item in the list should contain only one option");
   }
 
   @Test
@@ -190,7 +189,8 @@ public class CcCommonTest extends BuildViewTestCase {
             "archive_in_srcs_test",
             "cc_test(name = 'archive_in_srcs_test',",
             "           srcs = ['archive_in_srcs_test.cc'],",
-            "           deps = [':archive_in_srcs_lib'])",
+            "           deps = [':archive_in_srcs_lib'],",
+            "           linkstatic = 0,)",
             "cc_library(name = 'archive_in_srcs_lib',",
             "           srcs = ['libstatic.a', 'libboth.a', 'libboth.so'])");
     List<String> artifactNames = baseArtifactNames(getLinkerInputs(archiveInSrcsTest));
@@ -825,6 +825,22 @@ public class CcCommonTest extends BuildViewTestCase {
   }
 
   @Test
+  public void testProvidesLinkerScriptToLinkAction() throws Exception {
+    scratch.file(
+        "a/BUILD",
+        "cc_binary(",
+        "    name='bin',",
+        "    srcs=['b.cc'],",
+        "    linkopts=['-Wl,@$(location a.lds)'],",
+        "    deps=['a.lds'])");
+    ConfiguredTarget target = getConfiguredTarget("//a:bin");
+    CppLinkAction action =
+        (CppLinkAction) getGeneratingAction(getOnlyElement(getFilesToBuild(target)));
+    Iterable<Artifact> linkInputs = action.getInputs();
+    assertThat(ActionsTestUtil.baseArtifactNames(linkInputs)).contains("a.lds");
+  }
+
+  @Test
   public void testIncludeManglingSmoke() throws Exception {
     scratch.file(
         "third_party/a/BUILD",
@@ -953,7 +969,7 @@ public class CcCommonTest extends BuildViewTestCase {
     @Override
     public Metadata getMetadata() {
       return Metadata.builder()
-          .name("toolchain_type")
+          .name("cc_toolchain_type")
           .factoryClass(BazelToolchainType.class)
           .ancestors(BaseRuleClasses.BaseRule.class)
           .build();
@@ -977,6 +993,7 @@ public class CcCommonTest extends BuildViewTestCase {
           BazelRuleClassProvider.BAZEL_SETUP.init(builder);
           CoreRules.INSTANCE.init(builder);
           BazelRuleClassProvider.CORE_WORKSPACE_RULES.init(builder);
+          BazelRuleClassProvider.PLATFORM_RULES.init(builder);
           BazelRuleClassProvider.GENERIC_RULES.init(builder);
           BazelRuleClassProvider.CPP_RULES.init(builder);
           builder.addRuleDefinition(new OnlyCppToolchainTypeRule());

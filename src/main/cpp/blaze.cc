@@ -44,8 +44,9 @@
 #include <algorithm>
 #include <chrono>  // NOLINT (gRPC requires this)
 #include <cinttypes>
-#include <mutex>   // NOLINT
+#include <mutex>  // NOLINT
 #include <set>
+#include <sstream>
 #include <string>
 #include <thread>  // NOLINT
 #include <utility>
@@ -352,23 +353,30 @@ static vector<string> GetArgumentArray() {
     die(jvm_args_exit_code, "%s", error.c_str());
   }
 
-  // We put all directories on the java.library.path that contain .so files.
-  string java_library_path = "-Djava.library.path=";
+  // We put all directories on java.library.path that contain .so/.dll files.
+  set<string> java_library_paths;
+  std::stringstream java_library_path;
+  java_library_path << "-Djava.library.path=";
   string real_install_dir =
       GetEmbeddedBinariesRoot(globals->options->install_base);
 
   bool first = true;
   for (const auto &it : globals->extracted_binaries) {
     if (IsSharedLibrary(it)) {
-      if (!first) {
-        java_library_path += kListSeparator;
+      string libpath(blaze::PathAsJvmFlag(
+          blaze_util::JoinPath(real_install_dir, blaze_util::Dirname(it))));
+      // Only add the library path if it's not added yet.
+      if (java_library_paths.find(libpath) == java_library_paths.end()) {
+        java_library_paths.insert(libpath);
+        if (!first) {
+          java_library_path << kListSeparator;
+        }
+        first = false;
+        java_library_path << libpath;
       }
-      first = false;
-      java_library_path += blaze::PathAsJvmFlag(
-          blaze_util::JoinPath(real_install_dir, blaze_util::Dirname(it)));
     }
   }
-  result.push_back(java_library_path);
+  result.push_back(java_library_path.str());
 
   // Force use of latin1 for file names.
   result.push_back("-Dfile.encoding=ISO-8859-1");
@@ -561,7 +569,7 @@ static void VerifyJavaVersionAndSetJvm() {
     string jvm_version = GetJvmVersion(exe);
 
     // Compare that jvm_version is found and at least the one specified.
-    if (jvm_version.size() == 0) {
+    if (jvm_version.empty()) {
       die(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
           "Java version not detected while at least %s is needed.\n"
           "Please set JAVA_HOME.",
@@ -641,7 +649,7 @@ static void StartStandalone(const WorkspaceLayout *workspace_layout,
         globals->options->product_name.c_str(), product.c_str());
   }
   vector<string> jvm_args_vector = GetArgumentArray();
-  if (command != "") {
+  if (!command.empty()) {
     jvm_args_vector.push_back(command);
     AddLoggingArgs(&jvm_args_vector);
   }
@@ -762,10 +770,7 @@ static void StartServerAndConnect(const WorkspaceLayout *workspace_layout,
     std::this_thread::sleep_until(next_attempt_time);
     if (!server_startup->IsStillAlive()) {
       globals->option_processor->PrintStartupOptionsProvenanceMessage();
-      fprintf(stderr,
-              "\nunexpected pipe read status: %s\n"
-              "Server presumed dead. Now printing '%s':\n",
-              blaze_util::GetLastErrorString().c_str(),
+      fprintf(stderr, "\nServer crashed during startup. Now printing '%s':\n",
               globals->jvm_log_file.c_str());
       WriteFileToStderrOrDie(globals->jvm_log_file.c_str());
       exit(blaze_exit_code::INTERNAL_ERROR);
@@ -948,6 +953,27 @@ static void ExtractData(const string &self_path) {
         continue;
       }
       if (!blaze_util::CanReadFile(path)) {
+        // TODO(laszlocsomor): remove the following `#if 1` block after I or
+        // somebody else fixed https://github.com/bazelbuild/bazel/issues/3618.
+#if 1
+        fprintf(stderr,
+                "DEBUG: corrupt installation: file '%s' missing. "
+                "Dumping debug data.\n",
+                path.c_str());
+        string p = path;
+        while (!p.empty()) {
+          fprintf(stderr, "DEBUG: p=(%s), exists=%d, isdir=%d, canread=%d\n",
+                  p.c_str(), blaze_util::PathExists(p) ? 1 : 0,
+                  blaze_util::IsDirectory(p) ? 1 : 0,
+                  blaze_util::CanReadFile(p) ? 1 : 0);
+          string parent = blaze_util::Dirname(p);
+          if (parent == p) {
+            break;
+          } else {
+            p = parent;
+          }
+        }
+#endif
         die(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
             "Error: corrupt installation: file '%s' missing."
             " Please remove '%s' and try again.",
@@ -1256,12 +1282,6 @@ static void PrepareEnvironmentForJvm() {
     // This would override --host_jvm_args
     PrintWarning("ignoring _JAVA_OPTIONS in environment.");
     blaze::UnsetEnv("_JAVA_OPTIONS");
-  }
-
-  if (!blaze::GetEnv("TEST_TMPDIR").empty()) {
-    fprintf(stderr,
-            "INFO: $TEST_TMPDIR defined: output root default is '%s'.\n",
-            globals->options->output_root.c_str());
   }
 
   // TODO(bazel-team):  We've also seen a failure during loading (creating
@@ -1608,7 +1628,7 @@ unsigned int GrpcBlazeServer::Communicate() {
 
   vector<string> arg_vector;
   string command = globals->option_processor->GetCommand();
-  if (command != "") {
+  if (!command.empty()) {
     arg_vector.push_back(command);
     AddLoggingArgs(&arg_vector);
   }
@@ -1705,7 +1725,7 @@ unsigned int GrpcBlazeServer::Communicate() {
       Cancel();
     }
 
-    if (!command_id_set && response.command_id().size() > 0) {
+    if (!command_id_set && !response.command_id().empty()) {
       std::unique_lock<std::mutex> lock(cancel_thread_mutex_);
       command_id_ = response.command_id();
       command_id_set = true;

@@ -15,11 +15,11 @@
 package com.google.devtools.build.lib.remote;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.common.base.Supplier;
 import com.google.common.base.Throwables;
-import com.google.devtools.build.lib.util.Preconditions;
 import io.grpc.Status;
 import io.grpc.StatusException;
 import io.grpc.StatusRuntimeException;
@@ -147,6 +147,7 @@ public class Retrier {
           case INTERNAL:
           case UNAVAILABLE:
           case UNAUTHENTICATED:
+          case RESOURCE_EXHAUSTED:
             return true;
           default:
             return false;
@@ -206,13 +207,14 @@ public class Retrier {
         throw e;  // Nested retries are always pass-through.
       } catch (StatusException | StatusRuntimeException e) {
         Status st = Status.fromThrowable(e);
+        int attempts = backoff.getRetryAttempts();
         long delay = backoff.nextDelayMillis();
         if (st.getCode() == Status.Code.CANCELLED && Thread.currentThread().isInterrupted()) {
           Thread.currentThread().interrupt();
           throw new InterruptedException();
         }
         if (delay < 0 || !isRetriable.apply(st)) {
-          throw new RetryException(st.asRuntimeException(), backoff.getRetryAttempts());
+          throw new RetryException(st.asRuntimeException(), attempts);
         }
         sleep(delay);
       } catch (Exception e) {

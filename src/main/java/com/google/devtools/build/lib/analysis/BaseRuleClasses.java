@@ -40,11 +40,9 @@ import com.google.devtools.build.lib.analysis.constraints.EnvironmentRule;
 import com.google.devtools.build.lib.analysis.test.TestConfiguration;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.packages.Attribute;
-import com.google.devtools.build.lib.packages.Attribute.LateBoundLabel;
-import com.google.devtools.build.lib.packages.Attribute.LateBoundLabelList;
+import com.google.devtools.build.lib.packages.Attribute.LateBoundDefault;
 import com.google.devtools.build.lib.packages.Attribute.Transition;
 import com.google.devtools.build.lib.packages.AttributeMap;
-import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
 import com.google.devtools.build.lib.packages.RuleClass.Builder.RuleClassType;
@@ -73,35 +71,32 @@ public class BaseRuleClasses {
         }
       };
 
+  // TODO(b/65746853): provide a way to do this without passing the entire configuration
   /**
    * Implementation for the :action_listener attribute.
+   *
+   * <p>action_listeners are special rules; they tell the build system to add extra_actions to
+   * existing rules. As such they need an edge to every ConfiguredTarget with the limitation that
+   * they only run on the target configuration and should not operate on action_listeners and
+   * extra_actions themselves (to avoid cycles).
    */
   @VisibleForTesting
-  static final LateBoundLabelList<BuildConfiguration> ACTION_LISTENER =
-      new LateBoundLabelList<BuildConfiguration>() {
-    @Override
-    public List<Label> resolve(Rule rule, AttributeMap attributes,
-        BuildConfiguration configuration) {
-      // action_listeners are special rules; they tell the build system to add extra_actions to
-      // existing rules. As such they need an edge to every ConfiguredTarget with the limitation
-      // that they only run on the target configuration and should not operate on action_listeners
-      // and extra_actions themselves (to avoid cycles).
-      return configuration.getActionListeners();
-    }
-  };
+  static final LateBoundDefault<?, List<Label>> ACTION_LISTENER =
+      LateBoundDefault.fromTargetConfiguration(
+          BuildConfiguration.class,
+          ImmutableList.of(),
+          (rule, attributes, configuration) -> configuration.getActionListeners());
 
-  /**
-   * Implementation for the :run_under attribute.
-   */
-  public static final LateBoundLabel<BuildConfiguration> RUN_UNDER =
-      new LateBoundLabel<BuildConfiguration>() {
-        @Override
-        public Label resolve(Rule rule, AttributeMap attributes,
-            BuildConfiguration configuration) {
-          RunUnder runUnder = configuration.getRunUnder();
-          return runUnder == null ? null : runUnder.getLabel();
-        }
-      };
+  // TODO(b/65746853): provide a way to do this without passing the entire configuration
+  /** Implementation for the :run_under attribute. */
+  public static final LateBoundDefault<?, Label> RUN_UNDER =
+      LateBoundDefault.fromTargetConfiguration(
+          BuildConfiguration.class,
+          null,
+          (rule, attributes, configuration) -> {
+            RunUnder runUnder = configuration.getRunUnder();
+            return runUnder != null ? runUnder.getLabel() : null;
+          });
 
   /**
    * A base rule for all test rules.
@@ -182,41 +177,60 @@ public class BaseRuleClasses {
    * Share common attributes across both base and Skylark base rules.
    */
   public static RuleClass.Builder commonCoreAndSkylarkAttributes(RuleClass.Builder builder) {
-    return builder
+    return PlatformSemantics.platformAttributes(builder)
         // The visibility attribute is special: it is a nodep label, and loading the
         // necessary package groups is handled by {@link LabelVisitor#visitTargetVisibility}.
         // Package groups always have the null configuration so that they are not duplicated
         // needlessly.
-        .add(attr("visibility", NODEP_LABEL_LIST).orderIndependent().cfg(HOST)
-            .nonconfigurable("special attribute integrated more deeply into Bazel's core logic"))
-        .add(attr("deprecation", STRING).value(deprecationDefault)
-            .nonconfigurable("Used in core loading phase logic with no access to configs"))
-        .add(attr("tags", STRING_LIST).orderIndependent().taggable()
-            .nonconfigurable("low-level attribute, used in TargetUtils without configurations"))
-        .add(attr("generator_name", STRING).undocumented("internal")
-            .nonconfigurable("static structure of a rule"))
-        .add(attr("generator_function", STRING).undocumented("internal")
-            .nonconfigurable("static structure of a rule"))
-        .add(attr("generator_location", STRING).undocumented("internal")
-            .nonconfigurable("static structure of a rule"))
-        .add(attr("testonly", BOOLEAN).value(testonlyDefault)
-            .nonconfigurable("policy decision: rules testability should be consistent"))
+        .add(
+            attr("visibility", NODEP_LABEL_LIST)
+                .orderIndependent()
+                .cfg(HOST)
+                .nonconfigurable(
+                    "special attribute integrated more deeply into Bazel's core logic"))
+        .add(
+            attr("deprecation", STRING)
+                .value(deprecationDefault)
+                .nonconfigurable("Used in core loading phase logic with no access to configs"))
+        .add(
+            attr("tags", STRING_LIST)
+                .orderIndependent()
+                .taggable()
+                .nonconfigurable("low-level attribute, used in TargetUtils without configurations"))
+        .add(
+            attr("generator_name", STRING)
+                .undocumented("internal")
+                .nonconfigurable("static structure of a rule"))
+        .add(
+            attr("generator_function", STRING)
+                .undocumented("internal")
+                .nonconfigurable("static structure of a rule"))
+        .add(
+            attr("generator_location", STRING)
+                .undocumented("internal")
+                .nonconfigurable("static structure of a rule"))
+        .add(
+            attr("testonly", BOOLEAN)
+                .value(testonlyDefault)
+                .nonconfigurable("policy decision: rules testability should be consistent"))
         .add(attr("features", STRING_LIST).orderIndependent())
         .add(attr(":action_listener", LABEL_LIST).cfg(HOST).value(ACTION_LISTENER))
-        .add(attr(RuleClass.COMPATIBLE_ENVIRONMENT_ATTR, LABEL_LIST)
-            .allowedRuleClasses(EnvironmentRule.RULE_NAME)
-            .cfg(Attribute.ConfigurationTransition.HOST)
-            .allowedFileTypes(FileTypeSet.NO_FILE)
-            .dontCheckConstraints()
-            .nonconfigurable("special logic for constraints and select: see ConstraintSemantics")
-        )
-        .add(attr(RuleClass.RESTRICTED_ENVIRONMENT_ATTR, LABEL_LIST)
-            .allowedRuleClasses(EnvironmentRule.RULE_NAME)
-            .cfg(Attribute.ConfigurationTransition.HOST)
-            .allowedFileTypes(FileTypeSet.NO_FILE)
-            .dontCheckConstraints()
-            .nonconfigurable("special logic for constraints and select: see ConstraintSemantics")
-        );
+        .add(
+            attr(RuleClass.COMPATIBLE_ENVIRONMENT_ATTR, LABEL_LIST)
+                .allowedRuleClasses(EnvironmentRule.RULE_NAME)
+                .cfg(Attribute.ConfigurationTransition.HOST)
+                .allowedFileTypes(FileTypeSet.NO_FILE)
+                .dontCheckConstraints()
+                .nonconfigurable(
+                    "special logic for constraints and select: see ConstraintSemantics"))
+        .add(
+            attr(RuleClass.RESTRICTED_ENVIRONMENT_ATTR, LABEL_LIST)
+                .allowedRuleClasses(EnvironmentRule.RULE_NAME)
+                .cfg(Attribute.ConfigurationTransition.HOST)
+                .allowedFileTypes(FileTypeSet.NO_FILE)
+                .dontCheckConstraints()
+                .nonconfigurable(
+                    "special logic for constraints and select: see ConstraintSemantics"));
   }
 
   public static RuleClass.Builder nameAttribute(RuleClass.Builder builder) {
@@ -296,7 +310,7 @@ public class BaseRuleClasses {
           <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
           .add(attr("toolchains", LABEL_LIST)
               .allowedFileTypes(FileTypeSet.NO_FILE)
-              .mandatoryProviders(ImmutableList.of(MakeVariableInfo.PROVIDER.id())))
+              .mandatoryProviders(ImmutableList.of(TemplateVariableInfo.PROVIDER.id())))
           .build();
     }
 

@@ -19,7 +19,7 @@ sh_test(
     size = "medium",
     srcs = ["progress_reporting_test.sh"],
     data = [":test-deps"],
-    shard_count = 4,
+    shard_count = 8,
 )
 
 sh_test(
@@ -62,7 +62,7 @@ sh_test(
 
 sh_test(
     name = "java_integration_test",
-    size = "medium",
+    size = "large",
     srcs = ["java_integration_test.sh"],
     args = ["$(JAVABASE)"],
     data = [
@@ -197,12 +197,21 @@ sh_test(
     data = [":test-deps"],
 )
 
+sh_library(
+    name = "discard_graph_edges_lib",
+    testonly = 1,
+    srcs = ["discard_graph_edges_lib.sh"],
+)
+
 sh_test(
     name = "discard_graph_edges_test",
     size = "medium",
     srcs = ["discard_graph_edges_test.sh"],
-    data = [":test-deps"],
-    shard_count = 5,
+    data = [
+        ":discard_graph_edges_lib.sh",
+        ":test-deps",
+    ],
+    shard_count = 6,
 )
 
 sh_test(
@@ -257,6 +266,20 @@ sh_test(
 sh_test(
     name = "test_test",
     srcs = ["test_test.sh"],
+    data = [":test-deps"],
+)
+
+sh_test(
+    name = "outputs_test",
+    size = "medium",
+    srcs = ["outputs_test.sh"],
+    data = [":test-deps"],
+)
+
+sh_test(
+    name = "process_wrapper_test",
+    size = "medium",
+    srcs = ["process-wrapper_test.sh"],
     data = [":test-deps"],
 )
 

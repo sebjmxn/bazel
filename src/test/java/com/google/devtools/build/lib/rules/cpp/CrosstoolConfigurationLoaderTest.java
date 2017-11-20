@@ -18,10 +18,11 @@ import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.fail;
 
 import com.google.common.base.Functions;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
-import com.google.devtools.build.lib.analysis.MakeVariableInfo;
+import com.google.devtools.build.lib.analysis.TemplateVariableInfo;
 import com.google.devtools.build.lib.analysis.config.CompilationMode;
 import com.google.devtools.build.lib.analysis.config.ConfigurationEnvironment;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
@@ -34,7 +35,6 @@ import com.google.devtools.build.lib.packages.util.MockCcSupport;
 import com.google.devtools.build.lib.rules.cpp.CppConfiguration.Tool;
 import com.google.devtools.build.lib.testutil.TestConstants;
 import com.google.devtools.build.lib.testutil.TestRuleClassProvider;
-import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.view.config.crosstool.CrosstoolConfig.LipoMode;
 import java.io.IOException;
@@ -74,9 +74,9 @@ public class CrosstoolConfigurationLoaderTest extends AnalysisTestCase {
     return loader(
         "major_version: \"12\""
             + "minor_version: \"0\""
-            + "default_target_cpu: \"cpu\""
+            + "default_target_cpu: \"k8\""
             + "default_toolchain {"
-            + "  cpu: \"cpu\""
+            + "  cpu: \"k8\""
             + "  toolchain_identifier: \"toolchain-identifier\""
             + "}"
             + "toolchain {"
@@ -177,26 +177,26 @@ public class CrosstoolConfigurationLoaderTest extends AnalysisTestCase {
 
     // Need to clear out the android cpu options to avoid this split transition in Bazel.
     CppConfiguration toolchain =
-        create(loader, "--cpu=cpu", "--host_cpu=cpu", "--android_cpu=", "--fat_apk_cpu=");
+        create(loader, "--cpu=k8", "--host_cpu=k8", "--android_cpu=", "--fat_apk_cpu=");
     CcToolchainProvider ccProvider = getCcToolchainProvider(toolchain);
     assertThat(toolchain.getToolchainIdentifier()).isEqualTo("toolchain-identifier");
 
-    assertThat(toolchain.getHostSystemName()).isEqualTo("host-system-name");
+    assertThat(ccProvider.getHostSystemName()).isEqualTo("host-system-name");
     assertThat(toolchain.getCompiler()).isEqualTo("compiler");
     assertThat(toolchain.getTargetLibc()).isEqualTo("target-libc");
     assertThat(toolchain.getTargetCpu()).isEqualTo("piii");
-    assertThat(toolchain.getTargetGnuSystemName()).isEqualTo("target-system-name");
+    assertThat(ccProvider.getTargetGnuSystemName()).isEqualTo("target-system-name");
 
     assertThat(toolchain.getToolPathFragment(Tool.AR)).isEqualTo(getToolPath("/path-to-ar"));
 
-    assertThat(toolchain.getAbi()).isEqualTo("abi-version");
-    assertThat(toolchain.getAbiGlibcVersion()).isEqualTo("abi-libc-version");
+    assertThat(ccProvider.getAbi()).isEqualTo("abi-version");
+    assertThat(ccProvider.getAbiGlibcVersion()).isEqualTo("abi-libc-version");
 
-    assertThat(toolchain.supportsGoldLinker()).isTrue();
+    assertThat(ccProvider.supportsGoldLinker()).isTrue();
     assertThat(toolchain.supportsStartEndLib()).isFalse();
     assertThat(toolchain.supportsInterfaceSharedObjects()).isFalse();
-    assertThat(toolchain.supportsEmbeddedRuntimes()).isFalse();
-    assertThat(toolchain.toolchainNeedsPic()).isFalse();
+    assertThat(ccProvider.supportsEmbeddedRuntimes()).isFalse();
+    assertThat(ccProvider.toolchainNeedsPic()).isFalse();
     assertThat(toolchain.supportsFission()).isTrue();
 
     assertThat(ccProvider.getBuiltInIncludeDirectories())
@@ -228,8 +228,8 @@ public class CrosstoolConfigurationLoaderTest extends AnalysisTestCase {
         .containsExactly("linker", "linker-fastbuild", "dynamic", "solinker")
         .inOrder();
 
-    assertThat(toolchain.getObjCopyOptionsForEmbedding()).containsExactly("objcopy").inOrder();
-    assertThat(toolchain.getLdOptionsForEmbedding()).isEmpty();
+    assertThat(ccProvider.getObjCopyOptionsForEmbedding()).containsExactly("objcopy").inOrder();
+    assertThat(ccProvider.getLdOptionsForEmbedding()).isEmpty();
 
     assertThat(toolchain.getAdditionalMakeVariables().entrySet())
         .containsExactlyElementsIn(
@@ -239,7 +239,7 @@ public class CrosstoolConfigurationLoaderTest extends AnalysisTestCase {
                     "CC_FLAGS", "")
                 .entrySet());
 
-    assertThat(toolchain.getLdExecutable()).isEqualTo(getToolPath("/path-to-ld"));
+    assertThat(toolchain.getToolPathFragment(Tool.LD)).isEqualTo(getToolPath("/path-to-ld"));
     assertThat(toolchain.getToolPathFragment(Tool.DWP)).isEqualTo(getToolPath("/path-to-dwp"));
   }
 
@@ -492,15 +492,15 @@ public class CrosstoolConfigurationLoaderTest extends AnalysisTestCase {
     ConfiguredTarget ccToolchainA = getCcToolchainTarget(toolchainA);
     CcToolchainProvider ccProviderA =
         (CcToolchainProvider) ccToolchainA.get(ToolchainInfo.PROVIDER);
-    MakeVariableInfo makeProviderA = ccToolchainA.get(MakeVariableInfo.PROVIDER);
+    TemplateVariableInfo makeProviderA = ccToolchainA.get(TemplateVariableInfo.PROVIDER);
     assertThat(toolchainA.getToolchainIdentifier()).isEqualTo("toolchain-identifier-A");
-    assertThat(toolchainA.getHostSystemName()).isEqualTo("host-system-name-A");
-    assertThat(toolchainA.getTargetGnuSystemName()).isEqualTo("target-system-name-A");
+    assertThat(ccProviderA.getHostSystemName()).isEqualTo("host-system-name-A");
+    assertThat(ccProviderA.getTargetGnuSystemName()).isEqualTo("target-system-name-A");
     assertThat(toolchainA.getTargetCpu()).isEqualTo("piii");
     assertThat(toolchainA.getTargetLibc()).isEqualTo("target-libc-A");
     assertThat(toolchainA.getCompiler()).isEqualTo("compiler-A");
-    assertThat(toolchainA.getAbi()).isEqualTo("abi-version-A");
-    assertThat(toolchainA.getAbiGlibcVersion()).isEqualTo("abi-libc-version-A");
+    assertThat(ccProviderA.getAbi()).isEqualTo("abi-version-A");
+    assertThat(ccProviderA.getAbiGlibcVersion()).isEqualTo("abi-libc-version-A");
     assertThat(toolchainA.getToolPathFragment(Tool.AR)).isEqualTo(getToolPath("path/to/ar-A"));
     assertThat(toolchainA.getToolPathFragment(Tool.CPP)).isEqualTo(getToolPath("path/to/cpp-A"));
     assertThat(toolchainA.getToolPathFragment(Tool.GCC)).isEqualTo(getToolPath("path/to/gcc-A"));
@@ -513,10 +513,10 @@ public class CrosstoolConfigurationLoaderTest extends AnalysisTestCase {
         .isEqualTo(getToolPath("path/to/objdump-A"));
     assertThat(toolchainA.getToolPathFragment(Tool.STRIP))
         .isEqualTo(getToolPath("path/to/strip-A"));
-    assertThat(toolchainA.supportsGoldLinker()).isTrue();
+    assertThat(ccProviderA.supportsGoldLinker()).isTrue();
     assertThat(toolchainA.supportsStartEndLib()).isTrue();
-    assertThat(toolchainA.supportsEmbeddedRuntimes()).isTrue();
-    assertThat(toolchainA.toolchainNeedsPic()).isTrue();
+    assertThat(ccProviderA.supportsEmbeddedRuntimes()).isTrue();
+    assertThat(ccProviderA.toolchainNeedsPic()).isTrue();
 
     assertThat(toolchainA.getCompilerOptions(NO_FEATURES))
         .containsExactly(
@@ -527,7 +527,7 @@ public class CrosstoolConfigurationLoaderTest extends AnalysisTestCase {
             "cxx-flag-A-1", "cxx-flag-A-2", "cxx-fastbuild-flag-A-1", "cxx-fastbuild-flag-A-2")
         .inOrder();
     assertThat(ccProviderA.getUnfilteredCompilerOptions(NO_FEATURES))
-        .containsExactly("--sysroot=some", "unfiltered-flag-A-1", "unfiltered-flag-A-2")
+        .containsExactly("unfiltered-flag-A-1", "unfiltered-flag-A-2")
         .inOrder();
     assertThat(toolchainA.getDynamicLinkOptions(NO_FEATURES, true))
         .containsExactly(
@@ -584,14 +584,14 @@ public class CrosstoolConfigurationLoaderTest extends AnalysisTestCase {
             "linker-flag-A-1", "linker-flag-A-2", "fully-static-flag-A-1", "fully-static-flag-A-2")
         .inOrder();
 
-    assertThat(toolchainA.getObjCopyOptionsForEmbedding())
+    assertThat(ccProviderA.getObjCopyOptionsForEmbedding())
         .containsExactly("objcopy-embed-flag-A-1", "objcopy-embed-flag-A-2")
         .inOrder();
-    assertThat(toolchainA.getLdOptionsForEmbedding())
+    assertThat(ccProviderA.getLdOptionsForEmbedding())
         .containsExactly("ld-embed-flag-A-1", "ld-embed-flag-A-2")
         .inOrder();
 
-    assertThat(makeProviderA.getMakeVariables().entrySet())
+    assertThat(makeProviderA.getVariables().entrySet())
         .containsExactlyElementsIn(
             ImmutableMap.<String, String>builder()
                 .put("SOME_MAKE_VARIABLE-A-1", "make-variable-value-A-1")
@@ -626,19 +626,19 @@ public class CrosstoolConfigurationLoaderTest extends AnalysisTestCase {
             "--fat_apk_cpu=");
     CcToolchainProvider ccProviderC = getCcToolchainProvider(toolchainC);
     assertThat(toolchainC.getToolchainIdentifier()).isEqualTo("toolchain-identifier-C");
-    assertThat(toolchainC.getHostSystemName()).isEqualTo("host-system-name-C");
-    assertThat(toolchainC.getTargetGnuSystemName()).isEqualTo("target-system-name-C");
+    assertThat(ccProviderC.getHostSystemName()).isEqualTo("host-system-name-C");
+    assertThat(ccProviderC.getTargetGnuSystemName()).isEqualTo("target-system-name-C");
     assertThat(toolchainC.getTargetCpu()).isEqualTo("piii");
     assertThat(toolchainC.getTargetLibc()).isEqualTo("target-libc-C");
     assertThat(toolchainC.getCompiler()).isEqualTo("compiler-C");
-    assertThat(toolchainC.getAbi()).isEqualTo("abi-version-C");
-    assertThat(toolchainC.getAbiGlibcVersion()).isEqualTo("abi-libc-version-C");
+    assertThat(ccProviderC.getAbi()).isEqualTo("abi-version-C");
+    assertThat(ccProviderC.getAbiGlibcVersion()).isEqualTo("abi-libc-version-C");
     // Don't bother with testing the list of tools again.
-    assertThat(toolchainC.supportsGoldLinker()).isFalse();
+    assertThat(ccProviderC.supportsGoldLinker()).isFalse();
     assertThat(toolchainC.supportsStartEndLib()).isFalse();
     assertThat(toolchainC.supportsInterfaceSharedObjects()).isFalse();
-    assertThat(toolchainC.supportsEmbeddedRuntimes()).isFalse();
-    assertThat(toolchainC.toolchainNeedsPic()).isFalse();
+    assertThat(ccProviderC.supportsEmbeddedRuntimes()).isFalse();
+    assertThat(ccProviderC.toolchainNeedsPic()).isFalse();
     assertThat(toolchainC.supportsFission()).isFalse();
 
     assertThat(toolchainC.getCompilerOptions(NO_FEATURES)).isEmpty();
@@ -667,8 +667,8 @@ public class CrosstoolConfigurationLoaderTest extends AnalysisTestCase {
                 LinkingMode.FULLY_STATIC,
                 PathFragment.create("hello-world/ld")))
         .isEmpty();
-    assertThat(toolchainC.getObjCopyOptionsForEmbedding()).isEmpty();
-    assertThat(toolchainC.getLdOptionsForEmbedding()).isEmpty();
+    assertThat(ccProviderC.getObjCopyOptionsForEmbedding()).isEmpty();
+    assertThat(ccProviderC.getLdOptionsForEmbedding()).isEmpty();
 
     assertThat(toolchainC.getAdditionalMakeVariables()).containsExactlyEntriesIn(ImmutableMap.of(
         "CC_FLAGS", "",
@@ -682,7 +682,7 @@ public class CrosstoolConfigurationLoaderTest extends AnalysisTestCase {
         PackageIdentifier.create(
             TestConstants.TOOLS_REPOSITORY,
             PathFragment.create(
-                PathFragment.create(TestConstants.TOOLS_REPOSITORY_PATH),
+                PathFragment.create(TestConstants.MOCK_CC_CROSSTOOL_PATH),
                 PathFragment.create(path)));
     return packageIdentifier.getPathUnderExecRoot();
   }
@@ -879,9 +879,9 @@ public class CrosstoolConfigurationLoaderTest extends AnalysisTestCase {
         new StringBuilder(
             "major_version: \"12\""
                 + "minor_version: \"0\""
-                + "default_target_cpu: \"cpu\""
+                + "default_target_cpu: \"k8\""
                 + "default_toolchain {"
-                + "  cpu: \"cpu\""
+                + "  cpu: \"k8\""
                 + "  toolchain_identifier: \"toolchain-identifier\""
                 + "}"
                 + "toolchain {"
@@ -911,7 +911,7 @@ public class CrosstoolConfigurationLoaderTest extends AnalysisTestCase {
   public void testConfigWithMissingToolDefs() throws Exception {
     CppConfigurationLoader loader = loader(getConfigWithMissingToolDef(Tool.STRIP));
     try {
-      create(loader, "--cpu=cpu");
+      create(loader, "--cpu=k8");
       fail();
     } catch (IllegalArgumentException e) {
       assertThat(e).hasMessageThat().contains("Tool path for 'strip' is missing");
@@ -926,7 +926,7 @@ public class CrosstoolConfigurationLoaderTest extends AnalysisTestCase {
     CppConfigurationLoader loader =
         loader(getConfigWithMissingToolDef(Tool.DWP, "supports_fission: true"));
     try {
-      create(loader, "--cpu=cpu");
+      create(loader, "--cpu=k8");
       fail("Expected failed check on 'dwp' tool path");
     } catch (IllegalArgumentException e) {
       assertThat(e).hasMessageThat().contains("Tool path for 'dwp' is missing");
@@ -941,7 +941,7 @@ public class CrosstoolConfigurationLoaderTest extends AnalysisTestCase {
     CppConfigurationLoader loader =
         loader(getConfigWithMissingToolDef(Tool.DWP, "supports_fission: false"));
     // The following line throws an IllegalArgumentException if an expected tool path is missing.
-    create(loader, "--cpu=cpu");
+    create(loader, "--cpu=k8");
   }
 
   @Test
@@ -966,13 +966,21 @@ public class CrosstoolConfigurationLoaderTest extends AnalysisTestCase {
         loader(
             "major_version: \"v17\""
                 + "minor_version: \"0\""
-                + "default_target_cpu: \"cpu\""
+                + "default_target_cpu: \"k8\""
                 + "default_toolchain {"
                 + "  cpu: \"piii\""
                 + "  toolchain_identifier: \"default-libs\""
                 + "}"
                 + "default_toolchain {"
                 + "  cpu: \"k8\""
+                + "  toolchain_identifier: \"custom-libs\""
+                + "}"
+                + "default_toolchain {"
+                + "  cpu: \"darwin\""
+                + "  toolchain_identifier: \"custom-libs\""
+                + "}"
+                + "default_toolchain {"
+                + "  cpu: \"x64_windows\""
                 + "  toolchain_identifier: \"custom-libs\""
                 + "}"
                 + "toolchain {" // "default-libs": runtime libraries in default locations.
@@ -1005,15 +1013,17 @@ public class CrosstoolConfigurationLoaderTest extends AnalysisTestCase {
       ctTop = PackageIdentifier.createInMainRepo(ctTop.getPackageFragment());
     }
     CppConfiguration defaultLibs = create(loader, "--cpu=piii");
-    assertThat(defaultLibs.getStaticRuntimeLibsLabel())
+    CcToolchainProvider defaultLibsToolchain = getCcToolchainProvider(defaultLibs);
+    assertThat(defaultLibsToolchain.getStaticRuntimeLibsLabel())
         .isEqualTo(Label.create(ctTop, "static-runtime-libs-piii"));
-    assertThat(defaultLibs.getDynamicRuntimeLibsLabel())
+    assertThat(defaultLibsToolchain.getDynamicRuntimeLibsLabel())
         .isEqualTo(Label.create(ctTop, "dynamic-runtime-libs-piii"));
 
     CppConfiguration customLibs = create(loader, "--cpu=k8");
-    assertThat(customLibs.getStaticRuntimeLibsLabel())
+    CcToolchainProvider customLibsToolchain = getCcToolchainProvider(customLibs);
+    assertThat(customLibsToolchain.getStaticRuntimeLibsLabel())
         .isEqualTo(Label.create(ctTop, "static-group"));
-    assertThat(customLibs.getDynamicRuntimeLibsLabel())
+    assertThat(customLibsToolchain.getDynamicRuntimeLibsLabel())
         .isEqualTo(Label.create(ctTop, "dynamic-group"));
   }
 
@@ -1026,14 +1036,14 @@ public class CrosstoolConfigurationLoaderTest extends AnalysisTestCase {
     // Crosstool with gcov-tool
     CppConfigurationLoader loader =
         loaderWithOptionalTool("  tool_path { name: \"gcov-tool\" path: \"path-to-gcov-tool\" }");
-    CppConfiguration cppConfig = create(loader, "--cpu=cpu");
+    CppConfiguration cppConfig = create(loader, "--cpu=k8");
     ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
     cppConfig.addGlobalMakeVariables(builder);
     assertThat(builder.build().get("GCOVTOOL")).isNotNull();
 
     // Crosstool without gcov-tool
     loader = loaderWithOptionalTool("");
-    cppConfig = create(loader, "--cpu=cpu");
+    cppConfig = create(loader, "--cpu=k8");
     builder = ImmutableMap.builder();
     cppConfig.addGlobalMakeVariables(builder);
     assertThat(builder.build()).doesNotContainKey("GCOVTOOL");

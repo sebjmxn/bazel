@@ -17,11 +17,14 @@ import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.fail;
 
 import com.google.common.base.Joiner;
+import com.google.common.base.Preconditions;
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.eventbus.EventBus;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
+import com.google.devtools.build.lib.analysis.ServerDirectories;
+import com.google.devtools.build.lib.clock.BlazeClock;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.events.Reporter;
 import com.google.devtools.build.lib.packages.ConstantRuleVisibility;
@@ -30,20 +33,17 @@ import com.google.devtools.build.lib.packages.NoSuchTargetException;
 import com.google.devtools.build.lib.packages.NoSuchThingException;
 import com.google.devtools.build.lib.packages.Package;
 import com.google.devtools.build.lib.packages.Rule;
+import com.google.devtools.build.lib.packages.SkylarkSemanticsOptions;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.packages.util.LoadingMock;
 import com.google.devtools.build.lib.skyframe.BazelSkyframeExecutorConstants;
 import com.google.devtools.build.lib.skyframe.DiffAwareness;
-import com.google.devtools.build.lib.skyframe.PrecomputedValue;
 import com.google.devtools.build.lib.skyframe.SequencedSkyframeExecutor;
 import com.google.devtools.build.lib.skyframe.SkyValueDirtinessChecker;
 import com.google.devtools.build.lib.skyframe.SkyframeExecutor;
 import com.google.devtools.build.lib.syntax.GlobList;
-import com.google.devtools.build.lib.syntax.SkylarkSemanticsOptions;
 import com.google.devtools.build.lib.testutil.ManualClock;
 import com.google.devtools.build.lib.testutil.TestConstants;
-import com.google.devtools.build.lib.util.BlazeClock;
-import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.util.io.TimestampGranularityMonitor;
 import com.google.devtools.build.lib.vfs.Dirent;
 import com.google.devtools.build.lib.vfs.FileStatus;
@@ -342,6 +342,7 @@ public class IncrementalLoadingTest {
     tester.sync();
     try {
       tester.getTarget("//e:e");
+      fail("Expected exception");
     } catch (NoSuchPackageException expected) {
     }
     throwOnReaddir = null;
@@ -462,26 +463,25 @@ public class IncrementalLoadingTest {
       addFile("WORKSPACE");
 
       LoadingMock loadingMock = LoadingMock.get();
+      BlazeDirectories directories =
+          new BlazeDirectories(
+              new ServerDirectories(fs.getPath("/install"), fs.getPath("/output")),
+              workspace,
+              loadingMock.getProductName());
       skyframeExecutor =
           SequencedSkyframeExecutor.create(
               loadingMock
-                  .getPackageFactoryBuilderForTesting()
+                  .getPackageFactoryBuilderForTesting(directories)
                   .build(loadingMock.createRuleClassProvider(), fs),
-              new BlazeDirectories(
-                  fs.getPath("/install"),
-                  fs.getPath("/output"),
-                  workspace,
-                  loadingMock.getProductName()),
-              null, /* BinTools */
+              fs,
+              directories,
               null, /* workspaceStatusActionFactory */
               loadingMock.createRuleClassProvider().getBuildInfoFactories(),
               ImmutableList.of(new ManualDiffAwarenessFactory()),
               Predicates.<PathFragment>alwaysFalse(),
               ImmutableMap.<SkyFunctionName, SkyFunction>of(),
-              ImmutableList.<PrecomputedValue.Injected>of(),
               ImmutableList.<SkyValueDirtinessChecker>of(),
               PathFragment.EMPTY_FRAGMENT,
-              loadingMock.getProductName(),
               BazelSkyframeExecutorConstants.CROSS_REPOSITORY_LABEL_VIOLATION_STRATEGY,
               BazelSkyframeExecutorConstants.BUILD_FILES_BY_PRIORITY,
               BazelSkyframeExecutorConstants.ACTION_ON_IO_EXCEPTION_READING_BUILD_FILE);

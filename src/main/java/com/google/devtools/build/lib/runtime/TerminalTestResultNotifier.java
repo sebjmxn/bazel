@@ -56,8 +56,8 @@ public class TerminalTestResultNotifier implements TestResultNotifier {
       name = "verbose_test_summary",
       defaultValue = "true",
       category = "verbosity",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.LOGGING,
+      effectTags = {OptionEffectTag.AFFECTS_OUTPUTS},
       help =
           "If true, print additional information (timing, number of failed runs, etc) in the"
               + " test summary."
@@ -68,8 +68,8 @@ public class TerminalTestResultNotifier implements TestResultNotifier {
       name = "test_verbose_timeout_warnings",
       defaultValue = "false",
       category = "verbosity",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
+      documentationCategory = OptionDocumentationCategory.LOGGING,
+      effectTags = {OptionEffectTag.AFFECTS_OUTPUTS},
       help =
           "If true, print additional warnings when the actual test execution time does not "
               + "match the timeout defined by the test (whether implied or explicit)."
@@ -96,10 +96,10 @@ public class TerminalTestResultNotifier implements TestResultNotifier {
   private boolean duplicateLabels(Set<TestSummary> summaries) {
     Set<Label> labelsSeen = new HashSet<>();
     for (TestSummary summary : summaries) {
-      if (labelsSeen.contains(summary.getTarget().getLabel())) {
+      if (labelsSeen.contains(summary.getLabel())) {
         return true;
       }
-      labelsSeen.add(summary.getTarget().getLabel());
+      labelsSeen.add(summary.getLabel());
     }
     return false;
   }
@@ -122,7 +122,9 @@ public class TerminalTestResultNotifier implements TestResultNotifier {
   private void printShortSummary(Set<TestSummary> summaries, boolean showPassingTests) {
     boolean withConfig = duplicateLabels(summaries);
     for (TestSummary summary : summaries) {
-      if (summary.getStatus() != BlazeTestStatus.PASSED || showPassingTests) {
+      if ((summary.getStatus() != BlazeTestStatus.PASSED
+              && summary.getStatus() != BlazeTestStatus.NO_STATUS)
+          || showPassingTests) {
         TestSummaryPrinter.print(summary, printer, summaryOptions.verboseSummary, false,
             withConfig);
       }
@@ -186,11 +188,11 @@ public class TerminalTestResultNotifier implements TestResultNotifier {
         break;
 
       case SHORT:
-        printShortSummary(summaries, /*printSuccess=*/true);
+        printShortSummary(summaries, /* showPassingTests= */ true);
         break;
 
       case TERSE:
-        printShortSummary(summaries, /*printSuccess=*/false);
+        printShortSummary(summaries, /* showPassingTests= */ false);
         break;
 
       case NONE:

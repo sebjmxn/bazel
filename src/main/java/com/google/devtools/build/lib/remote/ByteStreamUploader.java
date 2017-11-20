@@ -13,9 +13,9 @@
 // limitations under the License.
 package com.google.devtools.build.lib.remote;
 
-import static com.google.devtools.build.lib.util.Preconditions.checkArgument;
-import static com.google.devtools.build.lib.util.Preconditions.checkNotNull;
-import static com.google.devtools.build.lib.util.Preconditions.checkState;
+import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.base.Preconditions.checkState;
 import static java.lang.String.format;
 import static java.util.Collections.singletonList;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -37,6 +37,7 @@ import io.grpc.CallCredentials;
 import io.grpc.CallOptions;
 import io.grpc.Channel;
 import io.grpc.ClientCall;
+import io.grpc.Context;
 import io.grpc.Metadata;
 import io.grpc.Status;
 import io.grpc.StatusException;
@@ -257,9 +258,11 @@ final class ByteStreamUploader {
             try {
               ListenableScheduledFuture<?> schedulingResult =
                   retryService.schedule(
-                      () ->
-                          startAsyncUploadWithRetry(
-                              chunker, backoffTimes, overallUploadResult),
+                      Context.current()
+                          .wrap(
+                              () ->
+                                  startAsyncUploadWithRetry(
+                                      chunker, backoffTimes, overallUploadResult)),
                       nextDelayMillis,
                       MILLISECONDS);
               // In case the scheduled execution errors, we need to notify the overallUploadResult.
@@ -418,7 +421,7 @@ final class ByteStreamUploader {
               return resourceName;
             }
           };
-      call.start(callListener, new Metadata());
+      call.start(callListener, TracingMetadataUtils.headersFromCurrentContext());
       call.request(1);
     }
 

@@ -21,6 +21,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.actions.ActionAnalysisMetadata;
 import com.google.devtools.build.lib.actions.ActionLookupValue.ActionLookupKey;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
+import com.google.devtools.build.lib.analysis.ServerDirectories;
 import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
 import com.google.devtools.build.lib.skyframe.ExternalFilesHelper.ExternalFileAction;
 import com.google.devtools.build.lib.skyframe.PackageLookupFunction.CrossRepositoryLabelViolationStrategy;
@@ -37,6 +38,7 @@ import com.google.devtools.build.skyframe.InMemoryMemoizingEvaluator;
 import com.google.devtools.build.skyframe.LegacySkyKey;
 import com.google.devtools.build.skyframe.MemoizingEvaluator;
 import com.google.devtools.build.skyframe.RecordingDifferencer;
+import com.google.devtools.build.skyframe.SequencedRecordingDifferencer;
 import com.google.devtools.build.skyframe.SequentialBuildDriver;
 import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyFunctionException;
@@ -58,7 +60,7 @@ abstract class ArtifactFunctionTestCase {
 
   protected Set<ActionAnalysisMetadata> actions;
   protected boolean fastDigest = false;
-  protected RecordingDifferencer differencer = new RecordingDifferencer();
+  protected RecordingDifferencer differencer = new SequencedRecordingDifferencer();
   protected SequentialBuildDriver driver;
   protected MemoizingEvaluator evaluator;
   protected Path root;
@@ -75,13 +77,13 @@ abstract class ArtifactFunctionTestCase {
     setupRoot(new CustomInMemoryFs());
     AtomicReference<PathPackageLocator> pkgLocator = new AtomicReference<>(new PathPackageLocator(
         root.getFileSystem().getPath("/outputbase"), ImmutableList.of(root)));
-    BlazeDirectories directories = new BlazeDirectories(root, root, root,
-        TestConstants.PRODUCT_NAME);
+    BlazeDirectories directories =
+        new BlazeDirectories(new ServerDirectories(root, root), root, TestConstants.PRODUCT_NAME);
     ExternalFilesHelper externalFilesHelper = new ExternalFilesHelper(
         pkgLocator,
         ExternalFileAction.DEPEND_ON_EXTERNAL_PKG_FOR_EXTERNAL_REPO_PATHS,
         directories);
-    differencer = new RecordingDifferencer();
+    differencer = new SequencedRecordingDifferencer();
     evaluator =
         new InMemoryMemoizingEvaluator(
             ImmutableMap.<SkyFunctionName, SkyFunction>builder()

@@ -19,6 +19,7 @@ import static com.google.devtools.build.lib.actions.util.ActionsTestUtil.getFirs
 import static org.junit.Assert.fail;
 
 import com.google.common.base.Function;
+import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.common.base.Splitter;
@@ -50,21 +51,19 @@ import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.BuildView;
 import com.google.devtools.build.lib.analysis.BuildView.AnalysisResult;
 import com.google.devtools.build.lib.analysis.CachingAnalysisEnvironment;
-import com.google.devtools.build.lib.analysis.ConfiguredAttributeMapper;
 import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.ExtraActionArtifactsProvider;
-import com.google.devtools.build.lib.analysis.FileConfiguredTarget;
 import com.google.devtools.build.lib.analysis.FileProvider;
 import com.google.devtools.build.lib.analysis.FilesToRunProvider;
 import com.google.devtools.build.lib.analysis.LabelAndConfiguration;
 import com.google.devtools.build.lib.analysis.OutputGroupProvider;
 import com.google.devtools.build.lib.analysis.PseudoAction;
-import com.google.devtools.build.lib.analysis.RuleConfiguredTarget;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.Runfiles;
 import com.google.devtools.build.lib.analysis.RunfilesProvider;
 import com.google.devtools.build.lib.analysis.RunfilesSupport;
+import com.google.devtools.build.lib.analysis.ServerDirectories;
 import com.google.devtools.build.lib.analysis.SourceManifestAction;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
 import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
@@ -75,14 +74,17 @@ import com.google.devtools.build.lib.analysis.actions.SymlinkTreeAction;
 import com.google.devtools.build.lib.analysis.buildinfo.BuildInfoFactory.BuildInfoKey;
 import com.google.devtools.build.lib.analysis.config.BinTools;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
-import com.google.devtools.build.lib.analysis.config.BuildConfiguration.Options.DynamicConfigsMode;
+import com.google.devtools.build.lib.analysis.config.BuildConfiguration.Options.ConfigsMode;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationCollection;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.PatchTransition;
+import com.google.devtools.build.lib.analysis.configuredtargets.FileConfiguredTarget;
+import com.google.devtools.build.lib.analysis.configuredtargets.RuleConfiguredTarget;
 import com.google.devtools.build.lib.analysis.extra.ExtraAction;
 import com.google.devtools.build.lib.analysis.test.BaselineCoverageAction;
 import com.google.devtools.build.lib.analysis.test.InstrumentedFilesProvider;
-import com.google.devtools.build.lib.buildtool.BuildRequest;
+import com.google.devtools.build.lib.buildtool.BuildRequestOptions;
+import com.google.devtools.build.lib.clock.BlazeClock;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.cmdline.PackageIdentifier;
@@ -110,6 +112,7 @@ import com.google.devtools.build.lib.packages.PackageFactory;
 import com.google.devtools.build.lib.packages.PackageFactory.EnvironmentExtension;
 import com.google.devtools.build.lib.packages.RawAttributeMapper;
 import com.google.devtools.build.lib.packages.Rule;
+import com.google.devtools.build.lib.packages.SkylarkSemanticsOptions;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.packages.util.MockToolsConfig;
 import com.google.devtools.build.lib.pkgcache.LoadingOptions;
@@ -124,17 +127,16 @@ import com.google.devtools.build.lib.skyframe.BazelSkyframeExecutorConstants;
 import com.google.devtools.build.lib.skyframe.ConfiguredTargetKey;
 import com.google.devtools.build.lib.skyframe.DiffAwareness;
 import com.google.devtools.build.lib.skyframe.LegacyLoadingPhaseRunner;
+import com.google.devtools.build.lib.skyframe.PackageRootsNoSymlinkCreation;
 import com.google.devtools.build.lib.skyframe.PrecomputedValue;
 import com.google.devtools.build.lib.skyframe.SequencedSkyframeExecutor;
 import com.google.devtools.build.lib.skyframe.SkyValueDirtinessChecker;
 import com.google.devtools.build.lib.skyframe.SkyframeExecutor;
-import com.google.devtools.build.lib.syntax.SkylarkSemanticsOptions;
+import com.google.devtools.build.lib.syntax.SkylarkSemantics;
 import com.google.devtools.build.lib.testutil.BlazeTestUtils;
 import com.google.devtools.build.lib.testutil.FoundationTestCase;
 import com.google.devtools.build.lib.testutil.TestConstants;
-import com.google.devtools.build.lib.util.BlazeClock;
 import com.google.devtools.build.lib.util.FileType;
-import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.util.StringUtil;
 import com.google.devtools.build.lib.util.io.TimestampGranularityMonitor;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
@@ -182,7 +184,7 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
   protected BuildConfigurationCollection masterConfig;
   protected BuildConfiguration targetConfig;  // "target" or "build" config
   private List<String> configurationArgs;
-  private DynamicConfigsMode dynamicConfigsMode = DynamicConfigsMode.NOTRIM;
+  private ConfigsMode configsMode = ConfigsMode.NOTRIM;
 
   protected OptionsParser optionsParser;
   private PackageCacheOptions packageCacheOptions;
@@ -199,7 +201,10 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
   public final void initializeSkyframeExecutor() throws Exception {
     analysisMock = getAnalysisMock();
     directories =
-        new BlazeDirectories(outputBase, outputBase, rootDirectory, analysisMock.getProductName());
+        new BlazeDirectories(
+            new ServerDirectories(outputBase, outputBase),
+            rootDirectory,
+            analysisMock.getProductName());
     binTools = BinTools.forUnitTesting(directories, analysisMock.getEmbeddedTools());
     mockToolsConfig = new MockToolsConfig(rootDirectory, false);
     analysisMock.setupMockClient(mockToolsConfig);
@@ -218,7 +223,7 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
             ImmutableMap.<RepositoryName, PathFragment>of()));
     pkgFactory =
         analysisMock
-            .getPackageFactoryBuilderForTesting()
+            .getPackageFactoryBuilderForTesting(directories)
             .setExtraPrecomputeValues(extraPrecomputedValues)
             .setEnvironmentExtensions(getEnvironmentExtensions())
             .setPlatformSetRegexps(getPlatformSetRegexps())
@@ -227,17 +232,15 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
     skyframeExecutor =
         SequencedSkyframeExecutor.create(
             pkgFactory,
+            fileSystem,
             directories,
-            binTools,
             workspaceStatusActionFactory,
             ruleClassProvider.getBuildInfoFactories(),
             ImmutableList.<DiffAwareness.Factory>of(),
             Predicates.<PathFragment>alwaysFalse(),
-            analysisMock.getSkyFunctions(),
-            getPrecomputedValues(),
+            analysisMock.getSkyFunctions(directories),
             ImmutableList.<SkyValueDirtinessChecker>of(),
             PathFragment.EMPTY_FRAGMENT,
-            analysisMock.getProductName(),
             BazelSkyframeExecutorConstants.CROSS_REPOSITORY_LABEL_VIOLATION_STRATEGY,
             BazelSkyframeExecutorConstants.BUILD_FILES_BY_PRIORITY,
             BazelSkyframeExecutorConstants.ACTION_ON_IO_EXCEPTION_READING_BUILD_FILE);
@@ -282,12 +285,8 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
     return ImmutableList.<EnvironmentExtension>of();
   }
 
-  protected ImmutableList<PrecomputedValue.Injected> getPrecomputedValues() {
-    return ImmutableList.of();
-  }
-
-  protected SkylarkSemanticsOptions getSkylarkSemantics() {
-    return skylarkSemanticsOptions;
+  protected SkylarkSemantics getSkylarkSemantics() {
+    return skylarkSemanticsOptions.toSkylarkSemantics();
   }
 
   protected ResourceSet getStartingResources() {
@@ -297,10 +296,11 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
 
   protected final BuildConfigurationCollection createConfigurations(String... args)
       throws Exception {
-    optionsParser = OptionsParser.newOptionsParser(Iterables.concat(Arrays.asList(
-          ExecutionOptions.class,
-          BuildRequest.BuildRequestOptions.class),
-          ruleClassProvider.getConfigurationOptions()));
+    optionsParser =
+        OptionsParser.newOptionsParser(
+            Iterables.concat(
+                Arrays.asList(ExecutionOptions.class, BuildRequestOptions.class),
+                ruleClassProvider.getConfigurationOptions()));
     List<String> allArgs = new ArrayList<>();
     // TODO(dmarting): Add --stamp option only to test that requires it.
     allArgs.add("--stamp");  // Stamp is now defaulted to false.
@@ -418,12 +418,12 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
         ModifiedFileSet.EVERYTHING_MODIFIED, rootDirectory);
     if (alsoConfigs) {
       try {
-        // Also invalidate all configurations. This is important for dynamic configurations: by
-        // invalidating all files we invalidate CROSSTOOL, which invalidates CppConfiguration (and
-        // a few other fragments). So we need to invalidate the
-        // {@link SkyframeBuildView#hostConfigurationCache} as well. Otherwise we end up
-        // with old CppConfiguration instances. Even though they're logically equal to the new ones,
-        // CppConfiguration has no .equals() method and some production code expects equality.
+        // Also invalidate all configurations. This is important: by invalidating all files we
+        // invalidate CROSSTOOL, which invalidates CppConfiguration (and a few other fragments). So
+        // we need to invalidate the {@link SkyframeBuildView#hostConfigurationCache} as well.
+        // Otherwise we end up with old CppConfiguration instances. Even though they're logically
+        // equal to the new ones, CppConfiguration has no .equals() method and some production code
+        // expects equality.
         useConfiguration(configurationArgs.toArray(new String[0]));
       } catch (Exception e) {
         // There are enough dependers on this method that don't handle Exception that just passing
@@ -445,7 +445,7 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
     String[] actualArgs;
     actualArgs = Arrays.copyOf(args, args.length + 1);
     actualArgs[args.length] = "--experimental_dynamic_configs="
-        + dynamicConfigsMode.toString().toLowerCase();
+        + configsMode.toString().toLowerCase();
     masterConfig = createConfigurations(actualArgs);
     targetConfig = getTargetConfiguration();
     configurationArgs = Arrays.asList(actualArgs);
@@ -453,11 +453,11 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
   }
 
   /**
-   * Makes subsequent {@link #useConfiguration} calls automatically enable dynamic configurations
-   * in the specified mode.
+   * Makes subsequent {@link #useConfiguration} calls automatically use the specified style for
+   * configurations.
    */
-  protected final void useDynamicConfigurations(DynamicConfigsMode mode) {
-    dynamicConfigsMode = mode;
+  protected final void useConfigurationMode(ConfigsMode mode) {
+    configsMode = mode;
   }
 
   /**
@@ -475,19 +475,23 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
 
     String defaultsPackageContent = ruleClassProvider.getDefaultsPackageContent(optionsParser);
     skyframeExecutor.setupDefaultPackage(defaultsPackageContent);
-    skyframeExecutor.dropConfiguredTargets();
+    skyframeExecutor.handleConfiguredTargetChange();
 
     view = new BuildView(directories, ruleClassProvider, skyframeExecutor, null);
     view.setConfigurationsForTesting(masterConfig);
 
-    view.setArtifactRoots(
-        ImmutableMap.of(PackageIdentifier.createInMainRepo(""), rootDirectory));
+    view.setArtifactRoots(new PackageRootsNoSymlinkCreation(rootDirectory));
   }
 
   protected CachingAnalysisEnvironment getTestAnalysisEnvironment() {
-    return new CachingAnalysisEnvironment(view.getArtifactFactory(),
-        ArtifactOwner.NULL_OWNER, /*isSystemEnv=*/true, /*extendedSanityChecks*/false, reporter,
-        /*skyframeEnv=*/ null, /*actionsEnabled=*/true);
+    return new CachingAnalysisEnvironment(
+        view.getArtifactFactory(),
+        ArtifactOwner.NULL_OWNER,
+        /*isSystemEnv=*/ true, /*extendedSanityChecks*/
+        false,
+        reporter,
+        /* env= */ null,
+        /* allowRegisteringActions= */ true);
   }
 
   /**
@@ -511,33 +515,6 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
     }
 
     return null;
-  }
-
-  /**
-   * Asserts that a target's prerequisites contain the given dependency.
-   */
-  // TODO(bazel-team): replace this method with assertThat(iterable).contains(target).
-  // That doesn't work now because dynamic configurations aren't yet applied to top-level targets.
-  // This means that getConfiguredTarget("//go:two") returns a different configuration than
-  // requesting "//go:two" as a dependency. So the configured targets aren't considered "equal".
-  // Once we apply dynamic configs to top-level targets this discrepancy will go away.
-  protected void assertDirectPrerequisitesContain(ConfiguredTarget target, ConfiguredTarget dep)
-      throws Exception {
-    Iterable<ConfiguredTarget> prereqs = getDirectPrerequisites(target);
-    BuildConfiguration depConfig = dep.getConfiguration();
-    for (ConfiguredTarget contained : prereqs) {
-      if (contained.getLabel().equals(dep.getLabel())) {
-        BuildConfiguration containedConfig = contained.getConfiguration();
-        if (containedConfig == null && depConfig == null) {
-          return;
-        } else if (containedConfig != null
-            && depConfig != null
-            && containedConfig.cloneOptions().equals(depConfig.cloneOptions())) {
-          return;
-        }
-      }
-    }
-    fail("Cannot find " + target.toString() + " in " + prereqs.toString());
   }
 
   /**
@@ -736,15 +713,14 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
   }
 
   /**
-   * Returns the ConfiguredTarget for the specified label, using the
-   * given build configuration. If the label corresponds to a target with a top-level configuration
-   * transition, that transition is applied to the given config in the returned ConfiguredTarget.
+   * Returns the ConfiguredTarget for the specified label, using the given build configuration. If
+   * the label corresponds to a target with a top-level configuration transition, that transition is
+   * applied to the given config in the returned ConfiguredTarget.
    *
-   * <p>If the evaluation of the SkyKey corresponding to the configured target fails, this
-   * method may return null.  In that case, use a debugger to inspect the {@link ErrorInfo}
-   * for the evaluation, which is produced by the
-   * {@link MemoizingEvaluator#getExistingValueForTesting} call in
-   * {@link SkyframeExecutor#getConfiguredTargetForTesting}.  See also b/26382502.
+   * <p>If the evaluation of the SkyKey corresponding to the configured target fails, this method
+   * may return null. In that case, use a debugger to inspect the {@link ErrorInfo} for the
+   * evaluation, which is produced by the {@link MemoizingEvaluator#getExistingValue} call in {@link
+   * SkyframeExecutor#getConfiguredTargetForTesting}. See also b/26382502.
    */
   protected ConfiguredTarget getConfiguredTarget(Label label, BuildConfiguration config) {
     return view.getConfiguredTargetForTesting(reporter, BlazeTestUtils.convertLabel(label), config);
@@ -792,7 +768,7 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
 
     invalidatePackages();
     // Need to re-initialize the workspace status.
-    getSkyframeExecutor().injectWorkspaceStatusData("test");
+    getSkyframeExecutor().maybeInvalidateWorkspaceStatusValue("test");
   }
 
   /**
@@ -1158,12 +1134,12 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
   }
 
   /**
-   * Strips the C++-contributed prefix out of an output path when tests are run with dynamic
+   * Strips the C++-contributed prefix out of an output path when tests are run with trimmed
    * configurations. e.g. turns "bazel-out/gcc-X-glibc-Y-k8-fastbuild/ to "bazel-out/fastbuild/".
    *
    * <p>This should be used for targets use configurations with C++ fragments.
    */
-  protected String stripCppPrefixForDynamicConfigs(String outputPath) {
+  protected String stripCppPrefixForTrimmedConfigs(String outputPath) {
     return targetConfig.trimConfigurations()
         ? AnalysisTestUtil.OUTPUT_PATH_CPP_PREFIX_PATTERN.matcher(outputPath).replaceFirst("")
         : outputPath;
@@ -1306,7 +1282,7 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
     BuildConfiguration config;
     try {
       config = getConfiguredTarget(label).getConfiguration();
-      config = view.getDynamicConfigurationForTesting(getTarget(label), config, reporter);
+      config = view.getConfigurationForTesting(getTarget(label), config, reporter);
     } catch (LabelSyntaxException e) {
       throw new IllegalArgumentException(e);
     } catch (Exception e) {
@@ -1501,8 +1477,7 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
   }
 
   /**
-   * Returns the configuration created by applying the given transition to the source
-   * configuration. Works for both static and dynamic configuration tests.
+   * Returns the configuration created by applying the given transition to the source configuration.
    */
   protected BuildConfiguration getConfiguration(BuildConfiguration fromConfig,
       Attribute.Transition transition) throws InterruptedException {
@@ -1522,7 +1497,7 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
    * Returns an attribute value retriever for the given rule for the target configuration.
    */
   protected AttributeMap attributes(RuleConfiguredTarget ct) {
-    return ConfiguredAttributeMapper.of(ct);
+    return ct.getAttributeMapper();
   }
 
   protected AttributeMap attributes(ConfiguredTarget rule) {
@@ -1737,7 +1712,7 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
     }
 
     @Override
-    public SkylarkSemanticsOptions getSkylarkSemantics() {
+    public SkylarkSemantics getSkylarkSemantics() {
       throw new UnsupportedOperationException();
     }
 

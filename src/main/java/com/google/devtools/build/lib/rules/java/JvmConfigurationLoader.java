@@ -24,7 +24,6 @@ import com.google.devtools.build.lib.analysis.config.ConfigurationFragmentFactor
 import com.google.devtools.build.lib.analysis.config.FragmentOptions;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
 import com.google.devtools.build.lib.cmdline.Label;
-import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
@@ -57,16 +56,11 @@ public final class JvmConfigurationLoader implements ConfigurationFragmentFactor
       // TODO(bazel-team): Instead of returning null here, add another method to the interface.
       return null;
     }
-    String javaHome = javaOptions.javaBase;
+
     String cpu = buildOptions.get(BuildConfiguration.Options.class).cpu;
 
-    try {
-      return createDefault(env, javaHome, cpu);
-    } catch (LabelSyntaxException e) {
-      // Try again with legacy
-    }
-
-    return createLegacy(javaHome);
+    return createFromJavaRuntimeSuite(env, javaOptions.javaBase, cpu,
+        javaOptions.enableMakeVariables);
   }
 
   @Override
@@ -80,15 +74,15 @@ public final class JvmConfigurationLoader implements ConfigurationFragmentFactor
   }
 
   @Nullable
-  private static Jvm createDefault(ConfigurationEnvironment lookup, String javaHome, String cpu)
-      throws InvalidConfigurationException, LabelSyntaxException, InterruptedException {
+  private static Jvm createFromJavaRuntimeSuite(
+      ConfigurationEnvironment lookup, Label javaBase, String cpu, boolean enableMakeVariables)
+      throws InvalidConfigurationException, InterruptedException {
     try {
-      Label label = Label.parseAbsolute(javaHome);
-      label = RedirectChaser.followRedirects(lookup, label, "jdk");
-      if (label == null) {
+      javaBase = RedirectChaser.followRedirects(lookup, javaBase, "jdk");
+      if (javaBase == null) {
         return null;
       }
-      Target javaHomeTarget = lookup.getTarget(label);
+      Target javaHomeTarget = lookup.getTarget(javaBase);
       if (javaHomeTarget instanceof Rule) {
         if (!((Rule) javaHomeTarget).getRuleClass().equals("java_runtime_suite")) {
           throw new InvalidConfigurationException(
@@ -96,10 +90,10 @@ public final class JvmConfigurationLoader implements ConfigurationFragmentFactor
                   + ((Rule) javaHomeTarget).getRuleClass()
                   + "'. Expected java_runtime_suite");
         }
-        return createFromRuntimeSuite(lookup, (Rule) javaHomeTarget, cpu);
+        return createFromRuntimeSuite(lookup, (Rule) javaHomeTarget, cpu, enableMakeVariables);
       }
       throw new InvalidConfigurationException(
-          "No JVM target found under " + javaHome + " that would work for " + cpu);
+          "No JVM target found under " + javaBase + " that would work for " + cpu);
     } catch (NoSuchThingException e) {
       lookup.getEventHandler().handle(Event.error(e.getMessage()));
       throw new InvalidConfigurationException(e.getMessage(), e);
@@ -108,8 +102,8 @@ public final class JvmConfigurationLoader implements ConfigurationFragmentFactor
 
   // TODO(b/34175492): eventually the Jvm fragement will containg only the label of a java_runtime
   // rule, and all of the configuration will be accessed using JavaRuntimeInfo.
-  private static Jvm createFromRuntimeSuite(
-      ConfigurationEnvironment lookup, Rule javaRuntimeSuite, String cpu)
+  private static Jvm createFromRuntimeSuite(ConfigurationEnvironment lookup, Rule javaRuntimeSuite,
+      String cpu, boolean enableMakeVariables)
       throws InvalidConfigurationException, InterruptedException, NoSuchTargetException,
           NoSuchPackageException {
     Label javaRuntimeLabel = selectRuntime(javaRuntimeSuite, cpu);
@@ -139,7 +133,7 @@ public final class JvmConfigurationLoader implements ConfigurationFragmentFactor
                 javaHomePath, srcs.toString()));
       }
     }
-    return new Jvm(javaHomePath, javaRuntimeSuite.getLabel());
+    return new Jvm(javaHomePath, javaRuntimeSuite.getLabel(), enableMakeVariables);
   }
 
   private static Label selectRuntime(Rule javaRuntimeSuite, String cpu)
@@ -156,12 +150,13 @@ public final class JvmConfigurationLoader implements ConfigurationFragmentFactor
         "No JVM target found under " + javaRuntimeSuite + " that would work for " + cpu);
   }
 
-  private static Jvm createLegacy(String javaHome) throws InvalidConfigurationException {
+  private static Jvm createFromAbsoluteJavabase(String javaHome, boolean enableMakeVariables)
+      throws InvalidConfigurationException {
     PathFragment javaHomePathFrag = PathFragment.create(javaHome);
     if (!javaHomePathFrag.isAbsolute()) {
       throw new InvalidConfigurationException(
           "Illegal javabase value '" + javaHome + "', javabase must be an absolute path or label");
     }
-    return new Jvm(javaHomePathFrag, null);
+    return new Jvm(javaHomePathFrag, null, enableMakeVariables);
   }
 }

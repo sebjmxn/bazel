@@ -2,7 +2,10 @@
 layout: documentation
 title: Extensions examples
 ---
+
 # Extensions examples
+
+<!-- [TOC] -->
 
 ## <a name="macro"></a>Macro creating a rule
 
@@ -346,7 +349,6 @@ file(
 )
 ```
 
-
 ## <a name="execute-bin"></a>Execute a binary
 
 This rule executes an existing binary. In this particular example, the
@@ -409,12 +411,12 @@ sh_binary(
 
 `merge.sh`:
 
-```python
-#!/bin/bash
+```shell
+#!/bin/sh
 
 out=$1
 shift
-cat $* > $out
+cat "$@" > $out
 ```
 
 `header.html`:
@@ -956,4 +958,3 @@ debug(
   name = "printing_rule"
 )
 ```
-

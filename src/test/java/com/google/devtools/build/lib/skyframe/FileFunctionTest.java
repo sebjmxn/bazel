@@ -20,6 +20,7 @@ import static com.google.devtools.build.skyframe.EvaluationResultSubjectFactory.
 import static org.junit.Assert.fail;
 
 import com.google.common.base.Function;
+import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -30,6 +31,8 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.common.testing.EqualsTester;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
+import com.google.devtools.build.lib.analysis.ServerDirectories;
+import com.google.devtools.build.lib.clock.BlazeClock;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.cmdline.RepositoryName;
@@ -40,13 +43,12 @@ import com.google.devtools.build.lib.rules.repository.RepositoryDelegatorFunctio
 import com.google.devtools.build.lib.skyframe.ExternalFilesHelper.ExternalFileAction;
 import com.google.devtools.build.lib.skyframe.PackageLookupFunction.CrossRepositoryLabelViolationStrategy;
 import com.google.devtools.build.lib.skyframe.PackageLookupValue.BuildFileName;
+import com.google.devtools.build.lib.syntax.SkylarkSemantics;
 import com.google.devtools.build.lib.testutil.ManualClock;
 import com.google.devtools.build.lib.testutil.TestConstants;
 import com.google.devtools.build.lib.testutil.TestRuleClassProvider;
 import com.google.devtools.build.lib.testutil.TestUtils;
-import com.google.devtools.build.lib.util.BlazeClock;
 import com.google.devtools.build.lib.util.Pair;
-import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.util.io.TimestampGranularityMonitor;
 import com.google.devtools.build.lib.vfs.FileStatus;
 import com.google.devtools.build.lib.vfs.FileSystem;
@@ -63,6 +65,7 @@ import com.google.devtools.build.skyframe.EvaluationResult;
 import com.google.devtools.build.skyframe.InMemoryMemoizingEvaluator;
 import com.google.devtools.build.skyframe.MemoizingEvaluator;
 import com.google.devtools.build.skyframe.RecordingDifferencer;
+import com.google.devtools.build.skyframe.SequencedRecordingDifferencer;
 import com.google.devtools.build.skyframe.SequentialBuildDriver;
 import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyFunctionName;
@@ -121,10 +124,11 @@ public class FileFunctionTest {
   private SequentialBuildDriver makeDriver(ExternalFileAction externalFileAction) {
     AtomicReference<PathPackageLocator> pkgLocatorRef = new AtomicReference<>(pkgLocator);
     BlazeDirectories directories =
-        new BlazeDirectories(pkgRoot, outputBase, pkgRoot, TestConstants.PRODUCT_NAME);
+        new BlazeDirectories(
+            new ServerDirectories(pkgRoot, outputBase), pkgRoot, TestConstants.PRODUCT_NAME);
     ExternalFilesHelper externalFilesHelper =
         new ExternalFilesHelper(pkgLocatorRef, externalFileAction, directories);
-    differencer = new RecordingDifferencer();
+    differencer = new SequencedRecordingDifferencer();
     MemoizingEvaluator evaluator =
         new InMemoryMemoizingEvaluator(
             ImmutableMap.<SkyFunctionName, SkyFunction>builder()
@@ -166,6 +170,7 @@ public class FileFunctionTest {
     PrecomputedValue.PATH_PACKAGE_LOCATOR.set(differencer, pkgLocator);
     RepositoryDelegatorFunction.REPOSITORY_OVERRIDES.set(
         differencer, ImmutableMap.<RepositoryName, PathFragment>of());
+    PrecomputedValue.SKYLARK_SEMANTICS.set(differencer, SkylarkSemantics.DEFAULT_SEMANTICS);
     return new SequentialBuildDriver(evaluator);
   }
 
@@ -719,7 +724,7 @@ public class FileFunctionTest {
       throws Exception {
     file("../outsideroot");
     symlink("a", "../outsideroot");
-    SequentialBuildDriver driver = 
+    SequentialBuildDriver driver =
         makeDriver(ExternalFileAction.ASSUME_NON_EXISTENT_AND_IMMUTABLE_FOR_EXTERNAL_PATHS);
     SkyKey key = skyKey("a");
     EvaluationResult<SkyValue> result =
@@ -1247,22 +1252,22 @@ public class FileFunctionTest {
 
   @Test
   public void testInfiniteSymlinkExpansion_AbsoluteSymlinkToDescendant() throws Exception {
-    runTestInfiniteSymlinkExpansion(/*ancestor=*/ false, /*absoluteSymlink=*/ true);
+    runTestInfiniteSymlinkExpansion(/* symlinkToAncestor= */ false, /*absoluteSymlink=*/ true);
   }
 
   @Test
   public void testInfiniteSymlinkExpansion_RelativeSymlinkToDescendant() throws Exception {
-    runTestInfiniteSymlinkExpansion(/*ancestor=*/ false, /*absoluteSymlink=*/ false);
+    runTestInfiniteSymlinkExpansion(/* symlinkToAncestor= */ false, /*absoluteSymlink=*/ false);
   }
 
   @Test
   public void testInfiniteSymlinkExpansion_AbsoluteSymlinkToAncestor() throws Exception {
-    runTestInfiniteSymlinkExpansion(/*ancestor=*/ true, /*absoluteSymlink=*/ true);
+    runTestInfiniteSymlinkExpansion(/* symlinkToAncestor= */ true, /*absoluteSymlink=*/ true);
   }
 
   @Test
   public void testInfiniteSymlinkExpansion_RelativeSymlinkToAncestor() throws Exception {
-    runTestInfiniteSymlinkExpansion(/*ancestor=*/ true, /*absoluteSymlink=*/ false);
+    runTestInfiniteSymlinkExpansion(/* symlinkToAncestor= */ true, /*absoluteSymlink=*/ false);
   }
 
   @Test

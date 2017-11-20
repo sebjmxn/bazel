@@ -21,10 +21,11 @@ import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ParameterFile.ParameterFileType;
 import com.google.devtools.build.lib.analysis.FilesToRunProvider;
-import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
+import com.google.devtools.build.lib.analysis.actions.ParamFileInfo;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
+import com.google.devtools.build.lib.analysis.configuredtargets.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
 
@@ -46,7 +47,7 @@ public class LibraryRGeneratorActionBuilder {
   }
 
   public LibraryRGeneratorActionBuilder withDependencies(ResourceDependencies resourceDeps) {
-    this.deps = resourceDeps.getResources();
+    this.deps = resourceDeps.getResourceContainers();
     return this;
   }
 
@@ -89,11 +90,11 @@ public class LibraryRGeneratorActionBuilder {
     SpawnAction.Builder spawnActionBuilder = new SpawnAction.Builder();
     ruleContext.registerAction(
         spawnActionBuilder
-            .useParameterFile(ParameterFileType.UNQUOTED)
             .useDefaultShellEnvironment()
             .addTransitiveInputs(inputs.build())
             .addOutputs(ImmutableList.<Artifact>of(rJavaClassJar))
-            .setCommandLine(builder.build())
+            .addCommandLine(
+                builder.build(), ParamFileInfo.builder(ParameterFileType.SHELL_QUOTED).build())
             .setExecutable(executable)
             .setProgressMessage("Generating Library R Classes: %s", ruleContext.getLabel())
             .setMnemonic("LibraryRClassGenerator")

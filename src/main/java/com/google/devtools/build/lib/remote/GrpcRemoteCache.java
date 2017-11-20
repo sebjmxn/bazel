@@ -21,12 +21,13 @@ import com.google.bytestream.ByteStreamProto.ReadResponse;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.ListeningScheduledExecutorService;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.devtools.build.lib.actions.ActionInput;
-import com.google.devtools.build.lib.actions.ActionInputFileCache;
 import com.google.devtools.build.lib.actions.EnvironmentalExecException;
 import com.google.devtools.build.lib.actions.ExecException;
+import com.google.devtools.build.lib.actions.MetadataProvider;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.remote.Digests.ActionKey;
 import com.google.devtools.build.lib.remote.TreeNodeRepository.TreeNode;
@@ -36,8 +37,6 @@ import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.remoteexecution.v1test.ActionCacheGrpc;
 import com.google.devtools.remoteexecution.v1test.ActionCacheGrpc.ActionCacheBlockingStub;
 import com.google.devtools.remoteexecution.v1test.ActionResult;
-import com.google.devtools.remoteexecution.v1test.BatchUpdateBlobsRequest;
-import com.google.devtools.remoteexecution.v1test.BatchUpdateBlobsResponse;
 import com.google.devtools.remoteexecution.v1test.Command;
 import com.google.devtools.remoteexecution.v1test.ContentAddressableStorageGrpc;
 import com.google.devtools.remoteexecution.v1test.ContentAddressableStorageGrpc.ContentAddressableStorageBlockingStub;
@@ -48,18 +47,17 @@ import com.google.devtools.remoteexecution.v1test.FindMissingBlobsResponse;
 import com.google.devtools.remoteexecution.v1test.GetActionResultRequest;
 import com.google.devtools.remoteexecution.v1test.OutputFile;
 import com.google.devtools.remoteexecution.v1test.UpdateActionResultRequest;
-import com.google.protobuf.ByteString;
 import io.grpc.CallCredentials;
 import io.grpc.Channel;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
-import io.grpc.protobuf.StatusProto;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -93,18 +91,21 @@ public class GrpcRemoteCache implements RemoteActionCache {
 
   private ContentAddressableStorageBlockingStub casBlockingStub() {
     return ContentAddressableStorageGrpc.newBlockingStub(channel)
+        .withInterceptors(TracingMetadataUtils.attachMetadataFromContextInterceptor())
         .withCallCredentials(credentials)
         .withDeadlineAfter(options.remoteTimeout, TimeUnit.SECONDS);
   }
 
   private ByteStreamBlockingStub bsBlockingStub() {
     return ByteStreamGrpc.newBlockingStub(channel)
+        .withInterceptors(TracingMetadataUtils.attachMetadataFromContextInterceptor())
         .withCallCredentials(credentials)
         .withDeadlineAfter(options.remoteTimeout, TimeUnit.SECONDS);
   }
 
   private ActionCacheBlockingStub acBlockingStub() {
     return ActionCacheGrpc.newBlockingStub(channel)
+        .withInterceptors(TracingMetadataUtils.attachMetadataFromContextInterceptor())
         .withCallCredentials(credentials)
         .withDeadlineAfter(options.remoteTimeout, TimeUnit.SECONDS);
   }
@@ -142,46 +143,35 @@ public class GrpcRemoteCache implements RemoteActionCache {
       TreeNodeRepository repository, Path execRoot, TreeNode root, Command command)
       throws IOException, InterruptedException {
     repository.computeMerkleDigests(root);
+    Digest commandDigest = Digests.computeDigest(command);
     // TODO(olaola): avoid querying all the digests, only ask for novel subtrees.
-    ImmutableSet<Digest> missingDigests = getMissingDigests(repository.getAllDigests(root));
+    ImmutableSet<Digest> missingDigests =
+        getMissingDigests(
+            Iterables.concat(repository.getAllDigests(root), ImmutableList.of(commandDigest)));
 
+    List<Chunker> toUpload = new ArrayList<>();
     // Only upload data that was missing from the cache.
     ArrayList<ActionInput> missingActionInputs = new ArrayList<>();
     ArrayList<Directory> missingTreeNodes = new ArrayList<>();
-    repository.getDataFromDigests(missingDigests, missingActionInputs, missingTreeNodes);
+    HashSet<Digest> missingTreeDigests = new HashSet<>(missingDigests);
+    missingTreeDigests.remove(commandDigest);
+    repository.getDataFromDigests(missingTreeDigests, missingActionInputs, missingTreeNodes);
 
+    if (missingDigests.contains(commandDigest)) {
+      toUpload.add(new Chunker(command.toByteArray()));
+    }
     if (!missingTreeNodes.isEmpty()) {
-      // TODO(olaola): split this into multiple requests if total size is > 10MB.
-      BatchUpdateBlobsRequest.Builder treeBlobRequest =
-          BatchUpdateBlobsRequest.newBuilder().setInstanceName(options.remoteInstanceName);
       for (Directory d : missingTreeNodes) {
-        byte[] data = d.toByteArray();
-        treeBlobRequest
-            .addRequestsBuilder()
-            .setContentDigest(Digests.computeDigest(data))
-            .setData(ByteString.copyFrom(data));
+        toUpload.add(new Chunker(d.toByteArray()));
       }
-      retrier.execute(
-          () -> {
-            BatchUpdateBlobsResponse response =
-                casBlockingStub().batchUpdateBlobs(treeBlobRequest.build());
-            for (BatchUpdateBlobsResponse.Response r : response.getResponsesList()) {
-              if (!Status.fromCodeValue(r.getStatus().getCode()).isOk()) {
-                throw StatusProto.toStatusRuntimeException(r.getStatus());
-              }
-            }
-            return null;
-          });
     }
-    uploadBlob(command.toByteArray());
     if (!missingActionInputs.isEmpty()) {
-      List<Chunker> inputsToUpload = new ArrayList<>();
-      ActionInputFileCache inputFileCache = repository.getInputFileCache();
+      MetadataProvider inputFileCache = repository.getInputFileCache();
       for (ActionInput actionInput : missingActionInputs) {
-        inputsToUpload.add(new Chunker(actionInput, inputFileCache, execRoot));
+        toUpload.add(new Chunker(actionInput, inputFileCache, execRoot));
       }
-      uploader.uploadBlobs(inputsToUpload);
     }
+    uploader.uploadBlobs(toUpload);
   }
 
   /**
@@ -301,10 +291,18 @@ public class GrpcRemoteCache implements RemoteActionCache {
   }
 
   @Override
-  public void upload(ActionKey actionKey, Path execRoot, Collection<Path> files, FileOutErr outErr)
+  public void upload(
+      ActionKey actionKey,
+      Path execRoot,
+      Collection<Path> files,
+      FileOutErr outErr,
+      boolean uploadAction)
       throws IOException, InterruptedException {
     ActionResult.Builder result = ActionResult.newBuilder();
     upload(execRoot, files, outErr, result);
+    if (!uploadAction) {
+      return;
+    }
     try {
       retrier.execute(
           () ->
@@ -394,7 +392,7 @@ public class GrpcRemoteCache implements RemoteActionCache {
    *
    * @return The key for fetching the file contents blob from cache.
    */
-  Digest uploadFileContents(ActionInput input, Path execRoot, ActionInputFileCache inputCache)
+  Digest uploadFileContents(ActionInput input, Path execRoot, MetadataProvider inputCache)
       throws IOException, InterruptedException {
     Digest digest = Digests.getDigestFromInputCache(input, inputCache);
     ImmutableSet<Digest> missing = getMissingDigests(ImmutableList.of(digest));

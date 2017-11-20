@@ -35,9 +35,12 @@ import com.google.devtools.remoteexecution.v1test.Digest;
 import io.grpc.CallCredentials;
 import io.grpc.Channel;
 import java.io.IOException;
+import java.util.logging.Logger;
 
 /** RemoteModule provides distributed cache and remote execution for Bazel. */
 public final class RemoteModule extends BlazeModule {
+  private static final Logger logger = Logger.getLogger(RemoteModule.class.getName());
+
   @VisibleForTesting
   static final class CasPathConverter implements PathConverter {
     // Not final; unfortunately, the Bazel startup process requires us to create this object before
@@ -89,7 +92,9 @@ public final class RemoteModule extends BlazeModule {
   @Override
   public void beforeCommand(CommandEnvironment env) {
     env.getEventBus().register(this);
-
+    String buildRequestId = env.getBuildRequestId().toString();
+    String commandId = env.getCommandId().toString();
+    logger.info("Command: buildRequestId = " + buildRequestId + ", commandId = " + commandId);
     RemoteOptions remoteOptions = env.getOptions().getOptions(RemoteOptions.class);
     AuthAndTLSOptions authAndTlsOptions = env.getOptions().getOptions(AuthAndTLSOptions.class);
     converter.options = remoteOptions;
@@ -100,14 +105,18 @@ public final class RemoteModule extends BlazeModule {
     }
 
     try {
-      boolean restCache = SimpleBlobStoreFactory.isRemoteCacheOptions(remoteOptions);
+      boolean remoteOrLocalCache = SimpleBlobStoreFactory.isRemoteCacheOptions(remoteOptions);
       boolean grpcCache = GrpcRemoteCache.isRemoteCacheOptions(remoteOptions);
 
       Retrier retrier = new Retrier(remoteOptions);
       CallCredentials creds = GrpcUtils.newCallCredentials(authAndTlsOptions);
+      // TODO(davido): The naming is wrong here. "Remote"-prefix in RemoteActionCache class has no
+      // meaning.
       final RemoteActionCache cache;
-      if (restCache) {
-        cache = new SimpleBlobStoreActionCache(SimpleBlobStoreFactory.create(remoteOptions));
+      if (remoteOrLocalCache) {
+        cache =
+            new SimpleBlobStoreActionCache(
+                SimpleBlobStoreFactory.create(remoteOptions, env.getWorkingDirectory()));
       } else if (grpcCache || remoteOptions.remoteExecutor != null) {
         // If a remote executor but no remote cache is specified, assume both at the same target.
         String target = grpcCache ? remoteOptions.remoteCache : remoteOptions.remoteExecutor;

@@ -40,7 +40,6 @@ import com.google.devtools.build.lib.actions.util.TestAction.DummyAction;
 import com.google.devtools.build.lib.events.NullEventHandler;
 import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.build.lib.vfs.FileStatus;
-import com.google.devtools.build.lib.vfs.FileSystem.HashFunction;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -448,7 +447,7 @@ public class ArtifactFunctionTest extends ArtifactFunctionTestCase {
   }
 
   private SkyValue evaluateArtifactValue(Artifact artifact) throws Throwable {
-    return evaluateArtifactValue(artifact, /*isMandatory=*/ true);
+    return evaluateArtifactValue(artifact, /* mandatory= */ true);
   }
 
   private SkyValue evaluateArtifactValue(Artifact artifact, boolean mandatory) throws Throwable {
@@ -460,8 +459,8 @@ public class ArtifactFunctionTest extends ArtifactFunctionTestCase {
     return result.get(key);
   }
 
-  private void setGeneratingActions() {
-    if (evaluator.getExistingValueForTesting(OWNER_KEY) == null) {
+  private void setGeneratingActions() throws InterruptedException {
+    if (evaluator.getExistingValue(OWNER_KEY) == null) {
       differencer.inject(
           ImmutableMap.of(
               OWNER_KEY,

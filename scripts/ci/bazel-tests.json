@@ -3,14 +3,8 @@
 [
     {
         "configurations": [
-            {
-                "node": "linux-x86_64",
-                "variation": ""
-            },
-            {
-                "node": "ubuntu_16.04-x86_64",
-                "variation": ""
-            }
+            {"node": "linux-x86_64"},
+            {"node": "ubuntu_16.04-x86_64"}
         ],
         "parameters": {
             "configure": [
@@ -28,22 +22,18 @@
             ],
             "tests": [
                 "//scripts/...",
-                "filter(\"^(?!//src/test/docker).*$\", //src/test/...)",
+                "//src/test/...",
                 "//third_party/ijar/...",
                 "//tools/android/..."
             ],
+            "test_tag_filters": ["-slow"],
             "targets": []
         }
     }, {
         "configurations": [
-            {
-                "node": "freebsd-11",
-                "variation": ""
-            },
-            {
-                "node": "freebsd-12",
-                "variation": ""
-            }
+            {"node": "freebsd-11"} //,
+            // TODO(aehlig): Fix bazelbuild/continuous-integration#149 and reactivate.
+            // {"node": "freebsd-12"}
         ],
         "parameters": {
             // As configure step, we redo the USES=shebangfix of the devel/bazel
@@ -59,15 +49,14 @@
                 "{} +"
             ],
             "tests": [
-                // java_integration_test is timeout flaky on FreeBSD...
-                "//src/test/shell/integration/... - //src/test/shell/integration:java_integration_test",
+                "//src/test/shell/integration/...",
                 "let bazel=\"//src/test/shell/bazel/...\" in $bazel - filter(\"all_tests\", $bazel) - filter(\"jdk\", $bazel) - filter(\"maven\", $bazel) - filter(\"android\", $bazel) - filter(\"java\", $bazel) - filter(\"workspace\", $bazel) - filter(\"external\", $bazel) - filter(\"example\", $bazel) - filter(\"skylark_repository\", $bazel) - filter(\"repository_cache\", $bazel)"
             ],
+            "test_tag_filters": ["-slow"],
             "targets": []
         }
     }, {
         "node": "darwin-x86_64",
-        "variation": "",
         "parameters": {
             "configure": [
                 "echo >>WORKSPACE",
@@ -85,26 +74,20 @@
             "build_opts": ["--define IPHONE_SDK=1"],
             "tests": [
                 "//scripts/...",
-                "filter(\"^(?!//src/test/docker).*$\", //src/test/...)",
+                "//src/test/...",
                 "//third_party/ijar/...",
-                "//tools/android/...",
-                "//src/test/shell/bazel:cpp_darwin_integration_test"
+                "//tools/android/..."
             ],
+            "test_tag_filters": ["-slow"],
             "targets": []
         }
     }, {
         "toolchain": "msvc",
-        "configurations": [{
-            "node": "windows-x86_64",
-            "variation": ""
-        }],
+        "node": "windows-x86_64",
         "parameters": {
             "build_opts": [
                 "--copt=-w",
-                "--host_copt=-w",
-                // TODO(pcloudy):.
-                // Remove it after wrapper-less CROSSTOOL becomes default
-                "--action_env=NO_MSVC_WRAPPER=1"
+                "--host_copt=-w"
             ],
             "test_opts": [
                 // TODO(pcloudy): Remove this after TEMP is properly set.
@@ -113,27 +96,20 @@
                 // ASSERT_DEATH will try to write to C:/Windows, then fails.
                 "--test_env=TEMP"
             ],
-            "test_tag_filters": ["-no_windows"],
             "tests": [
-                "//src/test/py/...",
-                "//src/test/java/...",
-                "//src/test/cpp/...",
-                "//src/test/native:all_tests",
-                "//src/tools/launcher/util/...",
-                "//src/test/shell/bazel:bazel_bootstrap_distfile_test",
-                "//src/test/shell/bazel:bazel_windows_example_test"
+                "//src:all_windows_tests"
             ],
             "targets": ["//src:bazel"]
         }
     }, {
         "toolchain": "msys",
-        "configurations": [{
-            "node": "windows-x86_64",
-            "variation": ""
-        }],
+        "node": "windows-x86_64",
         "parameters": {
             "build_opts": ["--cpu=x64_windows_msys", "--host_cpu=x64_windows_msys"],
-            "test_tag_filters": ["-no_windows"],
+            "test_tag_filters": [
+                "-no_windows",
+                "-slow"
+            ],
             "tests": [],
             "targets": ["//examples/cpp:hello-world"]
         }

@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.skyframe;
 import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.fail;
 
+import com.google.common.base.Preconditions;
 import com.google.common.base.Suppliers;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -38,13 +39,13 @@ import com.google.devtools.build.lib.events.NullEventHandler;
 import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
 import com.google.devtools.build.lib.skyframe.ArtifactSkyKey.OwnedArtifact;
 import com.google.devtools.build.lib.testutil.FoundationTestCase;
-import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.skyframe.EvaluationResult;
 import com.google.devtools.build.skyframe.InMemoryMemoizingEvaluator;
 import com.google.devtools.build.skyframe.MemoizingEvaluator;
 import com.google.devtools.build.skyframe.RecordingDifferencer;
+import com.google.devtools.build.skyframe.SequencedRecordingDifferencer;
 import com.google.devtools.build.skyframe.SequentialBuildDriver;
 import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyFunctionName;
@@ -71,7 +72,7 @@ public final class ActionTemplateExpansionFunctionTest extends FoundationTestCas
     artifactValueMap = new LinkedHashMap<>();
     AtomicReference<PathPackageLocator> pkgLocator = new AtomicReference<>(new PathPackageLocator(
         rootDirectory.getFileSystem().getPath("/outputbase"), ImmutableList.of(rootDirectory)));
-    RecordingDifferencer differencer = new RecordingDifferencer();
+    RecordingDifferencer differencer = new SequencedRecordingDifferencer();
     MemoizingEvaluator evaluator =
         new InMemoryMemoizingEvaluator(
             ImmutableMap.<SkyFunctionName, SkyFunction>builder()

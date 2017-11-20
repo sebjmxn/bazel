@@ -15,6 +15,7 @@
 package com.google.devtools.build.lib.packages;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -34,7 +35,7 @@ import com.google.devtools.build.lib.events.ExtendedEventHandler.Postable;
 import com.google.devtools.build.lib.events.Location;
 import com.google.devtools.build.lib.packages.AttributeMap.AcceptsLabelAttribute;
 import com.google.devtools.build.lib.packages.License.DistributionType;
-import com.google.devtools.build.lib.util.Preconditions;
+import com.google.devtools.build.lib.syntax.SkylarkSemantics;
 import com.google.devtools.build.lib.util.SpellChecker;
 import com.google.devtools.build.lib.vfs.Canonicalizer;
 import com.google.devtools.build.lib.vfs.Path;
@@ -47,6 +48,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import javax.annotation.Nullable;
 
@@ -712,9 +714,10 @@ public class Package {
 
       /**
        * Called after {@link com.google.devtools.build.lib.skyframe.PackageFunction} is completely
-       * done loading the given {@link Package}.
+       * done loading the given {@link Package}. {@code skylarkSemantics} are the semantics used to
+       * evaluate the build.
        */
-      void onLoadingComplete(Package pkg);
+      void onLoadingComplete(Package pkg, SkylarkSemantics skylarkSemantics);
     }
 
     /** {@link Helper} that simply calls the {@link Package} constructor. */
@@ -730,7 +733,7 @@ public class Package {
       }
 
       @Override
-      public void onLoadingComplete(Package pkg) {
+      public void onLoadingComplete(Package pkg, SkylarkSemantics skylarkSemantics) {
       }
     }
 
@@ -764,8 +767,6 @@ public class Package {
 
     protected Map<Label, Path> subincludes = null;
     protected ImmutableList<Label> skylarkFileDependencies = ImmutableList.of();
-
-    protected ExternalPackageBuilder externalPackageData = new ExternalPackageBuilder();
 
     protected List<Label> registeredToolchainLabels = new ArrayList<>();
 
@@ -1167,7 +1168,7 @@ public class Package {
       }
       if (!((InputFile) cacheInstance).isVisibilitySpecified()
           || cacheInstance.getVisibility() != visibility
-          || cacheInstance.getLicense() != license) {
+          || !Objects.equals(cacheInstance.getLicense(), license)) {
         targets.put(filename, new InputFile(
             pkg, cacheInstance.getLabel(), cacheInstance.getLocation(), visibility, license));
       }
@@ -1393,10 +1394,6 @@ public class Package {
       pkg.finishInit(this);
       alreadyBuilt = true;
       return pkg;
-    }
-
-    public ExternalPackageBuilder externalPackageData() {
-      return externalPackageData;
     }
 
     public Package build() throws InterruptedException, NoSuchPackageException {

@@ -14,6 +14,7 @@
 
 package com.google.devtools.build.lib.rules.genquery;
 
+import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
@@ -70,11 +71,11 @@ import com.google.devtools.build.lib.skyframe.PrecomputedValue.Precomputed;
 import com.google.devtools.build.lib.skyframe.SkyFunctions;
 import com.google.devtools.build.lib.skyframe.TargetPatternValue;
 import com.google.devtools.build.lib.skyframe.TargetPatternValue.TargetPatternKey;
+import com.google.devtools.build.lib.skyframe.TransitiveTargetKey;
 import com.google.devtools.build.lib.skyframe.TransitiveTargetValue;
 import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.Fingerprint;
 import com.google.devtools.build.lib.util.Pair;
-import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.skyframe.LegacySkyKey;
 import com.google.devtools.build.skyframe.SkyFunction;
@@ -214,7 +215,7 @@ public class GenQuery implements RuleConfiguredTargetFactory {
     NestedSetBuilder<Label> validTargets = NestedSetBuilder.stableOrder();
     Set<PackageIdentifier> successfulPackageNames = new LinkedHashSet<>();
     for (Target target : scope) {
-      SkyKey key = TransitiveTargetValue.key(target.getLabel());
+      SkyKey key = TransitiveTargetKey.of(target.getLabel());
       TransitiveTargetValue transNode = (TransitiveTargetValue) env.getValue(key);
       if (transNode == null) {
         return null;
@@ -305,12 +306,9 @@ public class GenQuery implements RuleConfiguredTargetFactory {
       // behavior of the query engine in these two use cases.
       settings.add(Setting.NO_NODEP_DEPS);
 
-      ImmutableList<OutputFormatter> outputFormatters = QUERY_OUTPUT_FORMATTERS.get(
-          ruleContext.getAnalysisEnvironment().getSkyframeEnv());
-      // This is a precomputed value so it should have been injected by the rules module by the
-      // time we get there.
-      formatter = OutputFormatter.getFormatter(
-          Preconditions.checkNotNull(outputFormatters), queryOptions.outputFormat);
+      formatter =
+          OutputFormatter.getFormatter(
+              OutputFormatter.getDefaultFormatters(), queryOptions.outputFormat);
       // All the packages are already loaded at this point, so there is no need
       // to start up many threads. 4 are started up to make good use of multiple
       // cores.
@@ -318,7 +316,7 @@ public class GenQuery implements RuleConfiguredTargetFactory {
           (BlazeQueryEnvironment)
               QUERY_ENVIRONMENT_FACTORY.create(
                   /*transitivePackageLoader=*/ null,
-                  /*graph=*/ null,
+                  /* graphFactory= */ null,
                   packageProvider,
                   evaluator,
                   /*keepGoing=*/ false,

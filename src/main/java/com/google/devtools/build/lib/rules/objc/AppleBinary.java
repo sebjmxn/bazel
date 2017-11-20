@@ -28,12 +28,12 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
-import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTargetFactory;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.analysis.configuredtargets.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.test.InstrumentedFilesCollector;
 import com.google.devtools.build.lib.analysis.test.InstrumentedFilesProvider;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
@@ -164,8 +164,10 @@ public class AppleBinary implements RuleConfiguredTargetFactory {
     objcProviderBuilder.add(MULTI_ARCH_LINKED_BINARIES, outputArtifact);
 
     ObjcProvider objcProvider = objcProviderBuilder.build();
-    // TODO(cparsons): Stop propagating ObjcProvider directly from this rule.
-    targetBuilder.addNativeDeclaredProvider(objcProvider);
+
+    if (appleConfiguration.shouldLinkingRulesPropagateObjc()) {
+      targetBuilder.addNativeDeclaredProvider(objcProvider);
+    }
 
     switch (getBinaryType(ruleContext)) {
       case EXECUTABLE:

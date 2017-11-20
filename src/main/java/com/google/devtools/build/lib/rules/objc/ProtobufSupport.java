@@ -24,23 +24,24 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Ordering;
 import com.google.common.collect.Sets;
 import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine.Builder;
+import com.google.devtools.build.lib.analysis.actions.CustomCommandLine.VectorArg;
 import com.google.devtools.build.lib.analysis.actions.FileWriteAction;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.analysis.configuredtargets.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.packages.RuleClass.ConfiguredTargetFactory.RuleErrorException;
+import com.google.devtools.build.lib.rules.cpp.CcToolchainProvider;
 import com.google.devtools.build.lib.rules.proto.ProtoSourcesProvider;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Set;
-import java.util.TreeMap;
 
 /**
  * Support for generating Objective C proto static libraries that registers actions which generate
@@ -73,6 +74,7 @@ final class ProtobufSupport {
   private final Set<PathFragment> dylibHandledProtoPaths;
   private final Iterable<ObjcProtoProvider> objcProtoProviders;
   private final NestedSet<Artifact> portableProtoFilters;
+  private final CcToolchainProvider toolchain;
 
   // Each entry of this map represents a generation action and a compilation action. The input set
   // are dependencies of the output set. The output set is always a subset of, or the same set as,
@@ -114,7 +116,8 @@ final class ProtobufSupport {
         NestedSetBuilder.<Artifact>stableOrder().build(),
         protoProviders,
         objcProtoProviders,
-        portableProtoFilters);
+        portableProtoFilters,
+        null);
   }
 
   /**
@@ -131,6 +134,8 @@ final class ProtobufSupport {
    *     symbols
    * @param protoProviders the list of ProtoSourcesProviders that this proto support should process
    * @param objcProtoProviders the list of ObjcProtoProviders that this proto support should process
+   * @param toolchain if not null, the toolchain to override the default toolchain for the rule
+   *     context.
    */
   public ProtobufSupport(
       RuleContext ruleContext,
@@ -138,7 +143,8 @@ final class ProtobufSupport {
       NestedSet<Artifact> dylibHandledProtos,
       Iterable<ProtoSourcesProvider> protoProviders,
       Iterable<ObjcProtoProvider> objcProtoProviders,
-      NestedSet<Artifact> portableProtoFilters) {
+      NestedSet<Artifact> portableProtoFilters,
+      CcToolchainProvider toolchain) {
     this.ruleContext = ruleContext;
     this.buildConfiguration = buildConfiguration;
     this.attributes = new ProtoAttributes(ruleContext);
@@ -148,6 +154,7 @@ final class ProtobufSupport {
     this.intermediateArtifacts =
         ObjcRuleClasses.intermediateArtifacts(ruleContext, buildConfiguration);
     this.inputsToOutputsMap = getInputsToOutputsMap(attributes, protoProviders, objcProtoProviders);
+    this.toolchain = toolchain;
   }
 
   /**
@@ -206,16 +213,18 @@ final class ProtobufSupport {
 
       ObjcCommon common = getCommon(intermediateArtifacts, compilationArtifacts);
 
-      new LegacyCompilationSupport(
-              ruleContext,
-              buildConfiguration,
-              intermediateArtifacts,
-              new CompilationAttributes.Builder().build(),
-              /*useDeps=*/ false,
-              new TreeMap<String, NestedSet<Artifact>>(),
-              /*isTestRule=*/ false,
-              /*usePch=*/ false)
-          .registerCompileAndArchiveActions(common, userHeaderSearchPaths);
+      CompilationSupport compilationSupport =
+          new CompilationSupport.Builder()
+              .setRuleContext(ruleContext)
+              .setConfig(buildConfiguration)
+              .setIntermediateArtifacts(intermediateArtifacts)
+              .setCompilationAttributes(new CompilationAttributes.Builder().build())
+              .setToolchainProvider(toolchain)
+              .doNotUseDeps()
+              .doNotUsePch()
+              .build();
+
+      compilationSupport.registerCompileAndArchiveActions(common, userHeaderSearchPaths);
 
       actionId++;
     }
@@ -448,7 +457,7 @@ final class ProtobufSupport {
             .addOutputs(getGeneratedProtoOutputs(outputProtos, HEADER_SUFFIX))
             .addOutputs(getProtoSourceFilesForCompilation(outputProtos))
             .setExecutable(attributes.getProtoCompiler().getExecPath())
-            .setCommandLine(getGenerationCommandLine(protoInputsFile))
+            .addCommandLine(getGenerationCommandLine(protoInputsFile))
             .build(ruleContext));
   }
 
@@ -477,7 +486,7 @@ final class ProtobufSupport {
         .addDynamicString(getGenfilesPathString())
         .add("--proto-root-dir")
         .add(".")
-        .addBeforeEachExecPath("--config", portableProtoFilters)
+        .addExecPaths(VectorArg.addBefore("--config").each(portableProtoFilters))
         .build();
   }
 
@@ -519,10 +528,9 @@ final class ProtobufSupport {
   }
 
   private boolean isLinkingTarget() {
-    // Since this is the ProtobufSupport helper class, check whether the current target has
-    // configured the protobuf attributes. If not, it's not an objc_proto_library rule, so it must
-    // be a linking rule (e.g. apple_binary).
-    return !attributes.requiresProtobuf();
+    // Since this is the ProtobufSupport helper class, check whether the current target is
+    // an objc_proto_library. If not, it must be a linking rule (e.g. apple_binary).
+    return !attributes.isObjcProtoLibrary();
   }
 
   /**

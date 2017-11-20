@@ -14,6 +14,8 @@
 
 package com.google.devtools.build.lib.bazel.rules.cpp;
 
+import com.google.common.base.Predicate;
+import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
@@ -51,13 +53,17 @@ public class BazelCppSemantics implements CppSemantics {
   public void finalizeCompileActionBuilder(
       RuleContext ruleContext,
       CppCompileActionBuilder actionBuilder,
-      FeatureSpecification featureSpecification) {
-    actionBuilder.setCppConfiguration(ruleContext.getFragment(CppConfiguration.class));
-    actionBuilder.setActionContext(CppCompileActionContext.class);
-    // Because Bazel does not support include scanning, we need the entire crosstool filegroup,
-    // including header files, as opposed to just the "compile" filegroup.
-    actionBuilder.addTransitiveMandatoryInputs(actionBuilder.getToolchain().getCrosstool());
-    actionBuilder.setShouldScanIncludes(false);
+      FeatureSpecification featureSpecification,
+      Predicate<String> coptsFilter,
+      ImmutableSet<String> features) {
+    actionBuilder
+        .setCppConfiguration(ruleContext.getFragment(CppConfiguration.class))
+        .setActionContext(CppCompileActionContext.class)
+        // Because Bazel does not support include scanning, we need the entire crosstool filegroup,
+        // including header files, as opposed to just the "compile" filegroup.
+        .addTransitiveMandatoryInputs(actionBuilder.getToolchain().getCrosstool())
+        .setShouldScanIncludes(false)
+        .setCoptsFilter(coptsFilter);
   }
 
   @Override
@@ -88,7 +94,7 @@ public class BazelCppSemantics implements CppSemantics {
   public boolean needsDotdInputPruning() {
     return true;
   }
-  
+
   @Override
   public void validateAttributes(RuleContext ruleContext) {
   }

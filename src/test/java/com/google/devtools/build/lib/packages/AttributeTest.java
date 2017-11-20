@@ -294,11 +294,6 @@ public class AttributeTest {
 
   private static class TestSplitTransition implements SplitTransition<BuildOptions> {
     @Override
-    public boolean defaultsToSelf() {
-      return true;
-    }
-
-    @Override
     public List<BuildOptions> split(BuildOptions buildOptions) {
       return ImmutableList.of(buildOptions.clone(), buildOptions.clone());
     }
@@ -306,7 +301,7 @@ public class AttributeTest {
 
   private static class TestSplitTransitionProvider implements SplitTransitionProvider {
     @Override
-    public SplitTransition<?> apply(Rule fromRule) {
+    public SplitTransition<?> apply(AttributeMap attrMapper) {
       return new TestSplitTransition();
     }
   }

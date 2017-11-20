@@ -74,7 +74,7 @@ public final class UnaryOperatorExpression extends Expression {
               String.format(
                   "unsupported operand type for -: '%s'", EvalUtils.getDataTypeName(value)));
         }
-        if (env.getSemantics().incompatibleCheckedArithmetic) {
+        if (env.getSemantics().incompatibleCheckedArithmetic()) {
           try {
             return Math.negateExact((Integer) value);
           } catch (ArithmeticException e) {
@@ -98,5 +98,10 @@ public final class UnaryOperatorExpression extends Expression {
   @Override
   public void accept(SyntaxTreeVisitor visitor) {
     visitor.visit(this);
+  }
+
+  @Override
+  public Kind kind() {
+    return Kind.UNARY_OPERATOR;
   }
 }

@@ -27,6 +27,7 @@ import com.google.common.util.concurrent.ListenableFuture;
 import com.google.devtools.build.lib.remote.RemoteOptions;
 import com.google.devtools.build.lib.remote.SimpleBlobStoreActionCache;
 import com.google.devtools.build.lib.remote.SimpleBlobStoreFactory;
+import com.google.devtools.build.lib.remote.TracingMetadataUtils;
 import com.google.devtools.build.lib.remote.blobstore.ConcurrentMapBlobStore;
 import com.google.devtools.build.lib.remote.blobstore.OnDiskBlobStore;
 import com.google.devtools.build.lib.remote.blobstore.SimpleBlobStore;
@@ -48,7 +49,12 @@ import com.google.devtools.remoteexecution.v1test.ActionResult;
 import com.google.devtools.remoteexecution.v1test.ContentAddressableStorageGrpc.ContentAddressableStorageImplBase;
 import com.google.devtools.remoteexecution.v1test.ExecutionGrpc.ExecutionImplBase;
 import com.google.watcher.v1.WatcherGrpc.WatcherImplBase;
+import com.hazelcast.config.Config;
+import com.hazelcast.core.Hazelcast;
+import com.hazelcast.core.HazelcastInstance;
 import io.grpc.Server;
+import io.grpc.ServerInterceptor;
+import io.grpc.ServerInterceptors;
 import io.grpc.netty.NettyServerBuilder;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -121,15 +127,16 @@ public final class RemoteWorker {
   }
 
   public Server startServer() throws IOException {
+    ServerInterceptor headersInterceptor = new TracingMetadataUtils.ServerHeadersInterceptor();
     NettyServerBuilder b =
         NettyServerBuilder.forPort(workerOptions.listenPort)
-            .addService(actionCacheServer)
-            .addService(bsServer)
-            .addService(casServer);
+            .addService(ServerInterceptors.intercept(actionCacheServer, headersInterceptor))
+            .addService(ServerInterceptors.intercept(bsServer, headersInterceptor))
+            .addService(ServerInterceptors.intercept(casServer, headersInterceptor));
 
     if (execServer != null) {
-      b.addService(execServer);
-      b.addService(watchServer);
+      b.addService(ServerInterceptors.intercept(execServer, headersInterceptor));
+      b.addService(ServerInterceptors.intercept(watchServer, headersInterceptor));
     } else {
       logger.info("Execution disabled, only serving cache requests.");
     }
@@ -165,6 +172,23 @@ public final class RemoteWorker {
                 }
               }
             });
+  }
+
+  /**
+   * Construct a {@link SimpleBlobStore} using Hazelcast's version of {@link ConcurrentMap}. This
+   * will start a standalone Hazelcast server in the same JVM. There will also be a REST server
+   * started for accessing the maps.
+   */
+  private static SimpleBlobStore createHazelcast(RemoteWorkerOptions options) {
+    Config config = new Config();
+    config
+        .getNetworkConfig()
+        .setPort(options.hazelcastStandaloneListenPort)
+        .getJoin()
+        .getMulticastConfig()
+        .setEnabled(false);
+    HazelcastInstance instance = Hazelcast.newHazelcastInstance(config);
+    return new ConcurrentMapBlobStore(instance.<String, byte[]>getMap("cache"));
   }
 
   public static void main(String[] args) throws Exception {
@@ -212,12 +236,21 @@ public final class RemoteWorker {
       return;
     }
 
-    SimpleBlobStore blobStore =
-        usingRemoteCache
-            ? SimpleBlobStoreFactory.create(remoteOptions)
-            : remoteWorkerOptions.casPath != null
-                ? new OnDiskBlobStore(fs.getPath(remoteWorkerOptions.casPath))
-                : new ConcurrentMapBlobStore(new ConcurrentHashMap<String, byte[]>());
+    // The instance of SimpleBlobStore used is based on these criteria in order:
+    // 1. If remote cache or local disk cache is specified then use it first.
+    // 2. Otherwise start a standalone Hazelcast instance and use it as the blob store. This also
+    //    creates a REST server for testing.
+    // 3. Finally use a ConcurrentMap to back the blob store.
+    final SimpleBlobStore blobStore;
+    if (usingRemoteCache) {
+      blobStore = SimpleBlobStoreFactory.create(remoteOptions, null);
+    } else if (remoteWorkerOptions.casPath != null) {
+      blobStore = new OnDiskBlobStore(fs.getPath(remoteWorkerOptions.casPath));
+    } else if (remoteWorkerOptions.hazelcastStandaloneListenPort != 0) {
+      blobStore = createHazelcast(remoteWorkerOptions);
+    } else {
+      blobStore = new ConcurrentMapBlobStore(new ConcurrentHashMap<String, byte[]>());
+    }
 
     RemoteWorker worker =
         new RemoteWorker(

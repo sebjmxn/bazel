@@ -27,7 +27,13 @@ pkg_tar(
     for flavour in FLAVOURS
 ]
 
-# TODO(#2418): reactivate debian-stretch opt (flaky)
+# Shard the docker test by compilation mode
+SHARD_NUMBER = {
+    "opt": 1,
+    "fastbuild": 2,
+    "dbg": 3,
+}
+
 [
     [py_test(
         name = "test_cc_configure-%s-%s" % (flavour, mode),
@@ -47,15 +53,12 @@ pkg_tar(
             "docker",
             "exclusive",
             "local",
+            "slow",
+            "shard-%s" % SHARD_NUMBER[mode],
         ],
         deps = ["//third_party/py/gflags"],
-    ) for mode in [
-        "dbg",
-        "opt",
-        "fastbuild",
-    ]]
+    ) for mode in SHARD_NUMBER]
     for flavour in FLAVOURS
-    if flavour != "debian-stretch"
 ]
 
 filegroup(

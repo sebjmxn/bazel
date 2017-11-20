@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.analysis;
 
 import static java.util.stream.Collectors.joining;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableBiMap;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -37,8 +38,6 @@ import com.google.devtools.build.lib.syntax.EvalException;
 import com.google.devtools.build.lib.syntax.EvalUtils;
 import com.google.devtools.build.lib.syntax.SkylarkIndexable;
 import com.google.devtools.build.lib.util.OrderedSetMultimap;
-import com.google.devtools.build.lib.util.Preconditions;
-import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import javax.annotation.Nullable;
@@ -54,7 +53,7 @@ import javax.annotation.Nullable;
 public class ToolchainContext {
   public static ToolchainContext create(
       String targetDescription,
-      List<Label> requiredToolchains,
+      Set<Label> requiredToolchains,
       ImmutableBiMap<Label, Label> resolvedLabels) {
     ToolchainContext toolchainContext =
         new ToolchainContext(
@@ -76,13 +75,17 @@ public class ToolchainContext {
 
   private ToolchainContext(
       String targetDescription,
-      List<Label> requiredToolchains,
+      Set<Label> requiredToolchains,
       ResolvedToolchainLabels resolvedToolchainLabels) {
     this.targetDescription = targetDescription;
     this.requiredToolchains = ImmutableList.copyOf(requiredToolchains);
     this.resolvedToolchainLabels = resolvedToolchainLabels;
     this.resolvedToolchainProviders =
         new ResolvedToolchainProviders(ImmutableMap.<Label, ToolchainInfo>of());
+  }
+
+  public ImmutableList<Label> getRequiredToolchains() {
+    return requiredToolchains;
   }
 
   public void resolveToolchains(OrderedSetMultimap<Attribute, ConfiguredTarget> prerequisiteMap) {
@@ -142,6 +145,7 @@ public class ToolchainContext {
         prerequisiteMap
             .keys()
             .stream()
+            .filter(attribute -> attribute != null)
             .filter(attribute -> attribute.getName().equals(PlatformSemantics.TOOLCHAINS_ATTR))
             .findFirst();
     Preconditions.checkState(
@@ -162,7 +166,7 @@ public class ToolchainContext {
   }
 
   /** Tracks the mapping from toolchain type label to {@link ToolchainInfo} provider. */
-  private class ResolvedToolchainProviders implements SkylarkValue, SkylarkIndexable {
+  public class ResolvedToolchainProviders implements SkylarkValue, SkylarkIndexable {
 
     private final ImmutableMap<Label, ToolchainInfo> toolchains;
 
@@ -223,6 +227,11 @@ public class ToolchainContext {
                     .map(toolchain -> toolchain.toString())
                     .collect(joining())));
       }
+      return toolchains.get(toolchainType);
+    }
+
+    /** Returns the toolchain for the given type */
+    public ToolchainInfo getForToolchainType(Label toolchainType) {
       return toolchains.get(toolchainType);
     }
 

@@ -31,14 +31,14 @@ import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Artifact.ArtifactExpander;
 import com.google.devtools.build.lib.actions.ResourceSet;
 import com.google.devtools.build.lib.actions.SimpleSpawn;
+import com.google.devtools.build.lib.actions.SpawnResult;
+import com.google.devtools.build.lib.actions.SpawnResult.Status;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventKind;
 import com.google.devtools.build.lib.events.Reporter;
 import com.google.devtools.build.lib.events.StoredEventHandler;
 import com.google.devtools.build.lib.exec.SpawnCache.CacheHandle;
 import com.google.devtools.build.lib.exec.SpawnInputExpander;
-import com.google.devtools.build.lib.exec.SpawnResult;
-import com.google.devtools.build.lib.exec.SpawnResult.Status;
 import com.google.devtools.build.lib.exec.SpawnRunner.ProgressStatus;
 import com.google.devtools.build.lib.exec.SpawnRunner.SpawnExecutionPolicy;
 import com.google.devtools.build.lib.exec.util.FakeOwner;
@@ -53,6 +53,7 @@ import com.google.devtools.build.lib.vfs.inmemoryfs.InMemoryFileSystem;
 import com.google.devtools.common.options.Options;
 import com.google.devtools.remoteexecution.v1test.ActionResult;
 import com.google.devtools.remoteexecution.v1test.Command;
+import com.google.devtools.remoteexecution.v1test.RequestMetadata;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.Collection;
@@ -62,7 +63,10 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.MockitoAnnotations;
+import org.mockito.invocation.InvocationOnMock;
+import org.mockito.stubbing.Answer;
 
 /** Tests for {@link RemoteSpawnCache}. */
 @RunWith(JUnit4.class)
@@ -166,7 +170,9 @@ public class RemoteSpawnCacheTest {
     Reporter reporter = new Reporter(new EventBus());
     eventHandler = new StoredEventHandler();
     reporter.addHandler(eventHandler);
-    cache = new RemoteSpawnCache(execRoot, options, remoteCache, false, reporter);
+    cache =
+        new RemoteSpawnCache(
+            execRoot, options, remoteCache, "build-req-id", "command-id", false, reporter);
     fakeFileCache.createScratchInput(simpleSpawn.getInputFiles().get(0), "xyz");
   }
 
@@ -174,7 +180,29 @@ public class RemoteSpawnCacheTest {
   @Test
   public void cacheHit() throws Exception {
     ActionResult actionResult = ActionResult.getDefaultInstance();
-    when(remoteCache.getCachedActionResult(any(ActionKey.class))).thenReturn(actionResult);
+    when(remoteCache.getCachedActionResult(any(ActionKey.class)))
+        .thenAnswer(
+            new Answer<ActionResult>() {
+              @Override
+              public ActionResult answer(InvocationOnMock invocation) {
+                RequestMetadata meta = TracingMetadataUtils.fromCurrentContext();
+                assertThat(meta.getCorrelatedInvocationsId()).isEqualTo("build-req-id");
+                assertThat(meta.getToolInvocationId()).isEqualTo("command-id");
+                return actionResult;
+              }
+            });
+    Mockito.doAnswer(
+            new Answer<Void>() {
+              @Override
+              public Void answer(InvocationOnMock invocation) {
+                RequestMetadata meta = TracingMetadataUtils.fromCurrentContext();
+                assertThat(meta.getCorrelatedInvocationsId()).isEqualTo("build-req-id");
+                assertThat(meta.getToolInvocationId()).isEqualTo("command-id");
+                return null;
+              }
+            })
+        .when(remoteCache)
+        .download(actionResult, execRoot, outErr);
 
     CacheHandle entry = cache.lookup(simpleSpawn, simplePolicy);
     assertThat(entry.hasResult()).isTrue();
@@ -189,7 +217,11 @@ public class RemoteSpawnCacheTest {
             any(Command.class));
     verify(remoteCache, never())
         .upload(
-            any(ActionKey.class), any(Path.class), any(Collection.class), any(FileOutErr.class));
+            any(ActionKey.class),
+            any(Path.class),
+            any(Collection.class),
+            any(FileOutErr.class),
+            any(Boolean.class));
     assertThat(result.setupSuccess()).isTrue();
     assertThat(result.exitCode()).isEqualTo(0);
     // We expect the CachedLocalSpawnRunner to _not_ write to outErr at all.
@@ -203,13 +235,21 @@ public class RemoteSpawnCacheTest {
     assertThat(entry.hasResult()).isFalse();
     SpawnResult result = new SpawnResult.Builder().setExitCode(0).setStatus(Status.SUCCESS).build();
     ImmutableList<Path> outputFiles = ImmutableList.of(fs.getPath("/random/file"));
+    Mockito.doAnswer(
+            new Answer<Void>() {
+              @Override
+              public Void answer(InvocationOnMock invocation) {
+                RequestMetadata meta = TracingMetadataUtils.fromCurrentContext();
+                assertThat(meta.getCorrelatedInvocationsId()).isEqualTo("build-req-id");
+                assertThat(meta.getToolInvocationId()).isEqualTo("command-id");
+                return null;
+              }
+            })
+        .when(remoteCache)
+        .upload(any(ActionKey.class), any(Path.class), eq(outputFiles), eq(outErr), eq(true));
     entry.store(result, outputFiles);
     verify(remoteCache)
-        .upload(
-            any(ActionKey.class),
-            any(Path.class),
-            eq(outputFiles),
-            eq(outErr));
+        .upload(any(ActionKey.class), any(Path.class), eq(outputFiles), eq(outErr), eq(true));
   }
 
   @Test
@@ -219,18 +259,13 @@ public class RemoteSpawnCacheTest {
     SpawnResult result = new SpawnResult.Builder().setExitCode(0).setStatus(Status.SUCCESS).build();
     ImmutableList<Path> outputFiles = ImmutableList.of(fs.getPath("/random/file"));
 
-    doThrow(new IOException("cache down")).when(remoteCache).upload(any(ActionKey.class),
-        any(Path.class),
-        eq(outputFiles),
-        eq(outErr));
+    doThrow(new IOException("cache down"))
+        .when(remoteCache)
+        .upload(any(ActionKey.class), any(Path.class), eq(outputFiles), eq(outErr), eq(true));
 
     entry.store(result, outputFiles);
     verify(remoteCache)
-        .upload(
-            any(ActionKey.class),
-            any(Path.class),
-            eq(outputFiles),
-            eq(outErr));
+        .upload(any(ActionKey.class), any(Path.class), eq(outputFiles), eq(outErr), eq(true));
 
     assertThat(eventHandler.getEvents()).hasSize(1);
     Event evt = eventHandler.getEvents().get(0);

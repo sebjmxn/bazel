@@ -13,9 +13,8 @@
 // limitations under the License.
 package com.google.devtools.build.lib.syntax;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
-import com.google.devtools.build.lib.syntax.FlowStatement.FlowException;
-import com.google.devtools.build.lib.util.Preconditions;
 import java.io.IOException;
 import java.util.List;
 
@@ -69,31 +68,12 @@ public final class ForStatement extends Statement {
   }
 
   @Override
-  void doExec(Environment env) throws EvalException, InterruptedException {
-    Object o = collection.eval(env);
-    Iterable<?> col = EvalUtils.toIterable(o, getLocation(), env);
-    EvalUtils.lock(o, getLocation());
-    try {
-      for (Object it : col) {
-        variable.assign(it, env, getLocation());
-
-        try {
-          for (Statement stmt : block) {
-            stmt.exec(env);
-          }
-        } catch (FlowException ex) {
-          if (ex.mustTerminateLoop()) {
-            return;
-          }
-        }
-      }
-    } finally {
-      EvalUtils.unlock(o, getLocation());
-    }
+  public void accept(SyntaxTreeVisitor visitor) {
+    visitor.visit(this);
   }
 
   @Override
-  public void accept(SyntaxTreeVisitor visitor) {
-    visitor.visit(this);
+  public Kind kind() {
+    return Kind.FOR;
   }
 }

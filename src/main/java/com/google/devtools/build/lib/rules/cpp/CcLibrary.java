@@ -20,12 +20,12 @@ import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.FailAction;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.OutputGroupProvider;
-import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTargetFactory;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.Runfiles;
 import com.google.devtools.build.lib.analysis.RunfilesProvider;
+import com.google.devtools.build.lib.analysis.configuredtargets.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.test.InstrumentedFilesProvider;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
@@ -34,6 +34,7 @@ import com.google.devtools.build.lib.packages.AttributeMap;
 import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.ImplicitOutputsFunction;
 import com.google.devtools.build.lib.packages.RawAttributeMapper;
+import com.google.devtools.build.lib.rules.cpp.CcCommon.CcFlagsSupplier;
 import com.google.devtools.build.lib.rules.cpp.CcToolchainFeatures.FeatureConfiguration;
 import com.google.devtools.build.lib.rules.cpp.Link.LinkTargetType;
 import com.google.devtools.build.lib.rules.cpp.LinkerInputs.LibraryToLink;
@@ -91,7 +92,6 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
     init(semantics, context, builder, staticLinkType,
         /*neverLink =*/ false,
         linkStatic,
-        /*collectLinkstamp =*/ true,
         /*addDynamicRuntimeInputArtifactsToRunfiles =*/ false);
     return builder.build();
   }
@@ -103,9 +103,10 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
       LinkTargetType staticLinkType,
       boolean neverLink,
       boolean linkStatic,
-      boolean collectLinkstamp,
       boolean addDynamicRuntimeInputArtifactsToRunfiles)
       throws RuleErrorException, InterruptedException {
+    ruleContext.initConfigurationMakeVariableContext(new CcFlagsSupplier(ruleContext));
+
     final CcCommon common = new CcCommon(ruleContext);
     CcToolchainProvider ccToolchain = common.getToolchain();
     FdoSupportProvider fdoSupport = common.getFdoSupport();
@@ -134,15 +135,11 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
                 ruleContext.getRule().getImplicitOutputsFunction() != ImplicitOutputsFunction.NONE)
             .setLinkType(staticLinkType)
             .setNeverLink(neverLink)
-            .addPrecompiledFiles(precompiledFiles);
-
-    if (collectLinkstamp) {
-      helper.addLinkstamps(ruleContext.getPrerequisites("linkstamp", Mode.TARGET));
-    }
+            .addPrecompiledFiles(precompiledFiles)
+            .addLinkstamps(ruleContext.getPrerequisites("linkstamp", Mode.TARGET));
 
     Artifact soImplArtifact = null;
-    boolean supportsDynamicLinker =
-        ruleContext.getFragment(CppConfiguration.class).supportsDynamicLinker();
+    boolean supportsDynamicLinker = ccToolchain.supportsDynamicLinker();
     // TODO(djasper): This is hacky. We should actually try to figure out whether we generate
     // ccOutputs.
     boolean createDynamicLibrary =
@@ -187,11 +184,17 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
     // doesn't support it, then register an action which complains when triggered,
     // which only happens when some rule explicitly depends on the dynamic library.
     if (!createDynamicLibrary && !supportsDynamicLinker) {
-      Artifact solibArtifact =
+      ImmutableList.Builder<Artifact> dynamicLibraries = ImmutableList.builder();
+      dynamicLibraries.add(
+        CppHelper.getLinuxLinkedArtifact(
+          ruleContext, ruleContext.getConfiguration(), LinkTargetType.DYNAMIC_LIBRARY));
+      if (ccToolchain.getCppConfiguration().useInterfaceSharedObjects()) {
+        dynamicLibraries.add(
           CppHelper.getLinuxLinkedArtifact(
-              ruleContext, ruleContext.getConfiguration(), LinkTargetType.DYNAMIC_LIBRARY);
+            ruleContext, ruleContext.getConfiguration(), LinkTargetType.INTERFACE_DYNAMIC_LIBRARY));
+      }
       ruleContext.registerAction(new FailAction(ruleContext.getActionOwner(),
-          ImmutableList.of(solibArtifact), "Toolchain does not support dynamic linking"));
+          dynamicLibraries.build(), "Toolchain does not support dynamic linking"));
     } else if (!createDynamicLibrary
         && ruleContext.attributes().isConfigurable("srcs")) {
       // If "srcs" is configurable, the .so output is always declared because the logic that
@@ -199,11 +202,17 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
       // Here, where we *do* have the correct value, it may not contain any source files to
       // generate an .so with. If that's the case, register a fake generating action to prevent
       // a "no generating action for this artifact" error.
-      Artifact solibArtifact =
+      ImmutableList.Builder<Artifact> dynamicLibraries = ImmutableList.builder();
+      dynamicLibraries.add(
+        CppHelper.getLinuxLinkedArtifact(
+          ruleContext, ruleContext.getConfiguration(), LinkTargetType.DYNAMIC_LIBRARY));
+      if (ccToolchain.getCppConfiguration().useInterfaceSharedObjects()) {
+        dynamicLibraries.add(
           CppHelper.getLinuxLinkedArtifact(
-              ruleContext, ruleContext.getConfiguration(), LinkTargetType.DYNAMIC_LIBRARY);
+            ruleContext, ruleContext.getConfiguration(), LinkTargetType.INTERFACE_DYNAMIC_LIBRARY));
+      }
       ruleContext.registerAction(new FailAction(ruleContext.getActionOwner(),
-          ImmutableList.of(solibArtifact), "configurable \"srcs\" triggers an implicit .so output "
+          dynamicLibraries.build(), "configurable \"srcs\" triggers an implicit .so output "
           + "even though there are no sources to compile in this configuration"));
     }
 
@@ -258,9 +267,12 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
     NestedSetBuilder<Artifact> filesBuilder = NestedSetBuilder.stableOrder();
     filesBuilder.addAll(LinkerInputs.toLibraryArtifacts(linkedLibraries.getStaticLibraries()));
     filesBuilder.addAll(LinkerInputs.toLibraryArtifacts(linkedLibraries.getPicStaticLibraries()));
-    filesBuilder.addAll(LinkerInputs.toNonSolibArtifacts(linkedLibraries.getDynamicLibraries()));
-    filesBuilder.addAll(
-        LinkerInputs.toNonSolibArtifacts(linkedLibraries.getExecutionDynamicLibraries()));
+
+    if (!featureConfiguration.isEnabled(CppRuleClasses.TARGETS_WINDOWS)) {
+      filesBuilder.addAll(LinkerInputs.toNonSolibArtifacts(linkedLibraries.getDynamicLibraries()));
+      filesBuilder.addAll(
+          LinkerInputs.toNonSolibArtifacts(linkedLibraries.getExecutionDynamicLibraries()));
+    }
 
     CcLinkingOutputs linkingOutputs = info.getCcLinkingOutputs();
     if (!featureConfiguration.isEnabled(CppRuleClasses.HEADER_MODULE_CODEGEN)) {

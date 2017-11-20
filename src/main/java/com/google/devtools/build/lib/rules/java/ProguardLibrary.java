@@ -19,10 +19,10 @@ import com.google.common.collect.ImmutableMultimap;
 import com.google.common.collect.Multimap;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.FilesToRunProvider;
-import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
+import com.google.devtools.build.lib.analysis.configuredtargets.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
@@ -134,7 +134,7 @@ public final class ProguardLibrary {
             .setExecutable(proguardWhitelister)
             .setProgressMessage("Validating proguard configuration")
             .setMnemonic("ValidateProguard")
-            .setCommandLine(
+            .addCommandLine(
                 CustomCommandLine.builder()
                     .addExecPath("--path", specToValidate)
                     .addExecPath("--output", output)

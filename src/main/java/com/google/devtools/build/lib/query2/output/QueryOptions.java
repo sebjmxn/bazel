@@ -50,7 +50,7 @@ public class QueryOptions extends OptionsBase {
     effectTags = {OptionEffectTag.TERMINAL_OUTPUT},
     help =
         "The format in which the query results should be printed. Allowed values are: "
-            + "label, label_kind, minrank, maxrank, package, location, graph, xml, proto, record."
+            + "label, label_kind, minrank, maxrank, package, location, graph, xml, proto."
   )
   public String outputFormat;
 
@@ -250,7 +250,7 @@ public class QueryOptions extends OptionsBase {
     defaultValue = "false",
     category = "query",
     documentationCategory = OptionDocumentationCategory.QUERY,
-    effectTags = {OptionEffectTag.BUILD_FILE_SEMANTICS},
+    effectTags = {OptionEffectTag.BUILD_FILE_SEMANTICS, OptionEffectTag.EAGERNESS_TO_EXIT},
     help =
         "If true, the tests() expression gives an error if it encounters a test_suite containing "
             + "non-test targets."

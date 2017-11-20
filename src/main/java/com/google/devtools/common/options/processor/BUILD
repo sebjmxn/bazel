@@ -6,7 +6,6 @@ licenses(["notice"])  # Apache 2.0
 
 filegroup(
     name = "srcs",
-    testonly = 0,
     srcs = glob(
         ["**"],
     ),
@@ -15,11 +14,10 @@ filegroup(
 
 java_plugin(
     name = "options_preprocessor",
-    srcs = [
-        "OptionProcessor.java",
-    ],
+    srcs = glob(["*.java"]),
     processor_class = "com.google.devtools.common.options.processor.OptionProcessor",
     deps = [
         "//src/main/java/com/google/devtools/common/options:options_internal",
+        "//third_party:guava",
     ],
 )

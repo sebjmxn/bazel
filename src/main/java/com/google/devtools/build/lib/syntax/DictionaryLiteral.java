@@ -73,7 +73,7 @@ public final class DictionaryLiteral extends Expression {
     for (DictionaryEntryLiteral entry : entries) {
       Object key = entry.key.eval(env);
       Object val = entry.value.eval(env);
-      if (env.getSemantics().incompatibleDictLiteralHasNoDuplicates && dict.containsKey(key)) {
+      if (env.getSemantics().incompatibleDictLiteralHasNoDuplicates() && dict.containsKey(key)) {
         throw new EvalException(
             loc, "Duplicated key " + Printer.repr(key) + " when creating dictionary");
       }
@@ -97,6 +97,11 @@ public final class DictionaryLiteral extends Expression {
   @Override
   public void accept(SyntaxTreeVisitor visitor) {
     visitor.visit(this);
+  }
+
+  @Override
+  public Kind kind() {
+    return Kind.DICTIONARY_LITERAL;
   }
 
   public ImmutableList<DictionaryEntryLiteral> getEntries() {

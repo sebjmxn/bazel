@@ -20,14 +20,15 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Artifact.SpecialArtifact;
-import com.google.devtools.build.lib.analysis.FileConfiguredTarget;
-import com.google.devtools.build.lib.analysis.RuleConfiguredTarget;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
+import com.google.devtools.build.lib.analysis.configuredtargets.FileConfiguredTarget;
+import com.google.devtools.build.lib.analysis.configuredtargets.RuleConfiguredTarget;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.packages.NativeInfo;
 import com.google.devtools.build.lib.packages.NativeProvider;
 import com.google.devtools.build.lib.skylarkinterface.Param;
+import com.google.devtools.build.lib.skylarkinterface.ParamType;
 import com.google.devtools.build.lib.skylarkinterface.SkylarkCallable;
 import com.google.devtools.build.lib.skylarkinterface.SkylarkModule;
 import com.google.devtools.build.lib.skylarkinterface.SkylarkSignature;
@@ -155,6 +156,18 @@ public class SkylarkEvaluationTest extends EvaluationTest {
           positional = false,
           named = true
         ),
+        @Param(
+          name = "multi",
+          allowedTypes = {
+            @ParamType(type = String.class),
+            @ParamType(type = Integer.class),
+            @ParamType(type = SkylarkList.class, generic1 = Integer.class),
+          },
+          defaultValue = "None",
+          noneable = true,
+          positional = false,
+          named = true
+        )
       }
     )
     public String withParams(
@@ -164,7 +177,8 @@ public class SkylarkEvaluationTest extends EvaluationTest {
         boolean named,
         boolean optionalNamed,
         Object nonNoneable,
-        Object noneable) {
+        Object noneable,
+        Object multi) {
       return "with_params("
           + pos1
           + ", "
@@ -177,6 +191,8 @@ public class SkylarkEvaluationTest extends EvaluationTest {
           + optionalNamed
           + ", "
           + nonNoneable.toString()
+          + (noneable != Runtime.NONE ? ", " + noneable : "")
+          + (multi != Runtime.NONE ? ", " + multi : "")
           + ")";
     }
 
@@ -744,6 +760,20 @@ public class SkylarkEvaluationTest extends EvaluationTest {
         .testLookup("b", "with_params(1, true, false, true, false, a)");
     new SkylarkTest()
         .update("mock", new Mock())
+        .setUp("b = mock.with_params(1, True, named=True, multi=1)")
+        .testLookup("b", "with_params(1, true, false, true, false, a, 1)");
+    new SkylarkTest()
+        .update("mock", new Mock())
+        .setUp("b = mock.with_params(1, True, named=True, multi='abc')")
+        .testLookup("b", "with_params(1, true, false, true, false, a, abc)");
+
+    new SkylarkTest()
+        .update("mock", new Mock())
+        .setUp("b = mock.with_params(1, True, named=True, multi=[1,2,3])")
+        .testLookup("b", "with_params(1, true, false, true, false, a, [1, 2, 3])");
+
+    new SkylarkTest()
+        .update("mock", new Mock())
         .setUp("")
         .testIfExactError(
             "parameter 'named' has no default value, in method with_params(int, bool) of 'Mock'",
@@ -781,6 +811,21 @@ public class SkylarkEvaluationTest extends EvaluationTest {
             "parameter 'nonNoneable' cannot be None, in method with_params(int, bool, bool, "
                 + "bool named, bool optionalNamed, NoneType nonNoneable) of 'Mock'",
             "mock.with_params(1, True, True, named=True, optionalNamed=False, nonNoneable=None)");
+
+    new SkylarkTest()
+        .update("mock", new Mock())
+        .setUp("")
+        .testIfExactError(
+            "Cannot convert parameter 'multi' to type string or int or sequence of ints or"
+                + " NoneType, in method with_params(int, bool, bool named, bool multi) of 'Mock'",
+            "mock.with_params(1, True, named=True, multi=False)");
+
+    // We do not enforce list item parameter type constraints.
+    // Test for this behavior.
+    new SkylarkTest()
+        .update("mock", new Mock())
+        .setUp("b = mock.with_params(1, True, named=True, multi=['a', 'b'])")
+        .testLookup("b", "with_params(1, true, false, true, false, a, [\"a\", \"b\"])");
   }
 
   @Test
@@ -1217,6 +1262,18 @@ public class SkylarkEvaluationTest extends EvaluationTest {
   }
 
   @Test
+  public void testFunctionCallRecursion() throws Exception {
+    new SkylarkTest().testIfErrorContains("Recursion was detected when calling 'f' from 'g'",
+        "def main():",
+        "  f(5)",
+        "def f(n):",
+        "  if n > 0: g(n - 1)",
+        "def g(n):",
+        "  if n > 0: f(n - 1)",
+        "main()");
+  }
+
+  @Test
   public void testTypo() throws Exception {
     new SkylarkTest()
         .testIfErrorContains(
@@ -1383,11 +1440,6 @@ public class SkylarkEvaluationTest extends EvaluationTest {
             "assignment length mismatch: left-hand side has length 3, but right-hand side "
                 + "evaluates to value of length 2",
             "[x + y for x, y, z in [(1, 2), (3, 4)]]");
-
-    // can't reuse the same local variable twice(!)
-    new SkylarkTest()
-        .testIfErrorContains(
-            "Variable x is read only", "[x + y for x, y in (1, 2)]", "[x + y for x, y in (1, 2)]");
 
     new SkylarkTest()
         .testIfErrorContains("type 'int' is not a collection", "[x2 + y2 for x2, y2 in (1, 2)]");
@@ -1568,7 +1620,15 @@ public class SkylarkEvaluationTest extends EvaluationTest {
   public void testLoadStatementWithAbsolutePath() throws Exception {
     env = newEnvironmentWithSkylarkOptions("--incompatible_load_argument_is_label");
     checkEvalErrorContains(
-        "First argument of 'load' must be a label and start with either '//' or ':'",
+        "First argument of 'load' must be a label and start with either '//', ':', or '@'.",
+        "load('/tmp/foo', 'arg')");
+  }
+
+  @Test
+  public void testAllowLoadStatementWithAbsolutePath() throws Exception {
+    env = newEnvironmentWithSkylarkOptions("--incompatible_load_argument_is_label=false");
+    checkEvalErrorDoesNotContain(
+        "First argument of 'load' must be a label and start with either '//', ':', or '@'.",
         "load('/tmp/foo', 'arg')");
   }
 
@@ -1576,7 +1636,39 @@ public class SkylarkEvaluationTest extends EvaluationTest {
   public void testLoadStatementWithRelativePath() throws Exception {
     env = newEnvironmentWithSkylarkOptions("--incompatible_load_argument_is_label");
     checkEvalErrorContains(
-        "First argument of 'load' must be a label and start with either '//' or ':'",
+        "First argument of 'load' must be a label and start with either '//', ':', or '@'.",
         "load('foo', 'arg')");
+  }
+
+  @Test
+  public void testAllowLoadStatementWithRelativePath() throws Exception {
+    env = newEnvironmentWithSkylarkOptions("--incompatible_load_argument_is_label=false");
+    checkEvalErrorDoesNotContain(
+        "First argument of 'load' must be a label and start with either '//', ':', or '@'.",
+        "load('foo', 'arg')");
+  }
+
+  @Test
+  public void testLoadStatementWithExternalLabel() throws Exception {
+    env = newEnvironmentWithSkylarkOptions("--incompatible_load_argument_is_label");
+    checkEvalErrorDoesNotContain(
+        "First argument of 'load' must be a label and start with either '//', ':', or '@'.",
+        "load('@other//foo.bzl', 'arg')");
+  }
+
+  @Test
+  public void testLoadStatementWithAbsoluteLabel() throws Exception {
+    env = newEnvironmentWithSkylarkOptions("--incompatible_load_argument_is_label");
+    checkEvalErrorDoesNotContain(
+        "First argument of 'load' must be a label and start with either '//', ':', or '@'.",
+        "load('//foo.bzl', 'arg')");
+  }
+
+  @Test
+  public void testLoadStatementWithRelativeLabel() throws Exception {
+    env = newEnvironmentWithSkylarkOptions("--incompatible_load_argument_is_label");
+    checkEvalErrorDoesNotContain(
+        "First argument of 'load' must be a label and start with either '//', ':', or '@'.",
+        "load(':foo.bzl', 'arg')");
   }
 }

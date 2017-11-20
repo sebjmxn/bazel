@@ -19,8 +19,13 @@ import com.android.ide.common.internal.LoggedErrorException;
 import com.android.ide.common.internal.PngCruncher;
 import com.android.ide.common.process.DefaultProcessExecutor;
 import com.android.ide.common.process.LoggedProcessOutputHandler;
+import com.android.ide.common.xml.AndroidManifestParser;
+import com.android.ide.common.xml.ManifestData.Instrumentation;
+import com.android.io.StreamException;
 import com.android.utils.StdLogger;
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Stopwatch;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.android.AndroidDataMerger.MergeConflictException;
 import com.google.devtools.build.android.AndroidResourceMerger.MergingException;
@@ -38,14 +43,21 @@ import com.google.devtools.common.options.OptionDocumentationCategory;
 import com.google.devtools.common.options.OptionEffectTag;
 import com.google.devtools.common.options.OptionsBase;
 import com.google.devtools.common.options.OptionsParser;
+import com.google.devtools.common.options.ShellQuotedParamsFilePreProcessor;
 import com.google.devtools.common.options.TriState;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.FileSystems;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
 import java.util.logging.Logger;
+import javax.annotation.Nullable;
+import javax.xml.parsers.ParserConfigurationException;
+import org.xml.sax.SAXException;
 
 /**
  * Provides an entry point for the resource processing using the AOSP build tools.
@@ -247,6 +259,21 @@ public class AndroidResourceProcessingAction {
     public List<String> densities;
 
     @Option(
+      name = "densitiesForManifest",
+      defaultValue = "",
+      converter = CommaSeparatedOptionListConverter.class,
+      category = "config",
+      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
+      effectTags = {OptionEffectTag.UNKNOWN},
+      help =
+          "Densities to specify in the manifest. If 'densities' is specified, that value will be"
+              + " used instead and this flag will be ignored. However, if resources were filtered"
+              + " in analysis, this flag can be used to specify densities in the manifest without"
+              + " repeating the filtering process."
+    )
+    public List<String> densitiesForManifest;
+
+    @Option(
       name = "packageForR",
       defaultValue = "null",
       category = "config",
@@ -306,6 +333,19 @@ public class AndroidResourceProcessingAction {
       help = "If passed, resource merge conflicts will be treated as errors instead of warnings"
     )
     public boolean throwOnResourceConflict;
+
+    @Option(
+      name = "packageUnderTest",
+      defaultValue = "null",
+      category = "config",
+      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
+      effectTags = {OptionEffectTag.UNKNOWN},
+      help =
+          "When building a test APK, the package of the binary being tested. Android resources can"
+              + " only be provided if there is no package under test or if the test instrumentation"
+              + " is in a different package."
+    )
+    public String packageUnderTest;
   }
 
   private static AaptConfigOptions aaptConfigOptions;
@@ -315,7 +355,8 @@ public class AndroidResourceProcessingAction {
     final Stopwatch timer = Stopwatch.createStarted();
     OptionsParser optionsParser = OptionsParser.newOptionsParser(
         Options.class, AaptConfigOptions.class);
-    optionsParser.enableParamsFileSupport(FileSystems.getDefault());
+    optionsParser.enableParamsFileSupport(
+        new ShellQuotedParamsFilePreProcessor(FileSystems.getDefault()));
     optionsParser.parseAndExitUponError(args);
     aaptConfigOptions = optionsParser.getOptions(AaptConfigOptions.class);
     options = optionsParser.getOptions(Options.class);
@@ -366,12 +407,16 @@ public class AndroidResourceProcessingAction {
           options.prefilteredResources.isEmpty()
               ? options.densities
               : Collections.<String>emptyList();
+      final List<String> densitiesForManifest =
+          densitiesToFilter.isEmpty()
+              ? options.densitiesForManifest
+              : densitiesToFilter;
 
       final DensityFilteredAndroidData filteredData =
           mergedData.filter(
               new DensitySpecificResourceFilter(
                   densitiesToFilter, filteredResources, mergedResources),
-              new DensitySpecificManifestProcessor(options.densities, densityManifest));
+              new DensitySpecificManifestProcessor(densitiesForManifest, densityManifest));
 
       logger.fine(
           String.format(
@@ -394,11 +439,23 @@ public class AndroidResourceProcessingAction {
       }
 
       if (options.packageType == VariantType.LIBRARY) {
-        resourceProcessor.writeDummyManifestForAapt(dummyManifest, options.packageForR);
-        processedData = new MergedAndroidData(
-            processedData.getResourceDir(),
-            processedData.getAssetDir(),
-            dummyManifest);
+        AndroidResourceProcessor.writeDummyManifestForAapt(dummyManifest, options.packageForR);
+        processedData =
+            new MergedAndroidData(
+                processedData.getResourceDir(), processedData.getAssetDir(), dummyManifest);
+      }
+
+      if (hasConflictWithPackageUnderTest(
+          options.packageUnderTest,
+          options.primaryData.resourceDirs,
+          processedData.getManifest(),
+          timer)) {
+        logger.log(
+            Level.SEVERE,
+            "Android resources cannot be provided if the instrumentation package is the same as "
+                + "the package under test, but the instrumentation package (in the manifest) and "
+                + "the package under test both had the same package: " + options.packageUnderTest);
+        System.exit(1);
       }
 
       resourceProcessor.processResources(
@@ -433,11 +490,8 @@ public class AndroidResourceProcessingAction {
             generatedSources, options.rOutput, VariantType.LIBRARY == options.packageType);
       }
       if (options.resourcesOutput != null) {
-        AndroidResourceOutputs.createResourcesZip(
-            processedData.getResourceDir(),
-            processedData.getAssetDir(),
-            options.resourcesOutput,
-            false /* compress */);
+        ResourcesZip.from(processedData.getResourceDir(), processedData.getAssetDir())
+            .writeTo(options.resourcesOutput, false /* compress */);
       }
       logger.fine(
           String.format("Packaging finished at %sms", timer.elapsed(TimeUnit.MILLISECONDS)));
@@ -462,6 +516,55 @@ public class AndroidResourceProcessingAction {
       resourceProcessor.shutdown();
     }
     logger.fine(String.format("Resources processed in %sms", timer.elapsed(TimeUnit.MILLISECONDS)));
+  }
+
+  /**
+   * Checks if there is a conflict between the package under test and the package being built.
+   *
+   * When testing Android code, the test can be run in the same or a different process as the code
+   * being tested. If it's in the same process, we do not allow Android resources to be used by the
+   * test, as they could overwrite the resources used by the code being tested. If this APK won't
+   * be testing another APK, the test and code under test are in different processes, or no
+   * resources are being used, this isn't a concern.
+   *
+   * To determine whether the test and code under test are run in the same process, we check the
+   * package of the code under test, passed into this function, against the target packages of any
+   * <code>instrumentation</code> tags in this APK's manifest.
+   *
+   * @param packageUnderTest the package of the code under test, or null if no code is under test
+   * @param resourceDirs the resource directories for this APK
+   * @param processedManifest the processed manifest for this APK
+   *
+   * @return true if there is a conflict, false otherwise
+   */
+  @VisibleForTesting
+  static boolean hasConflictWithPackageUnderTest(
+      @Nullable String packageUnderTest,
+      ImmutableList<Path> resourceDirs,
+      Path processedManifest,
+      Stopwatch timer)
+      throws SAXException, StreamException, ParserConfigurationException, IOException {
+    if (packageUnderTest == null || resourceDirs.isEmpty()) {
+      return false;
+    }
+
+    // We are building a test APK with resources. Validate instrumentation package is different
+    // from the package under test. If it isn't, fail to prevent the test resources from
+    // overriding the resources of the APK under test.
+    try (InputStream stream = Files.newInputStream(processedManifest)) {
+      for (Instrumentation instrumentation :
+          AndroidManifestParser.parse(stream).getInstrumentations()) {
+        if (packageUnderTest.equals(instrumentation.getTargetPackage())) {
+          return true;
+        }
+      }
+    }
+
+    logger.fine(
+        String.format(
+            "Custom package and instrumentation verification finished at %sms",
+            timer.elapsed(TimeUnit.MILLISECONDS)));
+    return false;
   }
 
   private static boolean usePngCruncher() {

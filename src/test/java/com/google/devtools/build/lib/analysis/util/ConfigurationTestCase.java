@@ -23,15 +23,17 @@ import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Root;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
-import com.google.devtools.build.lib.analysis.config.BinTools;
+import com.google.devtools.build.lib.analysis.ServerDirectories;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationCollection;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.ConfigurationFragmentFactory;
 import com.google.devtools.build.lib.analysis.config.FragmentOptions;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
+import com.google.devtools.build.lib.clock.BlazeClock;
 import com.google.devtools.build.lib.cmdline.RepositoryName;
 import com.google.devtools.build.lib.packages.PackageFactory;
+import com.google.devtools.build.lib.packages.SkylarkSemanticsOptions;
 import com.google.devtools.build.lib.packages.util.MockToolsConfig;
 import com.google.devtools.build.lib.pkgcache.PackageCacheOptions;
 import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
@@ -41,10 +43,8 @@ import com.google.devtools.build.lib.skyframe.DiffAwareness;
 import com.google.devtools.build.lib.skyframe.PrecomputedValue;
 import com.google.devtools.build.lib.skyframe.SequencedSkyframeExecutor;
 import com.google.devtools.build.lib.skyframe.SkyValueDirtinessChecker;
-import com.google.devtools.build.lib.syntax.SkylarkSemanticsOptions;
 import com.google.devtools.build.lib.testutil.FoundationTestCase;
 import com.google.devtools.build.lib.testutil.TestConstants;
-import com.google.devtools.build.lib.util.BlazeClock;
 import com.google.devtools.build.lib.util.io.TimestampGranularityMonitor;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -100,10 +100,13 @@ public abstract class ConfigurationTestCase extends FoundationTestCase {
         new PathPackageLocator(outputBase, ImmutableList.of(rootDirectory));
     final PackageFactory pkgFactory;
     BlazeDirectories directories =
-        new BlazeDirectories(outputBase, outputBase, rootDirectory, analysisMock.getProductName());
+        new BlazeDirectories(
+            new ServerDirectories(outputBase, outputBase),
+            rootDirectory,
+            analysisMock.getProductName());
     pkgFactory =
         analysisMock
-            .getPackageFactoryBuilderForTesting()
+            .getPackageFactoryBuilderForTesting(directories)
             .build(ruleClassProvider, scratch.getFileSystem());
     AnalysisTestUtil.DummyWorkspaceStatusActionFactory workspaceStatusActionFactory =
         new AnalysisTestUtil.DummyWorkspaceStatusActionFactory(directories);
@@ -111,17 +114,15 @@ public abstract class ConfigurationTestCase extends FoundationTestCase {
     skyframeExecutor =
         SequencedSkyframeExecutor.create(
             pkgFactory,
+            fileSystem,
             directories,
-            BinTools.forUnitTesting(directories, analysisMock.getEmbeddedTools()),
             workspaceStatusActionFactory,
             ruleClassProvider.getBuildInfoFactories(),
             ImmutableList.<DiffAwareness.Factory>of(),
             Predicates.<PathFragment>alwaysFalse(),
-            analysisMock.getSkyFunctions(),
-            ImmutableList.<PrecomputedValue.Injected>of(),
+            analysisMock.getSkyFunctions(directories),
             ImmutableList.<SkyValueDirtinessChecker>of(),
             PathFragment.EMPTY_FRAGMENT,
-            analysisMock.getProductName(),
             BazelSkyframeExecutorConstants.CROSS_REPOSITORY_LABEL_VIOLATION_STRATEGY,
             BazelSkyframeExecutorConstants.BUILD_FILES_BY_PRIORITY,
             BazelSkyframeExecutorConstants.ACTION_ON_IO_EXCEPTION_READING_BUILD_FILE);

@@ -187,6 +187,23 @@ sh_test(
     ],
 )
 
+genquery(
+    name = "embedded_tools_deps",
+    expression = "kind(\"cc_(binary|library)\", deps(//src:embedded_tools_srcs))",
+    scope = ["//src:embedded_tools_srcs"],
+)
+
+sh_test(
+    name = "embedded_tools_deps_test",
+    size = "medium",
+    srcs = ["embedded_tools_deps_test.sh"],
+    data = [
+        ":embedded_tools_deps",
+        ":test-deps",
+        "//src/test/shell/bazel/testdata:embedded_tools_deps_test_data",
+    ],
+)
+
 # TODO(bazel-team): zip is non-deterministic because of file timestamp,
 # we should use a custom zip version (SingleJar?).
 genrule(
@@ -194,13 +211,13 @@ genrule(
     testonly = 1,
     srcs = [
         "//src/java_tools/singlejar:srcs",
-        "//src/main/protobuf:srcs",
-        "//src/main/java/com/google/devtools/build/lib:srcs",
         "//src/main/java/com/google/devtools/build/lib/actions:srcs",
-        "//src/main/java/com/google/devtools/build/lib/sandbox:srcs",
         "//src/main/java/com/google/devtools/build/lib/rules/genquery:srcs",
-        "//src/main/java/com/google/devtools/build/lib/worker:srcs",
+        "//src/main/java/com/google/devtools/build/lib/sandbox:srcs",
         "//src/main/java/com/google/devtools/build/lib/standalone:srcs",
+        "//src/main/java/com/google/devtools/build/lib/worker:srcs",
+        "//src/main/java/com/google/devtools/build/lib:srcs",
+        "//src/main/protobuf:srcs",
         "//src/tools/xcode-common:srcs",
         "//third_party:srcs",
     ],
@@ -234,6 +251,16 @@ sh_test(
     name = "git_repository_test",
     size = "large",
     srcs = ["git_repository_test.sh"],
+    data = [
+        ":test-deps",
+        "//src/test/shell/bazel/testdata:git-repos",
+    ],
+)
+
+sh_test(
+    name = "skylark_git_repository_test",
+    size = "large",
+    srcs = ["skylark_git_repository_test.sh"],
     data = [
         ":test-deps",
         "//src/test/shell/bazel/testdata:git-repos",
@@ -280,6 +307,13 @@ sh_test(
 )
 
 sh_test(
+    name = "local_action_cache_test",
+    size = "small",
+    srcs = ["local_action_cache_test.sh"],
+    data = [":test-deps"],
+)
+
+sh_test(
     name = "runfiles_test",
     size = "medium",
     srcs = ["runfiles_test.sh"],
@@ -313,7 +347,6 @@ sh_test(
     srcs = ["maven_skylark_test.sh"],
     data = [
         ":test-deps",
-        "//external:android_ndk_for_testing",
         "//external:android_sdk_for_testing",
         "@m2//:files",
     ],
@@ -324,13 +357,6 @@ sh_test(
     name = "workspace_test",
     size = "large",
     srcs = ["workspace_test.sh"],
-    data = [":test-deps"],
-)
-
-sh_test(
-    name = "process_wrapper_test",
-    size = "medium",
-    srcs = ["process-wrapper_test.sh"],
     data = [":test-deps"],
 )
 
@@ -352,7 +378,10 @@ sh_test(
     name = "bazel_sandboxing_test",
     size = "large",
     srcs = ["bazel_sandboxing_test.sh"],
-    data = [":test-deps"],
+    data = [
+        ":test-deps",
+        "@mount_path_toolchain//file",
+    ],
     tags = ["local"],
 )
 
@@ -420,6 +449,7 @@ sh_test(
     size = "large",
     srcs = ["bazel_repository_cache_test.sh"],
     data = [":test-deps"],
+    shard_count = 4,
 )
 
 sh_test(
@@ -460,7 +490,10 @@ sh_test(
         ":test-deps",
         "//:bazel-distfile",
     ],
-    tags = ["jdk8"],
+    tags = [
+        "jdk8",
+        "slow",
+    ],
 )
 
 sh_test(
@@ -480,9 +513,10 @@ sh_test(
 
 sh_test(
     name = "toolchain_test",
-    size = "medium",
+    size = "large",
     srcs = ["toolchain_test.sh"],
     data = [":test-deps"],
+    shard_count = 5,
 )
 
 sh_test(

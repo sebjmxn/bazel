@@ -15,13 +15,14 @@ package com.google.devtools.build.lib.actions.util;
 
 import static com.google.devtools.build.lib.actions.util.ActionsTestUtil.NULL_ACTION_OWNER;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.AbstractAction;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionExecutionException;
+import com.google.devtools.build.lib.actions.ActionResult;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.util.Fingerprint;
-import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -90,15 +91,15 @@ public class TestAction extends AbstractAction {
   }
 
   @Override
-  public void execute(ActionExecutionContext actionExecutionContext)
+  public ActionResult execute(ActionExecutionContext actionExecutionContext)
       throws ActionExecutionException {
     for (Artifact artifact : getInputs()) {
       // Do not check *.optional artifacts - artifacts with such extension are
       // used by tests to specify artifacts that may or may not be missing.
       // This is used, e.g., to test Blaze behavior when action has missing
       // input artifacts but still is successfully executed.
-      if (!artifact.getPath().exists() &&
-          !artifact.getExecPath().getBaseName().endsWith(".optional")) {
+      if (!artifact.getPath().exists()
+          && !artifact.getExecPath().getBaseName().endsWith(".optional")) {
         throw new IllegalStateException("action's input file does not exist: "
             + artifact.getPath());
       }
@@ -114,12 +115,14 @@ public class TestAction extends AbstractAction {
     }
 
     try {
-      for (Artifact artifact: getOutputs()) {
+      for (Artifact artifact : getOutputs()) {
         FileSystemUtils.touchFile(artifact.getPath());
       }
     } catch (IOException e) {
       throw new AssertionError(e);
     }
+
+    return ActionResult.EMPTY;
   }
 
   @Override
@@ -131,7 +134,9 @@ public class TestAction extends AbstractAction {
   }
 
   @Override
-  public String getMnemonic() { return "Test"; }
+  public String getMnemonic() {
+    return "Test";
+  }
 
   /** No-op action that has exactly one output, and can be a middleman action. */
   public static class DummyAction extends TestAction {
