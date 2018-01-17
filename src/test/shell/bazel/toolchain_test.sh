@@ -498,22 +498,22 @@ EOF
 
   # This should use toolchain_1.
   bazel build \
-    --experimental_host_platform=//:platform1 \
-    --experimental_platforms=//:platform2 \
+    --host_platform=//:platform1 \
+    --platforms=//:platform2 \
     //demo:use &> $TEST_log || fail "Build failed"
   expect_log 'Using toolchain: rule message: "this is the rule", toolchain extra_str: "foo from 1"'
 
   # This should use toolchain_2.
   bazel build \
-    --experimental_host_platform=//:platform2 \
-    --experimental_platforms=//:platform1 \
+    --host_platform=//:platform2 \
+    --platforms=//:platform1 \
     //demo:use &> $TEST_log || fail "Build failed"
   expect_log 'Using toolchain: rule message: "this is the rule", toolchain extra_str: "foo from 2"'
 
   # This should not match any toolchains.
   bazel build \
-    --experimental_host_platform=//:platform1 \
-    --experimental_platforms=//:platform1 \
+    --host_platform=//:platform1 \
+    --platforms=//:platform1 \
     //demo:use &> $TEST_log && fail "Build failure expected"
   expect_log 'While resolving toolchains for target //demo:use: no matching toolchains found for types //toolchain:test_toolchain'
   expect_not_log 'Using toolchain: rule message:'
@@ -573,12 +573,14 @@ register_toolchains('//demo:invalid')
 EOF
 
   mkdir -p demo
+  cat >> demo/out.log<<EOF
+INVALID
+EOF
   cat >> demo/BUILD <<EOF
-genrule(
+filegroup(
     name = "invalid",
-    srcs = [],
-    outs = ["out.log"],
-    cmd = "echo invalid > $@")
+    srcs = ["out.log"],
+)
 
 load('//toolchain:rule_use_toolchain.bzl', 'use_toolchain')
 # Use the toolchain.
@@ -625,7 +627,7 @@ EOF
 }
 
 
-function test_toolchain_error_invalid_target() {
+function test_platforms_options_error_invalid_target() {
   write_test_toolchain
   write_test_rule
   write_register_toolchain
@@ -639,16 +641,16 @@ use_toolchain(
     message = 'this is the rule')
 EOF
 
-  # Write and invalid rule to be the platform.
+  # Write an invalid rule to be the platform.
   mkdir -p platform
   cat >> platform/BUILD <<EOF
   filegroup(name = 'not_a_platform')
 EOF
 
-  bazel build --experimental_platforms=//platform:not_a_platform //demo:use &> $TEST_log && fail "Build failure expected"
+  bazel build --platforms=//platform:not_a_platform //demo:use &> $TEST_log && fail "Build failure expected"
   expect_log "While resolving toolchains for target //demo:use: Target filegroup rule //platform:not_a_platform was found as the target platform, but does not provide PlatformInfo"
 
-  bazel build --experimental_host_platform=//platform:not_a_platform //demo:use &> $TEST_log && fail "Build failure expected"
+  bazel build --host_platform=//platform:not_a_platform //demo:use &> $TEST_log && fail "Build failure expected"
   expect_log "While resolving toolchains for target //demo:use: Target filegroup rule //platform:not_a_platform was found as the execution platform, but does not provide PlatformInfo"
 }
 

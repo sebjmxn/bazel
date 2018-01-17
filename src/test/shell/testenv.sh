@@ -30,10 +30,14 @@ function is_darwin() {
   [[ "${PLATFORM}" =~ darwin ]]
 }
 
+function is_linux() {
+  [[ "${PLATFORM}" =~ linux ]]
+}
+
 function _log_base() {
   prefix=$1
   shift
-  echo >&2 "${prefix}[$(basename "$0") $(date "+%H:%M:%S.%N (%z)")] $@"
+  echo >&2 "${prefix}[$(basename "$0") $(date "+%H:%M:%S.%N (%z)")] $*"
 }
 
 function log_info() {
@@ -148,26 +152,8 @@ if [ "${MACHINE_TYPE}" = 's390x' ]; then
   MACHINE_IS_Z='yes'
 fi
 
-case "${PLATFORM}" in
-  darwin)
-    if [ "${MACHINE_IS_64BIT}" = 'yes' ]; then
-      protoc_compiler="${BAZEL_RUNFILES}/third_party/protobuf/protoc-osx-x86_64.exe"
-    else
-      protoc_compiler="${BAZEL_RUNFILES}/third_party/protobuf/protoc-osx-x86_32.exe"
-    fi
-    ;;
-  *)
-    if [ "${MACHINE_IS_64BIT}" = 'yes' ]; then
-      if [ "${MACHINE_IS_Z}" = 'yes' ]; then
-        protoc_compiler="${BAZEL_RUNFILES}//third_party/protobuf/protoc-linux-s390x_64.exe"
-      else
-        protoc_compiler="${BAZEL_RUNFILES}/third_party/protobuf/protoc-linux-x86_64.exe"
-      fi
-    else
-        protoc_compiler="${BAZEL_RUNFILES}/third_party/protobuf/protoc-linux-x86_32.exe"
-    fi
-    ;;
-esac
+# Requires //third_party/protobuf:protoc
+protoc_compiler="${BAZEL_RUNFILES}/third_party/protobuf/3.4.0/protoc"
 
 if [ -z ${RUNFILES_MANIFEST_ONLY+x} ]; then
   junit_jar="${BAZEL_RUNFILES}/third_party/junit/junit-*.jar"
@@ -472,7 +458,7 @@ function cleanup_workspace() {
     cd ${WORKSPACE_DIR}
     bazel clean >> $TEST_log 2>&1 # Clean up the output base
 
-    for i in $(ls); do
+    for i in *; do
       if ! is_tools_directory "$i"; then
         rm -fr "$i"
       fi
@@ -563,6 +549,7 @@ setup_clean_workspace
 # Setting up the environment for our legacy integration tests.
 #
 PRODUCT_NAME=bazel
+TOOLS_REPOSITORY="@bazel_tools"
 WORKSPACE_NAME=main
 bazelrc=$TEST_TMPDIR/bazelrc
 

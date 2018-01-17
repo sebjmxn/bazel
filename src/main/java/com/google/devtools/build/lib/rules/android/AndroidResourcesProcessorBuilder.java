@@ -33,9 +33,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-/**
- * Builder for creating resource processing action.
- */
+/** Builder for creating resource processing action. */
 public class AndroidResourcesProcessorBuilder {
 
   private static final ResourceContainerConverter.ToArg AAPT2_RESOURCE_DEP_TO_ARG =
@@ -77,10 +75,11 @@ public class AndroidResourcesProcessorBuilder {
   private ResourceDependencies dependencies;
   private Artifact proguardOut;
   private Artifact mainDexProguardOut;
+  private boolean conditionalKeepRules;
   private Artifact rTxtOut;
   private Artifact sourceJarOut;
   private boolean debug = false;
-  private ResourceFilterFactory resourceFilterFactory;
+  private ResourceFilterFactory resourceFilterFactory = ResourceFilterFactory.empty();
   private List<String> uncompressedExtensions = Collections.emptyList();
   private Artifact apkOut;
   private final AndroidSdkProvider sdk;
@@ -103,20 +102,18 @@ public class AndroidResourcesProcessorBuilder {
   private boolean throwOnResourceConflict;
   private String packageUnderTest;
   private boolean useCompiledResourcesForMerge;
+  private boolean isTestWithResources = false;
 
-  /**
-   * @param ruleContext The RuleContext that was used to create the SpawnAction.Builder.
-   */
+  /** @param ruleContext The RuleContext that was used to create the SpawnAction.Builder. */
   public AndroidResourcesProcessorBuilder(RuleContext ruleContext) {
     this.sdk = AndroidSdkProvider.fromRuleContext(ruleContext);
     this.ruleContext = ruleContext;
     this.spawnActionBuilder = new SpawnAction.Builder();
-    this.resourceFilterFactory = ResourceFilterFactory.empty(ruleContext);
   }
 
   /**
-   * The primary resource for merging. This resource will overwrite any resource or data
-   * value in the transitive closure.
+   * The primary resource for merging. This resource will overwrite any resource or data value in
+   * the transitive closure.
    */
   public AndroidResourcesProcessorBuilder withPrimary(ResourceContainer primary) {
     this.primary = primary;
@@ -125,7 +122,8 @@ public class AndroidResourcesProcessorBuilder {
 
   /**
    * The output zip for resource-processed data binding expressions (i.e. a zip of .xml files).
-   * If null, data binding processing is skipped (and data binding expressions aren't allowed in
+   *
+   * <p>If null, data binding processing is skipped (and data binding expressions aren't allowed in
    * layout resources).
    */
   public AndroidResourcesProcessorBuilder setDataBindingInfoZip(Artifact zip) {
@@ -162,6 +160,11 @@ public class AndroidResourcesProcessorBuilder {
 
   public AndroidResourcesProcessorBuilder setProguardOut(Artifact proguardCfg) {
     this.proguardOut = proguardCfg;
+    return this;
+  }
+
+  public AndroidResourcesProcessorBuilder conditionalKeepRules(boolean conditionalKeepRules) {
+    this.conditionalKeepRules = conditionalKeepRules;
     return this;
   }
 
@@ -266,6 +269,10 @@ public class AndroidResourcesProcessorBuilder {
     return this;
   }
 
+  public AndroidResourcesProcessorBuilder setIsTestWithResources(boolean isTestWithResources) {
+    this.isTestWithResources = isTestWithResources;
+    return this;
+  }
 
   private ResourceContainer createAapt2ApkAction(ActionConstructionContext context) {
     List<Artifact> outs = new ArrayList<>();
@@ -299,6 +306,14 @@ public class AndroidResourcesProcessorBuilder {
 
     if (useCompiledResourcesForMerge) {
       builder.add("--useCompiledResourcesForMerge");
+    }
+
+    if (conditionalKeepRules) {
+      builder.add("--conditionalKeepRules");
+    }
+
+    if (resourceFilterFactory.hasDensities()) {
+      builder.add("--densities", resourceFilterFactory.getDensityString());
     }
 
     configureCommonFlags(outs, inputs, builder);
@@ -366,6 +381,21 @@ public class AndroidResourcesProcessorBuilder {
     }
     builder.addExecPath("--aapt", sdk.getAapt().getExecutable());
     configureCommonFlags(outs, inputs, builder);
+
+    if (resourceFilterFactory.hasDensities()) {
+      // If we did not filter by density in analysis, filter in execution. Otherwise, don't filter
+      // in execution, but still pass the densities so they can be added to the manifest.
+      if (resourceFilterFactory.isPrefiltering()) {
+        builder.add("--densitiesForManifest", resourceFilterFactory.getDensityString());
+      } else {
+        builder.add("--densities", resourceFilterFactory.getDensityString());
+      }
+    }
+    ImmutableList<String> filteredResources =
+        resourceFilterFactory.getResourcesToIgnoreInExecution();
+    if (!filteredResources.isEmpty()) {
+      builder.addAll("--prefilteredResources", VectorArg.join(",").each(filteredResources));
+    }
 
     ParamFileInfo.Builder paramFileInfo = ParamFileInfo.builder(ParameterFileType.SHELL_QUOTED);
     // Some flags (e.g. --mainData) may specify lists (or lists of lists) separated by special
@@ -473,20 +503,6 @@ public class AndroidResourcesProcessorBuilder {
       // might remove resources that we previously accepted.
       builder.add("--resourceConfigs", resourceFilterFactory.getConfigurationFilterString());
     }
-    if (resourceFilterFactory.hasDensities()) {
-      // If we did not filter by density in analysis, filter in execution. Otherwise, don't filter
-      // in execution, but still pass the densities so they can be added to the manifest.
-      if (resourceFilterFactory.isPrefiltering()) {
-        builder.add("--densitiesForManifest", resourceFilterFactory.getDensityString());
-      } else {
-        builder.add("--densities", resourceFilterFactory.getDensityString());
-      }
-    }
-    ImmutableList<String> filteredResources =
-        resourceFilterFactory.getResourcesToIgnoreInExecution();
-    if (!filteredResources.isEmpty()) {
-      builder.addAll("--prefilteredResources", VectorArg.join(",").each(filteredResources));
-    }
     if (!uncompressedExtensions.isEmpty()) {
       builder.addAll("--uncompressedExtensions", VectorArg.join(",").each(uncompressedExtensions));
     }
@@ -536,6 +552,10 @@ public class AndroidResourcesProcessorBuilder {
 
     if (packageUnderTest != null) {
       builder.add("--packageUnderTest", packageUnderTest);
+    }
+
+    if (isTestWithResources) {
+      builder.add("--isTestWithResources");
     }
   }
 }

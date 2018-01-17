@@ -3,9 +3,9 @@ layout: documentation
 title: Deploying new Skylark rules
 ---
 
-# Deploying new Skylark rules
+# Deploying new rules
 
-This documentation is for Skylark rule writers who are planning to make their
+This documentation is for rule writers who are planning to make their
 rules available to others.
 
 ## Hosting and naming rules
@@ -38,25 +38,25 @@ Rules can be grouped either by language (e.g., Scala) or some notion of platform
 Every rule repository should have a certain layout so that users can quickly
 understand new rules.
 
-For example, suppose we are writing new Skylark rules for the (make-believe)
-chaiscript language. We would have the following structure:
+For example, suppose we are writing new rules for the (make-believe)
+mockascript language. We would have the following structure:
 
 ```
 .travis.yml
 README.md
 WORKSPACE
-chaiscript/
+mockascript/
   BUILD
-  chaiscript.bzl
+  mockascript.bzl
 tests/
   BUILD
   some_test.sh
   another_test.py
 examples/
   BUILD
-  bin.chai
-  lib.chai
-  test.chai
+  bin.mocs
+  lib.mocs
+  test.mocs
 ```
 
 ### README.md
@@ -147,6 +147,6 @@ The downside is a more complicated one-time installation process for our users:
 they have to copy-paste a rule into their WORKSPACE file, as shown in the
 README section above.
 
-We used to have all of the Skylark rules in the Bazel repository (under
+We used to have all of the rules in the Bazel repository (under
 `//tools/build_rules` or `//tools/build_defs`). We still have a couple rules
 there, but we are working on moving the remaining rules out.

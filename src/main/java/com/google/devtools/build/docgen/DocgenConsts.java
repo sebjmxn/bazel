@@ -169,6 +169,15 @@ public class DocgenConsts {
       .put("hdrs", -90)
       .build();
 
+  // The following variables are not constants as they can be overridden from
+  // SkylarkDocumentationProcessor#parseOptions
+
+  // Build Encyclopedia documentation root
+  public static String BeDocsRoot = "/versions/master/be";
+
+  // Documentation files extension
+  public static String documentationExtension = "html";
+
   static String toCommandLineFormat(String cmdDoc) {
     // Replace html <br> tags with line breaks
     cmdDoc = cmdDoc.replaceAll("(<br>|<br[\\s]*/>)", "\n") + "\n";

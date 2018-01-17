@@ -28,14 +28,14 @@ import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.packages.AspectDefinition;
 import com.google.devtools.build.lib.packages.AspectParameters;
 import com.google.devtools.build.lib.packages.BuildType;
-import com.google.devtools.build.lib.packages.NativeAspectClass;
+import com.google.devtools.build.lib.packages.SkylarkNativeAspect;
 import com.google.devtools.build.lib.rules.proto.ProtoSourcesProvider;
 
 /**
  * Aspect that gathers the proto dependencies of the attached rule target, and propagates the proto
  * values of its dependencies through the ObjcProtoProvider.
  */
-public class ObjcProtoAspect extends NativeAspectClass implements ConfiguredAspectFactory {
+public class ObjcProtoAspect extends SkylarkNativeAspect implements ConfiguredAspectFactory {
   public static final String NAME = "ObjcProtoAspect";
 
   @Override
@@ -56,7 +56,7 @@ public class ObjcProtoAspect extends NativeAspectClass implements ConfiguredAspe
 
     if (ruleContext.attributes().has("deps", BuildType.LABEL_LIST)) {
       Iterable<ObjcProtoProvider> depObjcProtoProviders =
-          ruleContext.getPrerequisites("deps", Mode.TARGET, ObjcProtoProvider.class);
+          ruleContext.getPrerequisites("deps", Mode.TARGET, ObjcProtoProvider.SKYLARK_CONSTRUCTOR);
       aspectObjcProtoProvider.addTransitive(depObjcProtoProviders);
     }
 
@@ -105,8 +105,13 @@ public class ObjcProtoAspect extends NativeAspectClass implements ConfiguredAspe
 
     // Only add the provider if it has any values, otherwise skip it.
     if (!aspectObjcProtoProvider.isEmpty()) {
-      aspectBuilder.addProvider(aspectObjcProtoProvider.build());
+      aspectBuilder.addNativeDeclaredProvider(aspectObjcProtoProvider.build());
     }
     return aspectBuilder.build();
+  }
+
+  @Override
+  public String getName() {
+    return NAME;
   }
 }

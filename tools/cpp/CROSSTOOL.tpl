@@ -1,3 +1,17 @@
+# Copyright 2016 The Bazel Authors. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 major_version: "local"
 minor_version: ""
 default_target_cpu: "same_as_host"
@@ -115,8 +129,40 @@ toolchain {
 %{opt_content}
   }
   linking_mode_flags { mode: DYNAMIC }
+%{link_content}
 
 %{coverage}
+
+  feature {
+    name: 'fdo_optimize'
+    provides: 'profile'
+    flag_set {
+      action: 'c-compile'
+      action: 'c++-compile'
+      expand_if_all_available: 'fdo_profile_path'
+      flag_group {
+        flag: '-fprofile-use=%{fdo_profile_path}'
+        flag: '-fprofile-correction',
+      }
+    }
+  }
+}
+
+toolchain {
+  toolchain_identifier: "msys_x64_mingw"
+  abi_version: "local"
+  abi_libc_version: "local"
+  builtin_sysroot: ""
+  compiler: "mingw-gcc"
+  host_system_name: "local"
+  needsPic: false
+  target_libc: "mingw"
+  target_cpu: "x64_windows"
+  target_system_name: "local"
+
+%{msys_x64_mingw_content}
+
+  linking_mode_flags { mode: DYNAMIC }
 }
 
 toolchain {
@@ -127,8 +173,8 @@ toolchain {
   abi_version: "local"
   abi_libc_version: "local"
   target_cpu: "x64_windows"
-  compiler: "cl"
-  target_libc: "msvcrt140"
+  compiler: "msvc-cl"
+  target_libc: "msvcrt"
   default_python_version: "python2.7"
 
 %{cxx_builtin_include_directory}
@@ -914,13 +960,14 @@ toolchain {
       flag_group {
         flag: "/Od"
         flag: "/Z7"
+        flag: "/DDEBUG"
       }
     }
     flag_set {
       action: 'c++-link-executable'
       action: 'c++-link-dynamic-library'
       flag_group {
-        flag: "/DEBUG:FULL"
+        flag: "%{dbg_mode_debug}"
         flag: "/INCREMENTAL:NO"
       }
     }
@@ -935,13 +982,14 @@ toolchain {
       flag_group {
         flag: "/Od"
         flag: "/Z7"
+        flag: "/DDEBUG"
       }
     }
     flag_set {
       action: 'c++-link-executable'
       action: 'c++-link-dynamic-library'
       flag_group {
-        flag: "/DEBUG:FASTLINK"
+        flag: "%{fastbuild_mode_debug}"
         flag: "/INCREMENTAL:NO"
       }
     }
@@ -955,6 +1003,7 @@ toolchain {
       action: 'c++-compile'
       flag_group {
         flag: "/O2"
+        flag: "/DNDEBUG"
       }
     }
   }

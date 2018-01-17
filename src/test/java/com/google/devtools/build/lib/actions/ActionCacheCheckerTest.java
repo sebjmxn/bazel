@@ -62,7 +62,9 @@ public class ActionCacheCheckerTest {
     ArtifactResolver artifactResolver = new FakeArtifactResolverBase();
 
     cache = new CorruptibleCompactPersistentActionCache(scratch.resolve("/cache/test.dat"), clock);
-    cacheChecker = new ActionCacheChecker(cache, artifactResolver, Predicates.alwaysTrue(), null);
+    cacheChecker =
+        new ActionCacheChecker(
+            cache, artifactResolver, new ActionKeyContext(), Predicates.alwaysTrue(), null);
   }
 
   @Before
@@ -167,19 +169,21 @@ public class ActionCacheCheckerTest {
 
   @Test
   public void testDifferentActionKey() throws Exception {
-    Action action = new NullAction() {
-      @Override
-      protected String computeKey() {
-        return "key1";
-      }
-    };
+    Action action =
+        new NullAction() {
+          @Override
+          protected String computeKey(ActionKeyContext actionKeyContext) {
+            return "key1";
+          }
+        };
     runAction(action);
-    action = new NullAction() {
-      @Override
-      protected String computeKey() {
-        return "key2";
-      }
-    };
+    action =
+        new NullAction() {
+          @Override
+          protected String computeKey(ActionKeyContext actionKeyContext) {
+            return "key2";
+          }
+        };
     runAction(action);
 
     assertStatistics(
@@ -270,15 +274,16 @@ public class ActionCacheCheckerTest {
 
   @Test
   public void testMiddleman_DifferentFiles() throws Exception {
-    Action action = new NullMiddlemanAction() {
-      @Override
-      public synchronized Iterable<Artifact> getInputs() {
-        FileSystem fileSystem = getPrimaryOutput().getPath().getFileSystem();
-        Path path = fileSystem.getPath("/input");
-        Root root = Root.asSourceRoot(fileSystem.getPath("/"));
-        return ImmutableList.of(new Artifact(path, root));
-      }
-    };
+    Action action =
+        new NullMiddlemanAction() {
+          @Override
+          public synchronized Iterable<Artifact> getInputs() {
+            FileSystem fileSystem = getPrimaryOutput().getPath().getFileSystem();
+            Path path = fileSystem.getPath("/input");
+            ArtifactRoot root = ArtifactRoot.asSourceRoot(fileSystem.getPath("/"));
+            return ImmutableList.of(new Artifact(path, root));
+          }
+        };
     runAction(action);  // Not cached so recorded as different deps.
     FileSystemUtils.writeContentAsLatin1(action.getPrimaryInput().getPath(), "modified");
     runAction(action);  // Cache miss because input files were modified.

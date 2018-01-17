@@ -14,8 +14,10 @@
 package com.google.devtools.build.lib.analysis.config;
 
 import com.google.common.collect.ImmutableMap;
+import com.google.devtools.build.lib.analysis.config.transitions.PatchTransition;
+import com.google.devtools.build.lib.analysis.config.transitions.SplitTransition;
+import com.google.devtools.build.lib.analysis.config.transitions.Transition;
 import com.google.devtools.build.lib.packages.Attribute;
-import com.google.devtools.build.lib.packages.Attribute.Transition;
 import com.google.devtools.build.lib.packages.RuleClass;
 
 /**
@@ -23,7 +25,7 @@ import com.google.devtools.build.lib.packages.RuleClass;
  *
  * <p>Blaze applies configuration transitions by executing {@link PatchTransition} instances. But
  * for legacy reasons, not every transition declaration is a {@link PatchTransition}. The most
- * prominent example is {@link Attribute.ConfigurationTransition}, which defines its transitions as
+ * prominent example is {@link ConfigurationTransitionProxy}, which defines its transitions as
  * enums. These transitions are used all over the place. So we need a way to continue to support
  * them.
  *
@@ -35,7 +37,7 @@ import com.google.devtools.build.lib.packages.RuleClass;
  * {@link RuleClass.Builder#cfg(PatchTransition)}. That way, transition declarations "just work",
  * with no extra fuss. But this is a migration that will take some time to complete.
  *
- * {@link Attribute.ConfigurationTransition#DATA} provides the most complicated challenge. This is
+ * {@link ConfigurationTransitionProxy#DATA} provides the most complicated challenge. This is
  * C++/LIPO logic, and the implementation is in C++ rule code
  * ({@link com.google.devtools.build.lib.rules.cpp.transitions.DisableLipoTransition}). But the enum
  * is defined in {@link Attribute}, which is in {@code lib.packages}, which has access to neither
@@ -72,7 +74,7 @@ public final class DynamicTransitionMapper {
    */
   public Transition map(Transition fromTransition) {
     if (fromTransition instanceof PatchTransition
-        || fromTransition instanceof Attribute.SplitTransition<?>
+        || fromTransition instanceof SplitTransition
         || fromTransition == null) {
       return fromTransition;
     }

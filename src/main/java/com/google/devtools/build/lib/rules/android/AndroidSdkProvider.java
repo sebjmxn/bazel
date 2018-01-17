@@ -21,6 +21,7 @@ import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
 import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
 import com.google.devtools.build.lib.analysis.configuredtargets.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
+import com.google.devtools.build.lib.packages.RuleClass.ConfiguredTargetFactory.RuleErrorException;
 import javax.annotation.Nullable;
 
 /** Description of the tools Blaze needs from an Android SDK. */
@@ -74,25 +75,15 @@ public abstract class AndroidSdkProvider implements TransitiveInfoProvider {
    * not specified.
    */
   public static AndroidSdkProvider fromRuleContext(RuleContext ruleContext) {
-    TransitiveInfoCollection androidSdkDep =
-        ruleContext.getPrerequisite(":android_sdk", Mode.TARGET);
-    AndroidSdkProvider androidSdk = androidSdkDep == null
-        ? null : androidSdkDep.getProvider(AndroidSdkProvider.class);
-
-    return androidSdk;
+    return ruleContext.getPrerequisite(":android_sdk", Mode.TARGET, AndroidSdkProvider.class);
   }
 
-  /**
-   * Signals an error if the Android SDK cannot be found.
-   */
-  public static boolean verifyPresence(RuleContext ruleContext) {
+  /** Throws an error if the Android SDK cannot be found. */
+  public static void verifyPresence(RuleContext ruleContext) throws RuleErrorException {
     if (fromRuleContext(ruleContext) == null) {
-      ruleContext.ruleError(
+      throw ruleContext.throwWithRuleError(
           "No Android SDK found. Use the --android_sdk command line option to specify one.");
-      return false;
     }
-
-    return true;
   }
 
   /** The value of build_tools_version. May be null or empty. */

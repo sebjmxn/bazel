@@ -13,26 +13,42 @@
 // limitations under the License.
 package com.google.devtools.build.lib.rules.java;
 
+import static com.google.devtools.build.lib.syntax.SkylarkType.BOOL;
+
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.Runfiles;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
 import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
 import com.google.devtools.build.lib.analysis.TransitiveInfoProviderMap;
 import com.google.devtools.build.lib.analysis.TransitiveInfoProviderMapBuilder;
+import com.google.devtools.build.lib.analysis.skylark.SkylarkActionFactory;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.collect.nestedset.NestedSet;
+import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
+import com.google.devtools.build.lib.events.Location;
 import com.google.devtools.build.lib.packages.NativeInfo;
 import com.google.devtools.build.lib.packages.NativeProvider;
 import com.google.devtools.build.lib.skylarkinterface.SkylarkCallable;
 import com.google.devtools.build.lib.skylarkinterface.SkylarkModule;
 import com.google.devtools.build.lib.skylarkinterface.SkylarkModuleCategory;
+import com.google.devtools.build.lib.skylarkinterface.SkylarkValue;
+import com.google.devtools.build.lib.syntax.EvalException;
+import com.google.devtools.build.lib.syntax.FunctionSignature;
+import com.google.devtools.build.lib.syntax.Runtime;
 import com.google.devtools.build.lib.syntax.SkylarkList;
 import com.google.devtools.build.lib.syntax.SkylarkNestedSet;
+import com.google.devtools.build.lib.syntax.SkylarkType;
 import java.util.ArrayList;
-import java.util.LinkedList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.function.Function;
 import javax.annotation.Nullable;
 
 /** A Skylark declared provider that encapsulates all providers that are needed by Java rules. */
@@ -44,8 +60,84 @@ import javax.annotation.Nullable;
 @Immutable
 public final class JavaInfo extends NativeInfo {
 
+  public static final String SKYLARK_NAME = "JavaInfo";
+
+  private static final SkylarkType SEQUENCE_OF_ARTIFACTS =
+      SkylarkType.Combination.of(SkylarkType.SEQUENCE, SkylarkType.of(Artifact.class));
+  private static final SkylarkType SEQUENCE_OF_JAVA_INFO =
+      SkylarkType.Combination.of(SkylarkType.SEQUENCE, SkylarkType.of(JavaInfo.class));
+  private static final SkylarkType LIST_OF_ARTIFACTS =
+      SkylarkType.Combination.of(SkylarkType.SEQUENCE, SkylarkType.of(Artifact.class));
+
+  private static final FunctionSignature.WithValues<Object, SkylarkType> SIGNATURE =
+      FunctionSignature.WithValues.create(
+          FunctionSignature.of(
+              /*numMandatoryPositionals=*/ 0,
+              /*numOptionalPositionals=*/ 0,
+              /*numMandatoryNamedOnly=*/ 1,
+              /*starArg=*/ false,
+              /*kwArg=*/ false,
+              "output_jar",
+              "sources",
+              "source_jars",
+              "use_ijar",
+              "neverlink",
+              "deps",
+              "runtime_deps",
+              "exports",
+              "actions",
+              "java_toolchain"),
+
+          /*defaultValues=*/ Arrays.asList(
+              SkylarkList.createImmutable(Collections.emptyList()), // sources
+              SkylarkList.createImmutable(Collections.emptyList()), // source_jars
+              Boolean.TRUE, // use_ijar
+              Boolean.FALSE, // neverlink
+              SkylarkList.createImmutable(Collections.emptyList()), // deps
+              SkylarkList.createImmutable(Collections.emptyList()), // runtime_deps
+              SkylarkList.createImmutable(Collections.emptyList()), // exports
+              Runtime.NONE, // actions
+              Runtime.NONE), // java_toolchain
+          /*types=*/ ImmutableList.of(
+              SkylarkType.of(Artifact.class), // output_jar
+              SkylarkType.Union.of(SEQUENCE_OF_ARTIFACTS, LIST_OF_ARTIFACTS), // sources
+              SkylarkType.Union.of(SEQUENCE_OF_ARTIFACTS, LIST_OF_ARTIFACTS), // source_jars
+              BOOL, // use_ijar
+              BOOL, // neverlink
+              SEQUENCE_OF_JAVA_INFO, // deps
+              SEQUENCE_OF_JAVA_INFO, // runtime_deps
+              SEQUENCE_OF_JAVA_INFO, // exports
+              SkylarkType.of(SkylarkActionFactory.class), // actions
+              SkylarkType.of(ConfiguredTarget.class))); // java_toolchain
+
   public static final NativeProvider<JavaInfo> PROVIDER =
-      new NativeProvider<JavaInfo>(JavaInfo.class, "JavaInfo") {};
+      new NativeProvider<JavaInfo>(JavaInfo.class, SKYLARK_NAME, SIGNATURE) {
+
+        @Override
+        @SuppressWarnings("unchecked")
+        protected JavaInfo createInstanceFromSkylark(Object[] args, Location loc)
+            throws EvalException {
+
+          JavaInfo javaInfo =
+              JavaInfoBuildHelper.getInstance()
+                  .createJavaInfo(
+                      (Artifact) args[0],
+                      (SkylarkList<Artifact>) args[1],
+                      (SkylarkList<Artifact>) args[2],
+                      (Boolean) args[3],
+                      (Boolean) args[4],
+                      (SkylarkList<JavaInfo>) args[5],
+                      (SkylarkList<JavaInfo>) args[6],
+                      (SkylarkList<JavaInfo>) args[7],
+                      args[8],
+                      args[9],
+                      loc);
+
+          return javaInfo;
+        }
+      };
+
+  public static final JavaInfo EMPTY = JavaInfo.Builder.create().build();
 
   private static final ImmutableSet<Class<? extends TransitiveInfoProvider>> ALLOWED_PROVIDERS =
       ImmutableSet.of(
@@ -54,10 +146,16 @@ public final class JavaInfo extends NativeInfo {
         ProtoJavaApiInfoAspectProvider.class,
         JavaRuleOutputJarsProvider.class,
         JavaRunfilesProvider.class,
-        JavaPluginInfoProvider.class
+        JavaPluginInfoProvider.class,
+        JavaGenJarsProvider.class,
+        JavaExportsProvider.class,
+        JavaCompilationInfoProvider.class
       );
 
   private final TransitiveInfoProviderMap providers;
+
+  // Whether or not this library should be used only for compilation and not at runtime.
+  private final boolean neverlink;
 
   /** Returns the instance for the provided providerClass, or <tt>null</tt> if not present. */
   @Nullable
@@ -119,7 +217,7 @@ public final class JavaInfo extends NativeInfo {
    */
   public static <C extends TransitiveInfoProvider> List<C> fetchProvidersFromList(
       Iterable<JavaInfo> javaProviders, Class<C> providersClass) {
-    List<C> fetchedProviders = new LinkedList<>();
+    List<C> fetchedProviders = new ArrayList<>();
     for (JavaInfo javaInfo : javaProviders) {
       C provider = javaInfo.getProvider(providersClass);
       if (provider != null) {
@@ -194,9 +292,14 @@ public final class JavaInfo extends NativeInfo {
     return providersList.build();
   }
 
-  private JavaInfo(TransitiveInfoProviderMap providers) {
-    super(PROVIDER);
+  private JavaInfo(TransitiveInfoProviderMap providers, boolean neverlink, Location location) {
+    super(PROVIDER, ImmutableMap.of(), location);
     this.providers = providers;
+    this.neverlink = neverlink;
+  }
+
+  public Boolean isNeverlink() {
+    return neverlink;
   }
 
   @SkylarkCallable(
@@ -205,10 +308,7 @@ public final class JavaInfo extends NativeInfo {
       structField = true
   )
   public SkylarkNestedSet getTransitiveRuntimeJars() {
-    return SkylarkNestedSet.of(
-        Artifact.class,
-        providers.getProvider(JavaCompilationArgsProvider.class)
-            .getRecursiveJavaCompilationArgs().getRuntimeJars());
+    return SkylarkNestedSet.of(Artifact.class, getTransitiveRuntimeDeps());
   }
 
   @SkylarkCallable(
@@ -218,10 +318,7 @@ public final class JavaInfo extends NativeInfo {
       structField = true
   )
   public SkylarkNestedSet getTransitiveCompileTimeJars() {
-    return SkylarkNestedSet.of(
-        Artifact.class,
-        providers.getProvider(JavaCompilationArgsProvider.class)
-            .getRecursiveJavaCompilationArgs().getCompileTimeJars());
+    return SkylarkNestedSet.of(Artifact.class, getTransitiveDeps());
   }
 
   @SkylarkCallable(
@@ -236,10 +333,12 @@ public final class JavaInfo extends NativeInfo {
       structField = true
   )
   public SkylarkNestedSet getCompileTimeJars() {
-    return SkylarkNestedSet.of(
-        Artifact.class,
-        providers.getProvider(JavaCompilationArgsProvider.class)
-            .getJavaCompilationArgs().getCompileTimeJars());
+    NestedSet<Artifact> compileTimeJars =
+        getProviderAsNestedSet(
+            JavaCompilationArgsProvider.class,
+            JavaCompilationArgsProvider::getJavaCompilationArgs,
+            JavaCompilationArgs::getCompileTimeJars);
+    return SkylarkNestedSet.of(Artifact.class, compileTimeJars);
   }
 
   @SkylarkCallable(
@@ -253,10 +352,12 @@ public final class JavaInfo extends NativeInfo {
       structField = true
   )
   public SkylarkNestedSet getFullCompileTimeJars() {
-    return SkylarkNestedSet.of(
-        Artifact.class,
-        providers.getProvider(JavaCompilationArgsProvider.class)
-            .getJavaCompilationArgs().getFullCompileTimeJars());
+    NestedSet<Artifact> fullCompileTimeJars =
+        getProviderAsNestedSet(
+            JavaCompilationArgsProvider.class,
+            JavaCompilationArgsProvider::getJavaCompilationArgs,
+            JavaCompilationArgs::getFullCompileTimeJars);
+    return SkylarkNestedSet.of(Artifact.class, fullCompileTimeJars);
   }
 
   @SkylarkCallable(
@@ -267,8 +368,11 @@ public final class JavaInfo extends NativeInfo {
       structField = true
   )
   public SkylarkList<Artifact> getSourceJars() {
-    return SkylarkList.createImmutable(
-        providers.getProvider(JavaSourceJarsProvider.class).getSourceJars());
+    //TODO(#4221) change return type to NestedSet<Artifact>
+    JavaSourceJarsProvider provider = providers.getProvider(JavaSourceJarsProvider.class);
+    ImmutableList<Artifact> sourceJars =
+        provider == null ? ImmutableList.of() : provider.getSourceJars();
+    return SkylarkList.createImmutable(sourceJars);
   }
 
   @SkylarkCallable(
@@ -280,6 +384,113 @@ public final class JavaInfo extends NativeInfo {
   public JavaRuleOutputJarsProvider getOutputJars() {
     return getProvider(JavaRuleOutputJarsProvider.class);
   }
+
+
+  @SkylarkCallable(
+      name = "annotation_processing",
+      structField = true,
+      allowReturnNones = true,
+      doc = "Returns information about annotation processing for this Java target."
+  )
+  public JavaGenJarsProvider getGenJarsProvider() {
+    return getProvider(JavaGenJarsProvider.class);
+  }
+
+  @SkylarkCallable(
+    name = "compilation_info",
+    structField = true,
+    allowReturnNones = true,
+    doc = "Returns compilation information for this Java target."
+  )
+  public JavaCompilationInfoProvider getCompilationInfoProvider() {
+    return getProvider(JavaCompilationInfoProvider.class);
+  }
+
+  @SkylarkCallable(
+    name = "transitive_deps",
+    doc = "Returns the transitive set of Jars required to build the target.",
+    structField = true
+  )
+  public NestedSet<Artifact> getTransitiveDeps() {
+    return getProviderAsNestedSet(
+        JavaCompilationArgsProvider.class,
+        JavaCompilationArgsProvider::getRecursiveJavaCompilationArgs,
+        JavaCompilationArgs::getCompileTimeJars);
+  }
+
+  @SkylarkCallable(
+    name = "transitive_runtime_deps",
+    doc = "Returns the transitive set of Jars required on the target's runtime classpath.",
+    structField = true
+  )
+  public NestedSet<Artifact> getTransitiveRuntimeDeps() {
+    return getProviderAsNestedSet(
+        JavaCompilationArgsProvider.class,
+        JavaCompilationArgsProvider::getRecursiveJavaCompilationArgs,
+        JavaCompilationArgs::getRuntimeJars);
+  }
+
+  @SkylarkCallable(
+    name = "transitive_source_jars",
+    doc = "Returns the Jars containing Java source files for the target "
+            + "and all of its transitive dependencies.",
+    structField = true
+  )
+  public NestedSet<Artifact> getTransitiveSourceJars() {
+    return getProviderAsNestedSet(
+        JavaSourceJarsProvider.class,
+        JavaSourceJarsProvider::getTransitiveSourceJars);
+  }
+
+  @SkylarkCallable(
+      name = "transitive_exports",
+      structField = true,
+      doc = "Returns transitive set of labels that are being exported from this rule."
+  )
+  public NestedSet<Label> getTransitiveExports() {
+    return getProviderAsNestedSet(
+        JavaExportsProvider.class,
+        JavaExportsProvider::getTransitiveExports);
+  }
+
+  /**
+   * Gets Provider, check it for not null and call function to get NestedSet&lt;S&gt; from it.
+   *
+   * <p>Gets provider from map. If Provider is null, return default, empty, stabled ordered
+   * NestedSet. If provider is not null, then delegates to mapper all responsibility to fetch
+   * required NestedSet from provider.
+   *
+   * @see JavaInfo#getProviderAsNestedSet(Class, Function, Function)
+   * @param providerClass provider class. used as key to look up for provider.
+   * @param mapper Function used to convert provider to NesteSet&lt;S&gt;
+   * @param <P> type of Provider
+   * @param <S> type of returned NestedSet items
+   */
+  private <P extends TransitiveInfoProvider, S extends SkylarkValue>
+      NestedSet<S> getProviderAsNestedSet(
+          Class<P> providerClass, Function<P, NestedSet<S>> mapper) {
+
+    P provider = getProvider(providerClass);
+    if (provider == null) {
+      return NestedSetBuilder.<S>stableOrder().build();
+    }
+    return mapper.apply(provider);
+  }
+
+  /**
+   * The same as {@link JavaInfo#getProviderAsNestedSet(Class, Function)}, but uses
+   * sequence of two mappers.
+   *
+   * @see JavaInfo#getProviderAsNestedSet(Class, Function)
+   */
+  private <P extends TransitiveInfoProvider, S extends SkylarkValue, V>
+      NestedSet<S> getProviderAsNestedSet(
+          Class<P> providerClass,
+          Function<P, V> firstMapper,
+          Function<V, NestedSet<S>> secondMapper) {
+    return getProviderAsNestedSet(providerClass, firstMapper.andThen(secondMapper));
+  }
+
 
   @Override
   public boolean equals(Object otherObject) {
@@ -304,6 +515,8 @@ public final class JavaInfo extends NativeInfo {
    */
   public static class Builder {
     TransitiveInfoProviderMapBuilder providerMap;
+    private boolean neverlink;
+    private Location location = Location.BUILTIN;
 
     private Builder(TransitiveInfoProviderMapBuilder providerMap) {
       this.providerMap = providerMap;
@@ -318,6 +531,16 @@ public final class JavaInfo extends NativeInfo {
           new TransitiveInfoProviderMapBuilder().addAll(javaInfo.getProviders()));
     }
 
+    public Builder setNeverlink(boolean neverlink) {
+      this.neverlink = neverlink;
+      return this;
+    }
+
+    public Builder setLocation(Location location) {
+      this.location = location;
+      return this;
+    }
+
     public <P extends TransitiveInfoProvider> Builder addProvider(
         Class<P> providerClass, TransitiveInfoProvider provider) {
       Preconditions.checkArgument(ALLOWED_PROVIDERS.contains(providerClass));
@@ -326,7 +549,7 @@ public final class JavaInfo extends NativeInfo {
     }
 
     public JavaInfo build() {
-      return new JavaInfo(providerMap.build());
+      return new JavaInfo(providerMap.build(), neverlink, location);
     }
   }
 }

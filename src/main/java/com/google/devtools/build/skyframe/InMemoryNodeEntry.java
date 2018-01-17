@@ -189,19 +189,19 @@ public class InMemoryNodeEntry implements NodeEntry {
   }
 
   @Override
-  public synchronized SkyValue getValue() {
+  public SkyValue getValue() {
     Preconditions.checkState(isDone(), "no value until done. ValueEntry: %s", this);
     return ValueWithMetadata.justValue(value);
   }
 
   @Override
-  public synchronized SkyValue getValueMaybeWithMetadata() {
+  public SkyValue getValueMaybeWithMetadata() {
     Preconditions.checkState(isDone(), "no value until done: %s", this);
     return value;
   }
 
   @Override
-  public synchronized SkyValue toValue() {
+  public SkyValue toValue() {
     if (isDone()) {
       return getErrorInfo() == null ? getValue() : null;
     } else if (isChanged() || isDirty()) {
@@ -231,6 +231,11 @@ public class InMemoryNodeEntry implements NodeEntry {
     assertKeepDeps();
     Preconditions.checkState(isDone(), "no deps until done. NodeEntry: %s", this);
     return GroupedList.create(directDeps);
+  }
+
+  public int getNumDirectDeps() {
+    Preconditions.checkState(isDone(), "no deps until done. NodeEntry: %s", this);
+    return GroupedList.numElements(directDeps);
   }
 
   @Override
@@ -351,7 +356,7 @@ public class InMemoryNodeEntry implements NodeEntry {
     reverseDepsDataToConsolidate.add(KeyToConsolidate.create(reverseDep, op, getOpToStoreBare()));
   }
 
-  private OpToStoreBare getOpToStoreBare() {
+  protected OpToStoreBare getOpToStoreBare() {
     return isDirty() ? OpToStoreBare.CHECK : OpToStoreBare.ADD;
   }
 

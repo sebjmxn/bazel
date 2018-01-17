@@ -35,14 +35,17 @@ public class FailActionTest {
   private Artifact anOutput;
   private Collection<Artifact> outputs;
   private FailAction failAction;
+  private final ActionKeyContext actionKeyContext = new ActionKeyContext();
 
-  protected MutableActionGraph actionGraph = new MapBasedActionGraph();
+  protected MutableActionGraph actionGraph = new MapBasedActionGraph(actionKeyContext);
 
   @Before
   public final void setUp() throws Exception  {
     errorMessage = "An error just happened.";
-    anOutput = new Artifact(scratch.file("/out/foo"),
-        Root.asDerivedRoot(scratch.dir("/"), scratch.dir("/out")));
+    anOutput =
+        new Artifact(
+            scratch.file("/out/foo"),
+            ArtifactRoot.asDerivedRoot(scratch.dir("/"), scratch.dir("/out")));
     outputs = ImmutableList.of(anOutput);
     failAction = new FailAction(NULL_ACTION_OWNER, outputs, errorMessage);
     actionGraph.registerAction(failAction);

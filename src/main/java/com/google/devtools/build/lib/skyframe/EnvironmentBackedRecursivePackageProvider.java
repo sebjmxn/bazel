@@ -52,9 +52,11 @@ import java.util.Map;
 public final class EnvironmentBackedRecursivePackageProvider implements RecursivePackageProvider {
 
   private final Environment env;
+  private final PathPackageLocator pkgPath;
 
-  public EnvironmentBackedRecursivePackageProvider(Environment env) {
+  public EnvironmentBackedRecursivePackageProvider(Environment env, PathPackageLocator pkgPath) {
     this.env = env;
+    this.pkgPath = pkgPath;
   }
 
   @Override
@@ -91,6 +93,15 @@ public final class EnvironmentBackedRecursivePackageProvider implements Recursiv
       builder.put(pkgId, getPackage(env.getListener(), pkgId));
     }
     return builder.build();
+  }
+
+  @Override
+  public Path getBuildFileForPackage(PackageIdentifier packageName) {
+    try {
+      return pkgPath.getPackageBuildFile(packageName);
+    } catch (NoSuchPackageException e) {
+      return null;
+    }
   }
 
   @Override
@@ -135,9 +146,8 @@ public final class EnvironmentBackedRecursivePackageProvider implements Recursiv
       }
 
       if (!repositoryValue.repositoryExists()) {
-        // This shouldn't be possible; we're given a repository, so we assume that the caller has
-        // already checked for its existence.
-        throw new IllegalStateException(String.format("No such repository '%s'", repository));
+        eventHandler.handle(Event.error(String.format("No such repository '%s'", repository)));
+        return ImmutableList.of();
       }
       roots.add(repositoryValue.getPath());
     }

@@ -17,7 +17,7 @@
 # discard_graph_edges_lib.sh: functions needed by discard_graph_edges_test.sh
 
 STARTUP_FLAGS="--batch"
-BUILD_FLAGS="--discard_analysis_cache --nokeep_incrementality_data"
+BUILD_FLAGS="--discard_analysis_cache --notrack_incremental_state"
 
 function extract_histogram_count() {
   local histofile="$1"
@@ -53,9 +53,12 @@ genrule(name = 'action${i}',
         srcs = [':action${iminus}'],
         outs = ['histo.${i}'],
         local = 1,
+        # Try to get a histogram three times because of Bazel CI flakiness.
         cmd = 'server_pid=\$\$(cat $server_pid_file) ; ' +
-              '$javabase/bin/jmap -histo:live \$\$server_pid > ' +
-              '\$(location histo.${i}) ' +
+              'for i in 1 2 3 ; do' +
+              '  $javabase/bin/jmap -histo:live \$\$server_pid > ' +
+              '      \$(location histo.${i}) && break ;' +
+              'done ' +
               '|| echo "server_pid in genrule: \$\$server_pid"'
        )
 EOF

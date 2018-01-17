@@ -20,11 +20,12 @@ import com.google.devtools.build.lib.actions.AbstractAction;
 import com.google.devtools.build.lib.actions.ActionAnalysisMetadata;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionExecutionException;
+import com.google.devtools.build.lib.actions.ActionKeyContext;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.ActionResult;
 import com.google.devtools.build.lib.actions.Actions;
 import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.actions.Root;
+import com.google.devtools.build.lib.actions.ArtifactRoot;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
@@ -67,9 +68,8 @@ public final class SolibSymlinkAction extends AbstractAction {
     return ActionResult.EMPTY;
   }
 
-
   @Override
-  protected String computeKey() {
+  protected String computeKey(ActionKeyContext actionKeyContext) {
     Fingerprint f = new Fingerprint();
     f.addPath(symlink.getPath());
     f.addPath(target);
@@ -149,7 +149,7 @@ public final class SolibSymlinkAction extends AbstractAction {
     Preconditions.checkArgument(!library.getRootRelativePath().getSegment(0).startsWith("_solib_"));
 
     // Ignore libraries that are already represented by the symlinks.
-    Root root = configuration.getBinDirectory(ruleContext.getRule().getRepository());
+    ArtifactRoot root = configuration.getBinDirectory(ruleContext.getRule().getRepository());
     Artifact symlink = ruleContext.getShareableArtifact(symlinkName, root);
     ruleContext.registerAction(
         new SolibSymlinkAction(ruleContext.getActionOwner(), library, symlink));

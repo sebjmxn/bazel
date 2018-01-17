@@ -1,9 +1,9 @@
 ---
 layout: documentation
-title: Compile Bazel from Source
+title: Compiling Bazel from Source
 ---
 
-# <a name="compiling-from-source"></a>Compile Bazel from source
+# <a name="compiling-from-source"></a>Compiling Bazel from Source
 
 You can build Bazel from source following these steps:
 
@@ -21,7 +21,12 @@ You can build Bazel from source following these steps:
 2.  Download and unpack Bazel's distribution archive.
 
     Download `bazel-<version>-dist.zip` from the [release
-    page](https://github.com/bazelbuild/bazel/releases). We recommend to also
+    page](https://github.com/bazelbuild/bazel/releases).
+
+    **Note:** There is a **single architecture independent** distribution
+    archive. There are no architecture-specific distribution archives.
+
+    We recommend to also
     verify the signature made by our [release
     key](https://bazel.build/bazel-release.pub.gpg) 48457EE0.
 

@@ -30,10 +30,13 @@ import com.google.common.collect.Multimap;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
-import com.google.devtools.build.lib.analysis.config.PatchTransition;
+import com.google.devtools.build.lib.analysis.config.transitions.PatchTransition;
 import com.google.devtools.build.lib.packages.AttributeMap;
 import com.google.devtools.build.lib.packages.RuleClass.ConfiguredTargetFactory.RuleErrorException;
 import com.google.devtools.build.lib.packages.RuleErrorConsumer;
+import com.google.devtools.build.lib.rules.android.AndroidConfiguration.AndroidAaptVersion;
+import com.google.devtools.build.lib.skyframe.serialization.ObjectCodec;
+import com.google.devtools.build.lib.skyframe.serialization.autocodec.AutoCodec;
 import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.common.options.EnumConverter;
 import com.google.devtools.common.options.OptionsParsingException;
@@ -54,9 +57,13 @@ import javax.annotation.Nullable;
  * and {@link #hashCode()} methods. Failure to do so isn't just bad practice; it could seriously
  * interfere with Bazel's caching performance.
  */
+@AutoCodec
 public class ResourceFilterFactory {
   public static final String RESOURCE_CONFIGURATION_FILTERS_NAME = "resource_configuration_filters";
   public static final String DENSITIES_NAME = "densities";
+
+  public static final ObjectCodec<ResourceFilterFactory> CODEC =
+      new ResourceFilterFactory_AutoCodec();
 
   /**
    * Locales used for pseudolocation.
@@ -124,7 +131,6 @@ public class ResourceFilterFactory {
    * @param densities the density filters, as a list of strings.
    * @param filterBehavior the behavior of this filter.
    */
-  @VisibleForTesting
   ResourceFilterFactory(
       ImmutableList<String> configFilters,
       ImmutableList<String> densities,
@@ -141,10 +147,6 @@ public class ResourceFilterFactory {
 
     List<String> values = attrs.get(attrName, Type.STRING_LIST);
     return values != null && !values.isEmpty();
-  }
-
-  static boolean hasFilters(RuleContext ruleContext) {
-    return hasFilters(ruleContext.attributes());
   }
 
   static boolean hasFilters(AttributeMap attrs) {
@@ -197,16 +199,22 @@ public class ResourceFilterFactory {
     return ImmutableList.sortedCopyOf(builder.build());
   }
 
-  static ResourceFilterFactory fromRuleContext(RuleContext ruleContext) {
+  static ResourceFilterFactory fromRuleContext(RuleContext ruleContext) throws RuleErrorException {
     Preconditions.checkNotNull(ruleContext);
 
     if (!ruleContext.isLegalFragment(AndroidConfiguration.class)) {
-      return empty(DEFAULT_BEHAVIOR);
+      return empty();
     }
 
-    return forBaseAndAttrs(
-        ruleContext.getFragment(AndroidConfiguration.class).getResourceFilterFactory(),
-        ruleContext.attributes());
+    ResourceFilterFactory base;
+    if (AndroidAaptVersion.chooseTargetAaptVersion(ruleContext) == AndroidAaptVersion.AAPT2) {
+      // aapt2 must have access to all of the resources in execution, so don't filter in analysis.
+      base = empty(FilterBehavior.FILTER_IN_EXECUTION);
+    } else {
+      base = ruleContext.getFragment(AndroidConfiguration.class).getResourceFilterFactory();
+    }
+
+    return forBaseAndAttrs(base, ruleContext.attributes());
   }
 
   @VisibleForTesting
@@ -224,7 +232,7 @@ public class ResourceFilterFactory {
    */
   ResourceFilterFactory withAttrsFrom(AttributeMap attrs) {
     if (!hasFilters(attrs)) {
-      return new ResourceFilterFactory(configFilters, densities, filterBehavior);
+      return this;
     }
 
     return new ResourceFilterFactory(
@@ -382,8 +390,8 @@ public class ResourceFilterFactory {
     }
   }
 
-  static ResourceFilterFactory empty(RuleContext ruleContext) {
-    return empty(fromRuleContext(ruleContext).filterBehavior);
+  static ResourceFilterFactory empty() {
+    return empty(DEFAULT_BEHAVIOR);
   }
 
   @VisibleForTesting
@@ -654,6 +662,10 @@ public class ResourceFilterFactory {
     return Joiner.on(',').join(configFilters);
   }
 
+  ImmutableList<String> getConfigFilters() {
+    return configFilters;
+  }
+
   /**
    * Returns if this object contains a non-empty density filter.
    *
@@ -668,7 +680,7 @@ public class ResourceFilterFactory {
     return Joiner.on(',').join(densities);
   }
 
-  List<String> getDensities() {
+  ImmutableList<String> getDensities() {
     return densities;
   }
 
@@ -678,6 +690,10 @@ public class ResourceFilterFactory {
 
   boolean hasFilters() {
     return hasConfigurationFilters() || hasDensities();
+  }
+
+  FilterBehavior getFilterBehavior() {
+    return filterBehavior;
   }
 
   public String getOutputDirectorySuffix() {

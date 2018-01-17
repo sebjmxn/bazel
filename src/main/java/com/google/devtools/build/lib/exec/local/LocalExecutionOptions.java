@@ -49,4 +49,15 @@ public class LocalExecutionOptions extends OptionsBase {
             + "all actions are allowed to execute locally"
   )
   public Pattern allowedLocalAction;
+
+  @Option(
+    name = "experimental_collect_local_action_metrics",
+    defaultValue = "false",
+    documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
+    effectTags = {OptionEffectTag.EXECUTION},
+    help =
+        "When enabled, execution statistics (such as user and system time) are recorded for "
+            + "locally executed actions which don't use sandboxing"
+  )
+  public boolean collectLocalExecutionStatistics;
 }

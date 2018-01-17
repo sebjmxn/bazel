@@ -24,6 +24,7 @@ import com.google.devtools.build.lib.skyframe.FileArtifactValue;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.remoteexecution.v1test.Digest;
+import com.google.devtools.remoteexecution.v1test.Tree;
 import com.google.protobuf.ByteString;
 import java.io.IOException;
 import javax.annotation.Nullable;
@@ -32,9 +33,11 @@ import javax.annotation.Nullable;
 final class FakeActionInputFileCache implements ActionInputFileCache {
   private final Path execRoot;
   private final BiMap<ActionInput, String> cas = HashBiMap.create();
+  private final DigestUtil digestUtil;
 
   FakeActionInputFileCache(Path execRoot) {
     this.execRoot = execRoot;
+    this.digestUtil = new DigestUtil(execRoot.getFileSystem().getDigestFunction());
   }
 
   @Override
@@ -70,7 +73,15 @@ final class FakeActionInputFileCache implements ActionInputFileCache {
     Path inputFile = execRoot.getRelative(input.getExecPath());
     FileSystemUtils.createDirectoryAndParents(inputFile.getParentDirectory());
     FileSystemUtils.writeContentAsLatin1(inputFile, content);
-    Digest digest = Digests.computeDigest(inputFile);
+    Digest digest = digestUtil.compute(inputFile);
+    setDigest(input, digest.getHash());
+    return digest;
+  }
+
+  public Digest createScratchInputDirectory(ActionInput input, Tree content) throws IOException {
+    Path inputFile = execRoot.getRelative(input.getExecPath());
+    FileSystemUtils.createDirectoryAndParents(inputFile);
+    Digest digest = digestUtil.compute(content);
     setDigest(input, digest.getHash());
     return digest;
   }

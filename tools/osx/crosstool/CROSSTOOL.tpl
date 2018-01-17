@@ -157,9 +157,6 @@ toolchain {
   unfiltered_cxx_flag: "-D__TIMESTAMP__=\"redacted\""
   unfiltered_cxx_flag: "-D__TIME__=\"redacted\""
   default_python_version: "python2.7"
-  ar_flag: "-static"
-  ar_flag: "-s"
-  ar_flag: "-o"
   feature {
     name: "fastbuild"
   }
@@ -321,7 +318,6 @@ toolchain {
         flag: "%{output_execpath}"
       }
       expand_if_all_available: "output_execpath"
-      expand_if_all_available: "uses_action_configs_for_cc_archiving"
     }
   }
   feature {
@@ -984,8 +980,10 @@ toolchain {
       action: "c++-link-alwayslink-static-library"
       action: "c++-link-pic-static-library"
       action: "c++-link-alwayslink-pic-static-library"
+      action: "c++-link-interface-dynamic-library"
       action: "objc-executable"
       action: "objc++-executable"
+      action: "linkstamp-compile"
       env_entry {
         key: "XCODE_VERSION_OVERRIDE"
         value: "%{xcode_version_override_value}"
@@ -1154,22 +1152,6 @@ toolchain {
         flag: "-S"
         flag: "-o"
         flag: "%{output_file}"
-        flag: "-R"
-        flag: ".gnu.switches.text.quote_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.bracket_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.system_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.cpp_defines"
-        flag: "-R"
-        flag: ".gnu.switches.text.cpp_includes"
-        flag: "-R"
-        flag: ".gnu.switches.text.cl_args"
-        flag: "-R"
-        flag: ".gnu.switches.text.lipo_info"
-        flag: "-R"
-        flag: ".gnu.switches.text.annotation"
       }
       flag_group {
         flag: "%{stripopts}"
@@ -1778,9 +1760,6 @@ toolchain {
   unfiltered_cxx_flag: "-target"
   unfiltered_cxx_flag: "x86_64-apple-ios"
   default_python_version: "python2.7"
-  ar_flag: "-static"
-  ar_flag: "-s"
-  ar_flag: "-o"
   feature {
     name: "fastbuild"
   }
@@ -1951,7 +1930,6 @@ toolchain {
         flag: "%{output_execpath}"
       }
       expand_if_all_available: "output_execpath"
-      expand_if_all_available: "uses_action_configs_for_cc_archiving"
     }
   }
   feature {
@@ -2614,8 +2592,10 @@ toolchain {
       action: "c++-link-alwayslink-static-library"
       action: "c++-link-pic-static-library"
       action: "c++-link-alwayslink-pic-static-library"
+      action: "c++-link-interface-dynamic-library"
       action: "objc-executable"
       action: "objc++-executable"
+      action: "linkstamp-compile"
       env_entry {
         key: "XCODE_VERSION_OVERRIDE"
         value: "%{xcode_version_override_value}"
@@ -2789,22 +2769,6 @@ toolchain {
         flag: "-S"
         flag: "-o"
         flag: "%{output_file}"
-        flag: "-R"
-        flag: ".gnu.switches.text.quote_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.bracket_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.system_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.cpp_defines"
-        flag: "-R"
-        flag: ".gnu.switches.text.cpp_includes"
-        flag: "-R"
-        flag: ".gnu.switches.text.cl_args"
-        flag: "-R"
-        flag: ".gnu.switches.text.lipo_info"
-        flag: "-R"
-        flag: ".gnu.switches.text.annotation"
       }
       flag_group {
         flag: "%{stripopts}"
@@ -3415,9 +3379,6 @@ toolchain {
   unfiltered_cxx_flag: "-target"
   unfiltered_cxx_flag: "i386-apple-watchos"
   default_python_version: "python2.7"
-  ar_flag: "-static"
-  ar_flag: "-s"
-  ar_flag: "-o"
   feature {
     name: "fastbuild"
   }
@@ -3588,7 +3549,6 @@ toolchain {
         flag: "%{output_execpath}"
       }
       expand_if_all_available: "output_execpath"
-      expand_if_all_available: "uses_action_configs_for_cc_archiving"
     }
   }
   feature {
@@ -4253,8 +4213,10 @@ toolchain {
       action: "c++-link-alwayslink-static-library"
       action: "c++-link-pic-static-library"
       action: "c++-link-alwayslink-pic-static-library"
+      action: "c++-link-interface-dynamic-library"
       action: "objc-executable"
       action: "objc++-executable"
+      action: "linkstamp-compile"
       env_entry {
         key: "XCODE_VERSION_OVERRIDE"
         value: "%{xcode_version_override_value}"
@@ -4428,22 +4390,6 @@ toolchain {
         flag: "-S"
         flag: "-o"
         flag: "%{output_file}"
-        flag: "-R"
-        flag: ".gnu.switches.text.quote_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.bracket_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.system_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.cpp_defines"
-        flag: "-R"
-        flag: ".gnu.switches.text.cpp_includes"
-        flag: "-R"
-        flag: ".gnu.switches.text.cl_args"
-        flag: "-R"
-        flag: ".gnu.switches.text.lipo_info"
-        flag: "-R"
-        flag: ".gnu.switches.text.annotation"
       }
       flag_group {
         flag: "%{stripopts}"
@@ -5055,9 +5001,6 @@ toolchain {
   unfiltered_cxx_flag: "-target"
   unfiltered_cxx_flag: "x86_64-apple-tvos"
   default_python_version: "python2.7"
-  ar_flag: "-static"
-  ar_flag: "-s"
-  ar_flag: "-o"
   feature {
     name: "fastbuild"
   }
@@ -5228,7 +5171,6 @@ toolchain {
         flag: "%{output_execpath}"
       }
       expand_if_all_available: "output_execpath"
-      expand_if_all_available: "uses_action_configs_for_cc_archiving"
     }
   }
   feature {
@@ -5891,8 +5833,10 @@ toolchain {
       action: "c++-link-alwayslink-static-library"
       action: "c++-link-pic-static-library"
       action: "c++-link-alwayslink-pic-static-library"
+      action: "c++-link-interface-dynamic-library"
       action: "objc-executable"
       action: "objc++-executable"
+      action: "linkstamp-compile"
       env_entry {
         key: "XCODE_VERSION_OVERRIDE"
         value: "%{xcode_version_override_value}"
@@ -6087,22 +6031,6 @@ toolchain {
         flag: "-S"
         flag: "-o"
         flag: "%{output_file}"
-        flag: "-R"
-        flag: ".gnu.switches.text.quote_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.bracket_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.system_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.cpp_defines"
-        flag: "-R"
-        flag: ".gnu.switches.text.cpp_includes"
-        flag: "-R"
-        flag: ".gnu.switches.text.cl_args"
-        flag: "-R"
-        flag: ".gnu.switches.text.lipo_info"
-        flag: "-R"
-        flag: ".gnu.switches.text.annotation"
       }
       flag_group {
         flag: "%{stripopts}"
@@ -6722,9 +6650,6 @@ toolchain {
   unfiltered_cxx_flag: "-target"
   unfiltered_cxx_flag: "i386-apple-ios"
   default_python_version: "python2.7"
-  ar_flag: "-static"
-  ar_flag: "-s"
-  ar_flag: "-o"
   feature {
     name: "fastbuild"
   }
@@ -6895,7 +6820,6 @@ toolchain {
         flag: "%{output_execpath}"
       }
       expand_if_all_available: "output_execpath"
-      expand_if_all_available: "uses_action_configs_for_cc_archiving"
     }
   }
   feature {
@@ -7558,8 +7482,10 @@ toolchain {
       action: "c++-link-alwayslink-static-library"
       action: "c++-link-pic-static-library"
       action: "c++-link-alwayslink-pic-static-library"
+      action: "c++-link-interface-dynamic-library"
       action: "objc-executable"
       action: "objc++-executable"
+      action: "linkstamp-compile"
       env_entry {
         key: "XCODE_VERSION_OVERRIDE"
         value: "%{xcode_version_override_value}"
@@ -7733,22 +7659,6 @@ toolchain {
         flag: "-S"
         flag: "-o"
         flag: "%{output_file}"
-        flag: "-R"
-        flag: ".gnu.switches.text.quote_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.bracket_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.system_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.cpp_defines"
-        flag: "-R"
-        flag: ".gnu.switches.text.cpp_includes"
-        flag: "-R"
-        flag: ".gnu.switches.text.cl_args"
-        flag: "-R"
-        flag: ".gnu.switches.text.lipo_info"
-        flag: "-R"
-        flag: ".gnu.switches.text.annotation"
       }
       flag_group {
         flag: "%{stripopts}"
@@ -8359,9 +8269,6 @@ toolchain {
   unfiltered_cxx_flag: "-target"
   unfiltered_cxx_flag: "armv7-apple-ios"
   default_python_version: "python2.7"
-  ar_flag: "-static"
-  ar_flag: "-s"
-  ar_flag: "-o"
   feature {
     name: "fastbuild"
   }
@@ -8532,7 +8439,6 @@ toolchain {
         flag: "%{output_execpath}"
       }
       expand_if_all_available: "output_execpath"
-      expand_if_all_available: "uses_action_configs_for_cc_archiving"
     }
   }
   feature {
@@ -9195,8 +9101,10 @@ toolchain {
       action: "c++-link-alwayslink-static-library"
       action: "c++-link-pic-static-library"
       action: "c++-link-alwayslink-pic-static-library"
+      action: "c++-link-interface-dynamic-library"
       action: "objc-executable"
       action: "objc++-executable"
+      action: "linkstamp-compile"
       env_entry {
         key: "XCODE_VERSION_OVERRIDE"
         value: "%{xcode_version_override_value}"
@@ -9360,22 +9268,6 @@ toolchain {
         flag: "-S"
         flag: "-o"
         flag: "%{output_file}"
-        flag: "-R"
-        flag: ".gnu.switches.text.quote_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.bracket_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.system_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.cpp_defines"
-        flag: "-R"
-        flag: ".gnu.switches.text.cpp_includes"
-        flag: "-R"
-        flag: ".gnu.switches.text.cl_args"
-        flag: "-R"
-        flag: ".gnu.switches.text.lipo_info"
-        flag: "-R"
-        flag: ".gnu.switches.text.annotation"
       }
       flag_group {
         flag: "%{stripopts}"
@@ -9984,9 +9876,6 @@ toolchain {
   unfiltered_cxx_flag: "-target"
   unfiltered_cxx_flag: "armv7k-apple-watchos"
   default_python_version: "python2.7"
-  ar_flag: "-static"
-  ar_flag: "-s"
-  ar_flag: "-o"
   feature {
     name: "fastbuild"
   }
@@ -10157,7 +10046,6 @@ toolchain {
         flag: "%{output_execpath}"
       }
       expand_if_all_available: "output_execpath"
-      expand_if_all_available: "uses_action_configs_for_cc_archiving"
     }
   }
   feature {
@@ -10822,8 +10710,10 @@ toolchain {
       action: "c++-link-alwayslink-static-library"
       action: "c++-link-pic-static-library"
       action: "c++-link-alwayslink-pic-static-library"
+      action: "c++-link-interface-dynamic-library"
       action: "objc-executable"
       action: "objc++-executable"
+      action: "linkstamp-compile"
       env_entry {
         key: "XCODE_VERSION_OVERRIDE"
         value: "%{xcode_version_override_value}"
@@ -10987,22 +10877,6 @@ toolchain {
         flag: "-S"
         flag: "-o"
         flag: "%{output_file}"
-        flag: "-R"
-        flag: ".gnu.switches.text.quote_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.bracket_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.system_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.cpp_defines"
-        flag: "-R"
-        flag: ".gnu.switches.text.cpp_includes"
-        flag: "-R"
-        flag: ".gnu.switches.text.cl_args"
-        flag: "-R"
-        flag: ".gnu.switches.text.lipo_info"
-        flag: "-R"
-        flag: ".gnu.switches.text.annotation"
       }
       flag_group {
         flag: "%{stripopts}"
@@ -11612,9 +11486,6 @@ toolchain {
   unfiltered_cxx_flag: "-target"
   unfiltered_cxx_flag: "arm64-apple-tvos"
   default_python_version: "python2.7"
-  ar_flag: "-static"
-  ar_flag: "-s"
-  ar_flag: "-o"
   feature {
     name: "fastbuild"
   }
@@ -11785,7 +11656,6 @@ toolchain {
         flag: "%{output_execpath}"
       }
       expand_if_all_available: "output_execpath"
-      expand_if_all_available: "uses_action_configs_for_cc_archiving"
     }
   }
   feature {
@@ -12448,8 +12318,10 @@ toolchain {
       action: "c++-link-alwayslink-static-library"
       action: "c++-link-pic-static-library"
       action: "c++-link-alwayslink-pic-static-library"
+      action: "c++-link-interface-dynamic-library"
       action: "objc-executable"
       action: "objc++-executable"
+      action: "linkstamp-compile"
       env_entry {
         key: "XCODE_VERSION_OVERRIDE"
         value: "%{xcode_version_override_value}"
@@ -12634,22 +12506,6 @@ toolchain {
         flag: "-S"
         flag: "-o"
         flag: "%{output_file}"
-        flag: "-R"
-        flag: ".gnu.switches.text.quote_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.bracket_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.system_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.cpp_defines"
-        flag: "-R"
-        flag: ".gnu.switches.text.cpp_includes"
-        flag: "-R"
-        flag: ".gnu.switches.text.cl_args"
-        flag: "-R"
-        flag: ".gnu.switches.text.lipo_info"
-        flag: "-R"
-        flag: ".gnu.switches.text.annotation"
       }
       flag_group {
         flag: "%{stripopts}"
@@ -13267,9 +13123,6 @@ toolchain {
   unfiltered_cxx_flag: "-target"
   unfiltered_cxx_flag: "arm64-apple-ios"
   default_python_version: "python2.7"
-  ar_flag: "-static"
-  ar_flag: "-s"
-  ar_flag: "-o"
   feature {
     name: "fastbuild"
   }
@@ -13440,7 +13293,6 @@ toolchain {
         flag: "%{output_execpath}"
       }
       expand_if_all_available: "output_execpath"
-      expand_if_all_available: "uses_action_configs_for_cc_archiving"
     }
   }
   feature {
@@ -14103,8 +13955,10 @@ toolchain {
       action: "c++-link-alwayslink-static-library"
       action: "c++-link-pic-static-library"
       action: "c++-link-alwayslink-pic-static-library"
+      action: "c++-link-interface-dynamic-library"
       action: "objc-executable"
       action: "objc++-executable"
+      action: "linkstamp-compile"
       env_entry {
         key: "XCODE_VERSION_OVERRIDE"
         value: "%{xcode_version_override_value}"
@@ -14268,22 +14122,6 @@ toolchain {
         flag: "-S"
         flag: "-o"
         flag: "%{output_file}"
-        flag: "-R"
-        flag: ".gnu.switches.text.quote_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.bracket_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.system_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.cpp_defines"
-        flag: "-R"
-        flag: ".gnu.switches.text.cpp_includes"
-        flag: "-R"
-        flag: ".gnu.switches.text.cl_args"
-        flag: "-R"
-        flag: ".gnu.switches.text.lipo_info"
-        flag: "-R"
-        flag: ".gnu.switches.text.annotation"
       }
       flag_group {
         flag: "%{stripopts}"
@@ -14895,9 +14733,6 @@ toolchain {
   supports_interface_shared_objects: false
   supports_incremental_linker: false
   supports_fission: false
-  ar_flag: "-static"
-  ar_flag: "-s"
-  ar_flag: "-o"
   feature {
     name: "fastbuild"
   }
@@ -15068,7 +14903,6 @@ toolchain {
         flag: "%{output_execpath}"
       }
       expand_if_all_available: "output_execpath"
-      expand_if_all_available: "uses_action_configs_for_cc_archiving"
     }
   }
   feature {
@@ -15731,8 +15565,10 @@ toolchain {
       action: "c++-link-alwayslink-static-library"
       action: "c++-link-pic-static-library"
       action: "c++-link-alwayslink-pic-static-library"
+      action: "c++-link-interface-dynamic-library"
       action: "objc-executable"
       action: "objc++-executable"
+      action: "linkstamp-compile"
       env_entry {
         key: "XCODE_VERSION_OVERRIDE"
         value: "%{xcode_version_override_value}"
@@ -15896,22 +15732,6 @@ toolchain {
         flag: "-S"
         flag: "-o"
         flag: "%{output_file}"
-        flag: "-R"
-        flag: ".gnu.switches.text.quote_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.bracket_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.system_paths"
-        flag: "-R"
-        flag: ".gnu.switches.text.cpp_defines"
-        flag: "-R"
-        flag: ".gnu.switches.text.cpp_includes"
-        flag: "-R"
-        flag: ".gnu.switches.text.cl_args"
-        flag: "-R"
-        flag: ".gnu.switches.text.lipo_info"
-        flag: "-R"
-        flag: ".gnu.switches.text.annotation"
       }
       flag_group {
         flag: "%{stripopts}"

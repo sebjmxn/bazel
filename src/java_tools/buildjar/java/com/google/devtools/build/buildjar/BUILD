@@ -23,6 +23,7 @@ java_library(
     deps = [
         ":JarOwner",
         "//third_party:guava",
+        "//third_party:jsr305",
     ],
 )
 
@@ -75,6 +76,7 @@ java_library(
         "//src/java_tools/buildjar/java/com/google/devtools/build/buildjar/javac/plugins:processing",
         "//src/main/protobuf:worker_protocol_java_proto",
         "//third_party:guava",
+        "//third_party:jsr305",
         "//third_party/java/jacoco:core",
         "//third_party/java/jdk/langtools:javac",
     ],

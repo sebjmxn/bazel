@@ -74,7 +74,7 @@ public class SkylarkSemanticsConsistencyTest {
     }
   }
 
-  /*
+  /**
    * Checks that a randomly generated {@link SkylarkSemantics} object can be serialized and
    * deserialized to an equivalent object.
    */
@@ -97,6 +97,14 @@ public class SkylarkSemanticsConsistencyTest {
     assertThat(semanticsFromOptions).isEqualTo(defaultSemantics);
   }
 
+  @Test
+  public void canGetBuilderFromInstance() {
+    SkylarkSemantics original = SkylarkSemantics.DEFAULT_SEMANTICS;
+    assertThat(original.internalSkylarkFlagTestCanary()).isFalse();
+    SkylarkSemantics modified = original.toBuilder().internalSkylarkFlagTestCanary(true).build();
+    assertThat(modified.internalSkylarkFlagTestCanary()).isTrue();
+  }
+
   /**
    * Constructs a {@link SkylarkSemanticsOptions} object with random fields. Must access {@code
    * rand} using the same sequence of operations (for the same fields) as {@link
@@ -109,18 +117,18 @@ public class SkylarkSemanticsConsistencyTest {
         "--incompatible_checked_arithmetic=" + rand.nextBoolean(),
         "--incompatible_comprehension_variables_do_not_leak=" + rand.nextBoolean(),
         "--incompatible_depset_is_not_iterable=" + rand.nextBoolean(),
+        "--incompatible_depset_union=" + rand.nextBoolean(),
         "--incompatible_dict_literal_has_no_duplicates=" + rand.nextBoolean(),
+        "--incompatible_disable_glob_tracking=" + rand.nextBoolean(),
         "--incompatible_disallow_dict_plus=" + rand.nextBoolean(),
         "--incompatible_disallow_keyword_only_args=" + rand.nextBoolean(),
-        "--incompatible_disallow_set_constructor=" + rand.nextBoolean(),
         "--incompatible_disallow_toplevel_if_statement=" + rand.nextBoolean(),
-        "--incompatible_list_plus_equals_inplace=" + rand.nextBoolean(),
+        "--incompatible_disallow_uncalled_set_constructor=" + rand.nextBoolean(),
         "--incompatible_load_argument_is_label=" + rand.nextBoolean(),
         "--incompatible_new_actions_api=" + rand.nextBoolean(),
+        "--incompatible_show_all_print_messages=" + rand.nextBoolean(),
         "--incompatible_string_is_not_iterable=" + rand.nextBoolean(),
-        "--internal_do_not_export_builtins=" + rand.nextBoolean(),
-        "--internal_skylark_flag_test_canary=" + rand.nextBoolean()
-    );
+        "--internal_skylark_flag_test_canary=" + rand.nextBoolean());
   }
 
   /**
@@ -134,16 +142,17 @@ public class SkylarkSemanticsConsistencyTest {
         .incompatibleCheckedArithmetic(rand.nextBoolean())
         .incompatibleComprehensionVariablesDoNotLeak(rand.nextBoolean())
         .incompatibleDepsetIsNotIterable(rand.nextBoolean())
+        .incompatibleDepsetUnion(rand.nextBoolean())
         .incompatibleDictLiteralHasNoDuplicates(rand.nextBoolean())
+        .incompatibleDisableGlobTracking(rand.nextBoolean())
         .incompatibleDisallowDictPlus(rand.nextBoolean())
         .incompatibleDisallowKeywordOnlyArgs(rand.nextBoolean())
-        .incompatibleDisallowSetConstructor(rand.nextBoolean())
         .incompatibleDisallowToplevelIfStatement(rand.nextBoolean())
-        .incompatibleListPlusEqualsInplace(rand.nextBoolean())
+        .incompatibleDisallowUncalledSetConstructor(rand.nextBoolean())
         .incompatibleLoadArgumentIsLabel(rand.nextBoolean())
         .incompatibleNewActionsApi(rand.nextBoolean())
+        .incompatibleShowAllPrintMessages(rand.nextBoolean())
         .incompatibleStringIsNotIterable(rand.nextBoolean())
-        .internalDoNotExportBuiltins(rand.nextBoolean())
         .internalSkylarkFlagTestCanary(rand.nextBoolean())
         .build();
   }

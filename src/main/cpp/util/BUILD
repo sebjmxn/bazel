@@ -32,13 +32,7 @@ cc_library(
 cc_library(
     name = "file",
     srcs = ["file.cc"] + select({
-        "//src:windows": [
-            "file_windows.cc",
-        ],
-        "//src:windows_msys": [
-            "file_windows.cc",
-        ],
-        "//src:windows_msvc": [
+        "//src/conditions:windows": [
             "file_windows.cc",
         ],
         "//conditions:default": [
@@ -61,9 +55,7 @@ cc_library(
         ":errors",
         ":strings",
     ] + select({
-        "//src:windows": ["//src/main/native/windows:lib-file"],
-        "//src:windows_msys": ["//src/main/native/windows:lib-file"],
-        "//src:windows_msvc": ["//src/main/native/windows:lib-file"],
+        "//src/conditions:windows": ["//src/main/native/windows:lib-file"],
         "//conditions:default": [],
     }),
 )
@@ -71,9 +63,7 @@ cc_library(
 cc_library(
     name = "errors",
     srcs = ["errors.cc"] + select({
-        "//src:windows": ["errors_windows.cc"],
-        "//src:windows_msys": ["errors_windows.cc"],
-        "//src:windows_msvc": ["errors_windows.cc"],
+        "//src/conditions:windows": ["errors_windows.cc"],
         "//conditions:default": ["errors_posix.cc"],
     }),
     hdrs = ["errors.h"],

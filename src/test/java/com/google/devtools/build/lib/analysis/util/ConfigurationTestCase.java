@@ -15,12 +15,12 @@ package com.google.devtools.build.lib.analysis.util;
 
 import static org.junit.Assert.fail;
 
-import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.Iterables;
-import com.google.devtools.build.lib.actions.Root;
+import com.google.devtools.build.lib.actions.ActionKeyContext;
+import com.google.devtools.build.lib.actions.ArtifactRoot;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
 import com.google.devtools.build.lib.analysis.ServerDirectories;
@@ -90,6 +90,7 @@ public abstract class ConfigurationTestCase extends FoundationTestCase {
   protected SequencedSkyframeExecutor skyframeExecutor;
   protected List<ConfigurationFragmentFactory> configurationFragmentFactories;
   protected ImmutableList<Class<? extends FragmentOptions>> buildOptionClasses;
+  protected final ActionKeyContext actionKeyContext = new ActionKeyContext();
 
   @Before
   public final void initializeSkyframeExecutor() throws Exception {
@@ -97,7 +98,10 @@ public abstract class ConfigurationTestCase extends FoundationTestCase {
     analysisMock = getAnalysisMock();
     ConfiguredRuleClassProvider ruleClassProvider = analysisMock.createRuleClassProvider();
     PathPackageLocator pkgLocator =
-        new PathPackageLocator(outputBase, ImmutableList.of(rootDirectory));
+        new PathPackageLocator(
+            outputBase,
+            ImmutableList.of(rootDirectory),
+            BazelSkyframeExecutorConstants.BUILD_FILES_BY_PRIORITY);
     final PackageFactory pkgFactory;
     BlazeDirectories directories =
         new BlazeDirectories(
@@ -116,13 +120,14 @@ public abstract class ConfigurationTestCase extends FoundationTestCase {
             pkgFactory,
             fileSystem,
             directories,
+            actionKeyContext,
             workspaceStatusActionFactory,
             ruleClassProvider.getBuildInfoFactories(),
             ImmutableList.<DiffAwareness.Factory>of(),
-            Predicates.<PathFragment>alwaysFalse(),
             analysisMock.getSkyFunctions(directories),
             ImmutableList.<SkyValueDirtinessChecker>of(),
-            PathFragment.EMPTY_FRAGMENT,
+            BazelSkyframeExecutorConstants.HARDCODED_BLACKLISTED_PACKAGE_PREFIXES,
+            BazelSkyframeExecutorConstants.ADDITIONAL_BLACKLISTED_PACKAGE_PREFIXES_FILE,
             BazelSkyframeExecutorConstants.CROSS_REPOSITORY_LABEL_VIOLATION_STRATEGY,
             BazelSkyframeExecutorConstants.BUILD_FILES_BY_PRIORITY,
             BazelSkyframeExecutorConstants.ACTION_ON_IO_EXCEPTION_READING_BUILD_FILE);
@@ -196,7 +201,7 @@ public abstract class ConfigurationTestCase extends FoundationTestCase {
 
   public void assertConfigurationsHaveUniqueOutputDirectories(
       BuildConfigurationCollection configCollection) throws Exception {
-    Map<Root, BuildConfiguration> outputPaths = new HashMap<>();
+    Map<ArtifactRoot, BuildConfiguration> outputPaths = new HashMap<>();
     for (BuildConfiguration config : configCollection.getTargetConfigurations()) {
       if (config.isActionsEnabled()) {
         BuildConfiguration otherConfig = outputPaths.get(

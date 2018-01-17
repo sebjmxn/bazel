@@ -21,6 +21,7 @@ import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.cmdline.RepositoryName;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.packages.AggregatingAttributeMapper;
+import com.google.devtools.build.lib.packages.BuildFileName;
 import com.google.devtools.build.lib.packages.BuildFileNotFoundException;
 import com.google.devtools.build.lib.packages.ErrorDeterminingRepositoryException;
 import com.google.devtools.build.lib.packages.Package;
@@ -95,14 +96,9 @@ public class LocalRepositoryLookupFunction implements SkyFunction {
               directory.getRoot(),
               directory
                   .getRelativePath()
-                  .getRelative(PackageLookupValue.BuildFileName.WORKSPACE.getFilenameFragment()));
+                  .getRelative(BuildFileName.WORKSPACE.getFilenameFragment()));
       FileValue workspaceFileValue =
-          (FileValue)
-              env.getValueOrThrow(
-                  FileValue.key(workspaceRootedFile),
-                  IOException.class,
-                  FileSymlinkException.class,
-                  InconsistentFilesystemException.class);
+          (FileValue) env.getValueOrThrow(FileValue.key(workspaceRootedFile), IOException.class);
       if (workspaceFileValue == null) {
         return Optional.absent();
       }
@@ -111,10 +107,10 @@ public class LocalRepositoryLookupFunction implements SkyFunction {
         return Optional.of(false);
       }
       return Optional.of(workspaceFileValue.exists());
-    } catch (IOException e) {
+    } catch (InconsistentFilesystemException e) {
       throw new LocalRepositoryLookupFunctionException(
           new ErrorDeterminingRepositoryException(
-              "IOException while checking if there is a WORKSPACE file in "
+              "InconsistentFilesystemException while checking if there is a WORKSPACE file in "
                   + directory.asPath().getPathString(),
               e),
           Transience.PERSISTENT);
@@ -125,10 +121,10 @@ public class LocalRepositoryLookupFunction implements SkyFunction {
                   + directory.asPath().getPathString(),
               e),
           Transience.PERSISTENT);
-    } catch (InconsistentFilesystemException e) {
+    } catch (IOException e) {
       throw new LocalRepositoryLookupFunctionException(
           new ErrorDeterminingRepositoryException(
-              "InconsistentFilesystemException while checking if there is a WORKSPACE file in "
+              "IOException while checking if there is a WORKSPACE file in "
                   + directory.asPath().getPathString(),
               e),
           Transience.PERSISTENT);

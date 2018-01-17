@@ -23,7 +23,6 @@ import com.google.devtools.build.lib.cmdline.RepositoryName;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
-import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
 import com.google.devtools.build.lib.vfs.Dirent;
 import com.google.devtools.build.lib.vfs.Dirent.Type;
 import com.google.devtools.build.lib.vfs.Path;
@@ -31,7 +30,7 @@ import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.RootedPath;
 import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyKey;
-import com.google.devtools.build.skyframe.ValueOrException4;
+import com.google.devtools.build.skyframe.ValueOrException2;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -79,14 +78,8 @@ public class ProcessPackageDirectory {
     SkyKey fileKey = FileValue.key(rootedPath);
     FileValue fileValue;
     try {
-      fileValue =
-          (FileValue)
-              env.getValueOrThrow(
-                  fileKey,
-                  InconsistentFilesystemException.class,
-                  FileSymlinkException.class,
-                  IOException.class);
-    } catch (InconsistentFilesystemException | FileSymlinkException | IOException e) {
+      fileValue = (FileValue) env.getValueOrThrow(fileKey, IOException.class);
+    } catch (IOException e) {
       return reportErrorAndReturn(
           "Failed to get information about path", e, rootRelativePath, env.getListener());
     }
@@ -117,15 +110,12 @@ public class ProcessPackageDirectory {
     SkyKey dirListingKey = DirectoryListingValue.key(rootedPath);
     Map<
             SkyKey,
-            ValueOrException4<
-                NoSuchPackageException, InconsistentFilesystemException, FileSymlinkException,
-                IOException>>
+            ValueOrException2<
+                NoSuchPackageException, IOException>>
         pkgLookupAndDirectoryListingDeps =
             env.getValuesOrThrow(
                 ImmutableList.of(pkgLookupKey, dirListingKey),
                 NoSuchPackageException.class,
-                InconsistentFilesystemException.class,
-                FileSymlinkException.class,
                 IOException.class);
     if (env.valuesMissing()) {
       return null;
@@ -142,7 +132,7 @@ public class ProcessPackageDirectory {
                   pkgLookupKey);
     } catch (NoSuchPackageException | InconsistentFilesystemException e) {
       return reportErrorAndReturn("Failed to load package", e, rootRelativePath, env.getListener());
-    } catch (IOException | FileSymlinkException e) {
+    } catch (IOException e) {
       throw new IllegalStateException(e);
     }
     DirectoryListingValue dirListingValue;
@@ -155,15 +145,15 @@ public class ProcessPackageDirectory {
                   rootedPath,
                   repositoryName,
                   dirListingKey);
-    } catch (InconsistentFilesystemException | IOException e) {
-      return reportErrorAndReturn(
-          "Failed to list directory contents", e, rootRelativePath, env.getListener());
     } catch (FileSymlinkException e) {
       // DirectoryListingFunction only throws FileSymlinkCycleException when FileFunction throws it,
       // but FileFunction was evaluated for rootedPath above, and didn't throw there. It shouldn't
       // be able to avoid throwing there but throw here.
       throw new IllegalStateException(
           "Symlink cycle found after not being found for \"" + rootedPath + "\"");
+    } catch (IOException e) {
+      return reportErrorAndReturn(
+          "Failed to list directory contents", e, rootRelativePath, env.getListener());
     } catch (NoSuchPackageException e) {
       throw new IllegalStateException(e);
     }
@@ -194,10 +184,6 @@ public class ProcessPackageDirectory {
         continue;
       }
       String basename = dirent.getName();
-      if (rootRelativePath.equals(PathFragment.EMPTY_FRAGMENT)
-          && PathPackageLocator.DEFAULT_TOP_LEVEL_EXCLUDES.contains(basename)) {
-        continue;
-      }
       PathFragment subdirectory = rootRelativePath.getRelative(basename);
       if (subdirectory.equals(Label.EXTERNAL_PACKAGE_NAME)) {
         // Not a real package.

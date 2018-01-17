@@ -13,12 +13,11 @@
 // limitations under the License.
 package com.google.devtools.build.lib.actions;
 
-import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth8.assertThat;
 
-import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.ImmutableList;
 import java.time.Duration;
-import java.util.Set;
+import java.util.List;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -29,11 +28,15 @@ public final class ActionResultTest {
 
   @Test
   public void testCumulativeCommandExecutionTime_NoSpawnResults() {
-    Set<SpawnResult> spawnResults = ImmutableSet.of();
+    List<SpawnResult> spawnResults = ImmutableList.of();
     ActionResult actionResult = ActionResult.create(spawnResults);
     assertThat(actionResult.cumulativeCommandExecutionWallTime()).isEmpty();
+    assertThat(actionResult.cumulativeCommandExecutionCpuTime()).isEmpty();
     assertThat(actionResult.cumulativeCommandExecutionUserTime()).isEmpty();
     assertThat(actionResult.cumulativeCommandExecutionSystemTime()).isEmpty();
+    assertThat(actionResult.cumulativeCommandExecutionBlockOutputOperations()).isEmpty();
+    assertThat(actionResult.cumulativeCommandExecutionBlockInputOperations()).isEmpty();
+    assertThat(actionResult.cumulativeCommandExecutionInvoluntaryContextSwitches()).isEmpty();
   }
 
   @Test
@@ -43,16 +46,20 @@ public final class ActionResultTest {
             .setWallTime(Duration.ofMillis(1984))
             .setUserTime(Duration.ofMillis(225))
             .setSystemTime(Duration.ofMillis(42))
+            .setNumBlockOutputOperations(10)
+            .setNumBlockInputOperations(20)
+            .setNumInvoluntaryContextSwitches(30)
             .setStatus(SpawnResult.Status.SUCCESS)
             .build();
-    Set<SpawnResult> spawnResults = ImmutableSet.of(spawnResult);
+    List<SpawnResult> spawnResults = ImmutableList.of(spawnResult);
     ActionResult actionResult = ActionResult.create(spawnResults);
-    assertThat(actionResult.cumulativeCommandExecutionWallTime()).isPresent();
     assertThat(actionResult.cumulativeCommandExecutionWallTime()).hasValue(Duration.ofMillis(1984));
-    assertThat(actionResult.cumulativeCommandExecutionUserTime()).isPresent();
+    assertThat(actionResult.cumulativeCommandExecutionCpuTime()).hasValue(Duration.ofMillis(267));
     assertThat(actionResult.cumulativeCommandExecutionUserTime()).hasValue(Duration.ofMillis(225));
-    assertThat(actionResult.cumulativeCommandExecutionSystemTime()).isPresent();
     assertThat(actionResult.cumulativeCommandExecutionSystemTime()).hasValue(Duration.ofMillis(42));
+    assertThat(actionResult.cumulativeCommandExecutionBlockOutputOperations()).hasValue(10L);
+    assertThat(actionResult.cumulativeCommandExecutionBlockInputOperations()).hasValue(20L);
+    assertThat(actionResult.cumulativeCommandExecutionInvoluntaryContextSwitches()).hasValue(30L);
   }
 
   @Test
@@ -62,6 +69,9 @@ public final class ActionResultTest {
             .setWallTime(Duration.ofMillis(1979))
             .setUserTime(Duration.ofMillis(1))
             .setSystemTime(Duration.ofMillis(33))
+            .setNumBlockOutputOperations(10)
+            .setNumBlockInputOperations(20)
+            .setNumInvoluntaryContextSwitches(30)
             .setStatus(SpawnResult.Status.SUCCESS)
             .build();
     SpawnResult spawnResult2 =
@@ -69,6 +79,9 @@ public final class ActionResultTest {
             .setWallTime(Duration.ofMillis(4))
             .setUserTime(Duration.ofMillis(1))
             .setSystemTime(Duration.ofMillis(7))
+            .setNumBlockOutputOperations(100)
+            .setNumBlockInputOperations(200)
+            .setNumInvoluntaryContextSwitches(300)
             .setStatus(SpawnResult.Status.SUCCESS)
             .build();
     SpawnResult spawnResult3 =
@@ -76,16 +89,20 @@ public final class ActionResultTest {
             .setWallTime(Duration.ofMillis(1))
             .setUserTime(Duration.ofMillis(2))
             .setSystemTime(Duration.ofMillis(2))
+            .setNumBlockOutputOperations(1000)
+            .setNumBlockInputOperations(2000)
+            .setNumInvoluntaryContextSwitches(3000)
             .setStatus(SpawnResult.Status.SUCCESS)
             .build();
-    Set<SpawnResult> spawnResults = ImmutableSet.of(spawnResult1, spawnResult2, spawnResult3);
+    List<SpawnResult> spawnResults = ImmutableList.of(spawnResult1, spawnResult2, spawnResult3);
     ActionResult actionResult = ActionResult.create(spawnResults);
-    assertThat(actionResult.cumulativeCommandExecutionWallTime()).isPresent();
     assertThat(actionResult.cumulativeCommandExecutionWallTime()).hasValue(Duration.ofMillis(1984));
-    assertThat(actionResult.cumulativeCommandExecutionUserTime()).isPresent();
+    assertThat(actionResult.cumulativeCommandExecutionCpuTime()).hasValue(Duration.ofMillis(46));
     assertThat(actionResult.cumulativeCommandExecutionUserTime()).hasValue(Duration.ofMillis(4));
-    assertThat(actionResult.cumulativeCommandExecutionSystemTime()).isPresent();
     assertThat(actionResult.cumulativeCommandExecutionSystemTime()).hasValue(Duration.ofMillis(42));
+    assertThat(actionResult.cumulativeCommandExecutionBlockOutputOperations()).hasValue(1110L);
+    assertThat(actionResult.cumulativeCommandExecutionBlockInputOperations()).hasValue(2220L);
+    assertThat(actionResult.cumulativeCommandExecutionInvoluntaryContextSwitches()).hasValue(3330L);
   }
 
   @Test
@@ -96,10 +113,60 @@ public final class ActionResultTest {
         new SpawnResult.Builder().setStatus(SpawnResult.Status.SUCCESS).build();
     SpawnResult spawnResult3 =
         new SpawnResult.Builder().setStatus(SpawnResult.Status.SUCCESS).build();
-    Set<SpawnResult> spawnResults = ImmutableSet.of(spawnResult1, spawnResult2, spawnResult3);
+    List<SpawnResult> spawnResults = ImmutableList.of(spawnResult1, spawnResult2, spawnResult3);
     ActionResult actionResult = ActionResult.create(spawnResults);
     assertThat(actionResult.cumulativeCommandExecutionWallTime()).isEmpty();
+    assertThat(actionResult.cumulativeCommandExecutionCpuTime()).isEmpty();
     assertThat(actionResult.cumulativeCommandExecutionUserTime()).isEmpty();
     assertThat(actionResult.cumulativeCommandExecutionSystemTime()).isEmpty();
+    assertThat(actionResult.cumulativeCommandExecutionBlockOutputOperations()).isEmpty();
+    assertThat(actionResult.cumulativeCommandExecutionBlockInputOperations()).isEmpty();
+    assertThat(actionResult.cumulativeCommandExecutionInvoluntaryContextSwitches()).isEmpty();
+  }
+
+  @Test
+  public void testCumulativeCommandExecutionTime_ManySpawnResults_ButOnlyUserTime() {
+    SpawnResult spawnResult1 =
+        new SpawnResult.Builder()
+            .setUserTime(Duration.ofMillis(2))
+            .setStatus(SpawnResult.Status.SUCCESS)
+            .build();
+    SpawnResult spawnResult2 =
+        new SpawnResult.Builder()
+            .setUserTime(Duration.ofMillis(3))
+            .setStatus(SpawnResult.Status.SUCCESS)
+            .build();
+    SpawnResult spawnResult3 =
+        new SpawnResult.Builder()
+            .setUserTime(Duration.ofMillis(4))
+            .setStatus(SpawnResult.Status.SUCCESS)
+            .build();
+    List<SpawnResult> spawnResults = ImmutableList.of(spawnResult1, spawnResult2, spawnResult3);
+    ActionResult actionResult = ActionResult.create(spawnResults);
+    assertThat(actionResult.cumulativeCommandExecutionCpuTime()).hasValue(Duration.ofMillis(9));
+    assertThat(actionResult.cumulativeCommandExecutionUserTime()).hasValue(Duration.ofMillis(9));
+  }
+
+  @Test
+  public void testCumulativeCommandExecutionTime_ManySpawnResults_ButOnlySystemTime() {
+    SpawnResult spawnResult1 =
+        new SpawnResult.Builder()
+            .setSystemTime(Duration.ofMillis(33))
+            .setStatus(SpawnResult.Status.SUCCESS)
+            .build();
+    SpawnResult spawnResult2 =
+        new SpawnResult.Builder()
+            .setSystemTime(Duration.ofMillis(7))
+            .setStatus(SpawnResult.Status.SUCCESS)
+            .build();
+    SpawnResult spawnResult3 =
+        new SpawnResult.Builder()
+            .setSystemTime(Duration.ofMillis(2))
+            .setStatus(SpawnResult.Status.SUCCESS)
+            .build();
+    List<SpawnResult> spawnResults = ImmutableList.of(spawnResult1, spawnResult2, spawnResult3);
+    ActionResult actionResult = ActionResult.create(spawnResults);
+    assertThat(actionResult.cumulativeCommandExecutionCpuTime()).hasValue(Duration.ofMillis(42));
+    assertThat(actionResult.cumulativeCommandExecutionSystemTime()).hasValue(Duration.ofMillis(42));
   }
 }

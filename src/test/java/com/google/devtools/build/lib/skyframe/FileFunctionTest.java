@@ -42,7 +42,6 @@ import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
 import com.google.devtools.build.lib.rules.repository.RepositoryDelegatorFunction;
 import com.google.devtools.build.lib.skyframe.ExternalFilesHelper.ExternalFileAction;
 import com.google.devtools.build.lib.skyframe.PackageLookupFunction.CrossRepositoryLabelViolationStrategy;
-import com.google.devtools.build.lib.skyframe.PackageLookupValue.BuildFileName;
 import com.google.devtools.build.lib.syntax.SkylarkSemantics;
 import com.google.devtools.build.lib.testutil.ManualClock;
 import com.google.devtools.build.lib.testutil.TestConstants;
@@ -111,9 +110,13 @@ public class FileFunctionTest {
 
   private void createFsAndRoot(CustomInMemoryFs fs) throws IOException {
     this.fs = fs;
-    pkgRoot = fs.getRootDirectory().getRelative("root");
-    outputBase = fs.getRootDirectory().getRelative("output_base");
-    pkgLocator = new PathPackageLocator(outputBase, ImmutableList.of(pkgRoot));
+    pkgRoot = fs.getPath("/root");
+    outputBase = fs.getPath("/output_base");
+    pkgLocator =
+        new PathPackageLocator(
+            outputBase,
+            ImmutableList.of(pkgRoot),
+            BazelSkyframeExecutorConstants.BUILD_FILES_BY_PRIORITY);
     FileSystemUtils.createDirectoryAndParents(pkgRoot);
   }
 
@@ -151,7 +154,7 @@ public class FileFunctionTest {
                     new PackageLookupFunction(
                         new AtomicReference<>(ImmutableSet.<PackageIdentifier>of()),
                         CrossRepositoryLabelViolationStrategy.ERROR,
-                        ImmutableList.of(BuildFileName.BUILD_DOT_BAZEL, BuildFileName.BUILD)))
+                        BazelSkyframeExecutorConstants.BUILD_FILES_BY_PRIORITY))
                 .put(
                     SkyFunctions.WORKSPACE_AST,
                     new WorkspaceASTFunction(TestRuleClassProvider.getRuleClassProvider()))
@@ -159,8 +162,9 @@ public class FileFunctionTest {
                     SkyFunctions.WORKSPACE_FILE,
                     new WorkspaceFileFunction(
                         TestRuleClassProvider.getRuleClassProvider(),
-                        TestConstants.PACKAGE_FACTORY_BUILDER_FACTORY_FOR_TESTING.builder().build(
-                            TestRuleClassProvider.getRuleClassProvider(), fs),
+                        TestConstants.PACKAGE_FACTORY_BUILDER_FACTORY_FOR_TESTING
+                            .builder()
+                            .build(TestRuleClassProvider.getRuleClassProvider(), fs),
                         directories))
                 .put(SkyFunctions.EXTERNAL_PACKAGE, new ExternalPackageFunction())
                 .put(SkyFunctions.LOCAL_REPOSITORY_LOOKUP, new LocalRepositoryLookupFunction())
@@ -448,8 +452,6 @@ public class FileFunctionTest {
     p.setLastModifiedTime(0L);
     FileValue a = valueForPath(p);
     p.setLastModifiedTime(1L);
-    assertThat(valueForPath(p)).isNotEqualTo(a);
-    p.setLastModifiedTime(0L);
     assertThat(valueForPath(p)).isEqualTo(a);
     FileSystemUtils.writeContentAsLatin1(p, "content");
     // Same digest, but now non-empty.
@@ -467,7 +469,7 @@ public class FileFunctionTest {
     assertThat(value.getDigest()).isNull();
 
     p.setLastModifiedTime(10L);
-    assertThat(valueForPath(p)).isNotEqualTo(value);
+    assertThat(valueForPath(p)).isEqualTo(value);
 
     p.setLastModifiedTime(0L);
     assertThat(valueForPath(p)).isEqualTo(value);
@@ -492,16 +494,6 @@ public class FileFunctionTest {
     FileValue value = valueForPath(p);
     assertThat(value.exists()).isTrue();
     assertThat(value.getDigest()).isNotNull();
-  }
-
-  @Test
-  public void testFileModificationModTime() throws Exception {
-    fastDigest = false;
-    Path p = file("file");
-    FileValue a = valueForPath(p);
-    p.setLastModifiedTime(42);
-    FileValue b = valueForPath(p);
-    assertThat(a.equals(b)).isFalse();
   }
 
   @Test
@@ -630,8 +622,12 @@ public class FileFunctionTest {
 
   @Test
   public void testSymlinkAcrossPackageRoots() throws Exception {
-    Path otherPkgRoot = fs.getRootDirectory().getRelative("other_root");
-    pkgLocator = new PathPackageLocator(outputBase, ImmutableList.of(pkgRoot, otherPkgRoot));
+    Path otherPkgRoot = fs.getPath("/other_root");
+    pkgLocator =
+        new PathPackageLocator(
+            outputBase,
+            ImmutableList.of(pkgRoot, otherPkgRoot),
+            BazelSkyframeExecutorConstants.BUILD_FILES_BY_PRIORITY);
     symlink("a", "/other_root/b");
     assertValueChangesIfContentsOfFileChanges("/other_root/b", true, "a");
   }
@@ -827,7 +823,7 @@ public class FileFunctionTest {
             return super.getDigest(path, hf);
           }
         };
-    pkgRoot = fs.getRootDirectory().getRelative("root");
+    pkgRoot = fs.getPath("/root");
     Path file = file("file");
     FileSystemUtils.writeContentAsLatin1(file, Strings.repeat("a", 20));
     byte[] digest = file.getDigest();

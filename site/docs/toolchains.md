@@ -10,7 +10,7 @@ title: Toolchains
    - [Creating a toolchain rule](#creating-a-toolchain-rule)
    - [Creating a toolchain definition](#creating-a-toolchain-definition)
    - [Registering a toolchain](#registering-a-toolchain)
-- [Using a toolchain in a Skylark rule](#using-a-toolchain-in-a-skylark-rule)
+- [Using a toolchain in a new rule](#using-a-toolchain-in-a-rule)
 - [Debugging a toolchain](#debugging-a-toolchain)
 
 ## Overview
@@ -31,7 +31,7 @@ When a target requests a toolchain, Bazel checks the list of registered
 toolchains and creates a dependency from the target to the first matching
 toolchain it finds. To find a matching toolchain, Bazel does the following:
 
-1.  Looks through the registered toolchains, first from the `--experimental_extra_toolchains`
+1.  Looks through the registered toolchains, first from the `--extra_toolchains`
     flag, then from the `registered_toolchains` calls in the project's
     `WORKSPACE` file.
 
@@ -53,7 +53,7 @@ Defining a toolchain requires the following:
 *  **Toolchain rule** - a rule invoked in a custom build or test rule that
    specifies the build tool configuration options particular to the toolchain
    and supported [platforms](platforms.html) (for example, [`go_toolchain`](https://github.com/bazelbuild/rules_go/blob/master/go/private/go_toolchain.bzl)).
-   This rule must return a [`ToolchainInfo` provider](skylark/lib/ToolchainInfo.html).
+   This rule must return a [`ToolchainInfo` provider](skylark/lib/platform_common.html#ToolchainInfo).
    The toolchain rule is lazily instantiated by Bazel on an as-needed basis.
    Because of this, a toolchain rule's dependencies can be as complex as needed,
    including reliance on remote repositories, without affecting builds that do
@@ -69,7 +69,7 @@ Defining a toolchain requires the following:
 
 ### Creating a toolchain rule
 
-Toolchain rules are Skylark rules that create and return providers. To define a
+Toolchain rules are rules that create and return providers. To define a
 toolchain rule, first determine the information that the new rule will require.
 
 In the example below, we are adding support for a new programming language, so
@@ -78,26 +78,27 @@ that determines the CPU architecture for which Bazel builds the output.
 
 ```python
 def _my_toolchain_impl(ctx):
-  toolchain = platform.ToolchainInfo(
+  toolchain = platform_common.ToolchainInfo(
     compiler = ctx.attr.compiler,
     system_lib = ctx.attr.system_lib,
-    arch_flag = ctx.attr.arch_flag,
+    arch_flags = ctx.attr.arch_flags,
   )
   return [toolchain]
 
 my_toolchain = rule(
-    _my_toolchain_impl,
-    attrs = {
-        'compiler': attr.string(),
-        'system_lib': attr.string(),
-        'arch_flags': attr.string_list(),
-    })
+  _my_toolchain_impl,
+  attrs = {
+    'compiler': attr.string(),
+    'system_lib': attr.string(),
+    'arch_flags': attr.string_list(),
+  })
 ```
 
 An example invocation of the rule looks as follows:
 
 ```python
-my_toolchain(name = 'linux_toolchain_impl',
+my_toolchain(
+  name = 'linux_toolchain_impl',
   compiler = '@remote_linux_repo//compiler:compiler_binary',
   system_lib = '@remote_linux_repo//library:system_library',
   arch_flags = [
@@ -106,7 +107,8 @@ my_toolchain(name = 'linux_toolchain_impl',
   ]
 )
 
-my_toolchain(name = 'darwin_toolchain_impl',
+my_toolchain(
+  name = 'darwin_toolchain_impl',
   compiler = '@remote_darwin_repo//compiler:compiler_binary',
   system_lib = '@remote_darwin_repo//library:system_library',
   arch_flags = [
@@ -126,15 +128,18 @@ lazy loading of toolchains.
 Below is an example toolchain definition:
 
 ```python
-toolchain(name = 'linux_toolchain',
-    toolchain_type = '//path/to:my_toolchain_type',
-    exec_compatible_with = [
-        '@bazel_tools//platforms:linux',
-        '@bazel_tools//platforms:x86_64'],
-    target_compatible_with = [
-        '@bazel_tools//platforms:linux',
-        '@bazel_tools//platforms:x86_64'],
-    toolchain = ':linux_toolchain_impl',
+toolchain_type(name = 'my_toolchain_type')
+
+toolchain(
+  name = 'linux_toolchain',
+  toolchain_type = '//path/to:my_toolchain_type',
+  exec_compatible_with = [
+    '@bazel_tools//platforms:linux',
+    '@bazel_tools//platforms:x86_64'],
+  target_compatible_with = [
+    '@bazel_tools//platforms:linux',
+    '@bazel_tools//platforms:x86_64'],
+  toolchain = ':linux_toolchain_impl',
 )
 ```
 
@@ -142,7 +147,7 @@ toolchain(name = 'linux_toolchain',
 
 Once the toolchain rule and definition exist, register the toolchain to make
 Bazel aware of it. You can register a toolchain either via the project's
-`WORKSPACE` file or specify it in the `--experimental_extra_toolchains` flag.
+`WORKSPACE` file or specify it in the `--extra_toolchains` flag.
 
 Below is an example toolchain registration in a `WORKSPACE` file:
 
@@ -153,16 +158,16 @@ register_toolchains(
 )
 ```
 
-## Using a toolchain in a Skylark rule
+## Using a toolchain in a rule
 
-To use a toolchain in a Skylark rule, add the toolchain type to the rule
+To use a toolchain in a rule, add the toolchain type to the rule
 definition. For example:
 
 ```python
 my_library = rule(
-    ...
-    toolchains = ['//path/to:my_toolchain_type']
-    ...)
+  ...
+  toolchains = ['//path/to:my_toolchain_type']
+  ...)
 ```
 
 When using the `ctx.toolchains` rule, Bazel checks the execution and target
@@ -172,7 +177,7 @@ can then access the toolchain as follows:
 ```python
 def _my_library_impl(ctx):
   toolchain = ctx.toolchains['//path/to:my_toolchain_type']
-  command = '%s -l %s %s' % (toolchain.compiler, toolchain.system_lib, toolchain.arch_flag)
+  command = '%s -l %s %s' % (toolchain.compiler, toolchain.system_lib, toolchain.arch_flags)
   ...
 ```
 

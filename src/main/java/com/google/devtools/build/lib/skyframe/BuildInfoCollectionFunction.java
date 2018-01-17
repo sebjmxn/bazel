@@ -16,9 +16,10 @@ package com.google.devtools.build.lib.skyframe;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Supplier;
 import com.google.common.collect.ImmutableMap;
+import com.google.devtools.build.lib.actions.ActionKeyContext;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ArtifactFactory;
-import com.google.devtools.build.lib.actions.Root;
+import com.google.devtools.build.lib.actions.ArtifactRoot;
 import com.google.devtools.build.lib.analysis.buildinfo.BuildInfoFactory;
 import com.google.devtools.build.lib.analysis.buildinfo.BuildInfoFactory.BuildInfoContext;
 import com.google.devtools.build.lib.analysis.buildinfo.BuildInfoFactory.BuildInfoKey;
@@ -36,15 +37,18 @@ import com.google.devtools.build.skyframe.SkyValue;
  * injected value.
  */
 public class BuildInfoCollectionFunction implements SkyFunction {
+  private final ActionKeyContext actionKeyContext;
   // Supplier only because the artifact factory has not yet been created at constructor time.
   private final Supplier<ArtifactFactory> artifactFactory;
   private final Supplier<Boolean> removeActionsAfterEvaluation;
   private final ImmutableMap<BuildInfoKey, BuildInfoFactory> buildInfoFactories;
 
   BuildInfoCollectionFunction(
+      ActionKeyContext actionKeyContext,
       Supplier<ArtifactFactory> artifactFactory,
       ImmutableMap<BuildInfoKey, BuildInfoFactory> buildInfoFactories,
       Supplier<Boolean> removeActionsAfterEvaluation) {
+    this.actionKeyContext = actionKeyContext;
     this.artifactFactory = artifactFactory;
     this.buildInfoFactories = buildInfoFactories;
     this.removeActionsAfterEvaluation = Preconditions.checkNotNull(removeActionsAfterEvaluation);
@@ -54,7 +58,7 @@ public class BuildInfoCollectionFunction implements SkyFunction {
   public SkyValue compute(SkyKey skyKey, Environment env) throws InterruptedException {
     final BuildInfoKeyAndConfig keyAndConfig = (BuildInfoKeyAndConfig) skyKey.argument();
     WorkspaceStatusValue infoArtifactValue =
-        (WorkspaceStatusValue) env.getValue(WorkspaceStatusValue.SKY_KEY);
+        (WorkspaceStatusValue) env.getValue(WorkspaceStatusValue.BUILD_INFO_KEY);
     if (infoArtifactValue == null) {
       return null;
     }
@@ -66,17 +70,19 @@ public class BuildInfoCollectionFunction implements SkyFunction {
         nameValue.getName());
 
     final ArtifactFactory factory = artifactFactory.get();
-    BuildInfoContext context = new BuildInfoContext() {
-      @Override
-      public Artifact getBuildInfoArtifact(PathFragment rootRelativePath, Root root,
-          BuildInfoType type) {
-        return type == BuildInfoType.NO_REBUILD
-            ? factory.getConstantMetadataArtifact(rootRelativePath, root, keyAndConfig)
-            : factory.getDerivedArtifact(rootRelativePath, root, keyAndConfig);
-      }
-    };
+    BuildInfoContext context =
+        new BuildInfoContext() {
+          @Override
+          public Artifact getBuildInfoArtifact(
+              PathFragment rootRelativePath, ArtifactRoot root, BuildInfoType type) {
+            return type == BuildInfoType.NO_REBUILD
+                ? factory.getConstantMetadataArtifact(rootRelativePath, root, keyAndConfig)
+                : factory.getDerivedArtifact(rootRelativePath, root, keyAndConfig);
+          }
+        };
 
     return new BuildInfoCollectionValue(
+        actionKeyContext,
         buildInfoFactories
             .get(keyAndConfig.getInfoKey())
             .create(

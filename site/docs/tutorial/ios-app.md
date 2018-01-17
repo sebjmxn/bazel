@@ -3,7 +3,7 @@ layout: documentation
 title: Build Tutorial - iOS
 ---
 
-Introduction to Bazel: Build an iOS App
+Introduction to Bazel: Building an iOS App
 ==========
 
 In this tutorial, you will learn how to build a simple iOS app. You'll do the
@@ -204,7 +204,7 @@ ios_application(
         "iphone",
         "ipad",
     ],
-    minimum_os_version = "9.0"
+    minimum_os_version = "9.0",
     infoplists = [":UrlGet/UrlGet-Info.plist"],
     visibility = ["//visibility:public"],
     deps = [":UrlGetClasses"],

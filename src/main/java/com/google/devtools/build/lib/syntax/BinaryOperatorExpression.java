@@ -198,7 +198,7 @@ public final class BinaryOperatorExpression extends Expression {
           return plus(lhs, rhs, env, location, isAugmented);
 
         case PIPE:
-          return pipe(lhs, rhs, location);
+          return pipe(lhs, rhs, env, location);
 
         case MINUS:
           return minus(lhs, rhs, env, location);
@@ -211,7 +211,7 @@ public final class BinaryOperatorExpression extends Expression {
           return divide(lhs, rhs, location);
 
         case PERCENT:
-          return percent(lhs, rhs, env, location);
+          return percent(lhs, rhs, location);
 
         case EQUALS_EQUALS:
           return lhs.equals(rhs);
@@ -293,7 +293,7 @@ public final class BinaryOperatorExpression extends Expression {
     }
 
     if ((lval instanceof MutableList) && (rval instanceof MutableList)) {
-      if (isAugmented && env.getSemantics().incompatibleListPlusEqualsInplace()) {
+      if (isAugmented) {
         @SuppressWarnings("unchecked")
         MutableList<Object> list = (MutableList) lval;
         list.addAll((MutableList<?>) rval, location, env.mutability());
@@ -325,16 +325,33 @@ public final class BinaryOperatorExpression extends Expression {
       }
     }
 
-    // TODO(bazel-team): Deprecate + and | on depsets. Needs new API design.
+    // TODO(bazel-team): Remove deprecated operator.
     if (lval instanceof SkylarkNestedSet) {
+      if (env.getSemantics().incompatibleDepsetUnion()) {
+        throw new EvalException(
+            location,
+            "`+` operator on a depset is forbidden. See "
+                + "https://docs.bazel.build/versions/master/skylark/depsets.html for "
+                + "recommendations. Use --incompatible_depset_union=false "
+                + "to temporarily disable this check.");
+      }
       return new SkylarkNestedSet((SkylarkNestedSet) lval, rval, location);
     }
     throw typeException(lval, rval, Operator.PLUS, location);
   }
 
   /** Implements Operator.PIPE. */
-  private static Object pipe(Object lval, Object rval, Location location) throws EvalException {
+  private static Object pipe(Object lval, Object rval, Environment env, Location location)
+      throws EvalException {
     if (lval instanceof SkylarkNestedSet) {
+      if (env.getSemantics().incompatibleDepsetUnion()) {
+        throw new EvalException(
+            location,
+            "`|` operator on a depset is forbidden. See "
+                + "https://docs.bazel.build/versions/master/skylark/depsets.html for "
+                + "recommendations. Use --incompatible_depset_union=false "
+                + "to temporarily disable this check.");
+      }
       return new SkylarkNestedSet((SkylarkNestedSet) lval, rval, location);
     }
     throw typeException(lval, rval, Operator.PIPE, location);
@@ -403,7 +420,7 @@ public final class BinaryOperatorExpression extends Expression {
   }
 
   /** Implements Operator.PERCENT. */
-  private static Object percent(Object lval, Object rval, Environment env, Location location)
+  private static Object percent(Object lval, Object rval, Location location)
       throws EvalException {
     // int % int
     if (lval instanceof Integer && rval instanceof Integer) {

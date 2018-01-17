@@ -18,6 +18,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
+import com.google.devtools.build.lib.actions.ActionKeyContext;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.RuleContext;
@@ -33,8 +34,8 @@ import java.io.IOException;
 import java.io.InputStream;
 
 /**
- * Writes AndroidDeployInfo proto message. This proto describes how
- * to deploy and launch an android_binary/android_test.
+ * Writes AndroidDeployInfo proto message. This proto describes how to deploy and launch an
+ * android_binary/android_test.
  */
 @Immutable
 public final class AndroidDeployInfoAction extends AbstractFileWriteAction {
@@ -63,8 +64,11 @@ public final class AndroidDeployInfoAction extends AbstractFileWriteAction {
       Artifact mergedManifest,
       ImmutableList<Artifact> additionalMergedManifests,
       ImmutableList<Artifact> apksToDeploy) {
-    super(owner, makeInputs(mergedManifest, additionalMergedManifests, apksToDeploy),
-        outputFile, false);
+    super(
+        owner,
+        makeInputs(mergedManifest, additionalMergedManifests, apksToDeploy),
+        outputFile,
+        false);
     this.mergedManifest = mergedManifest;
     this.additionalMergedManifests = additionalMergedManifests;
     this.apksToDeploy = apksToDeploy;
@@ -89,8 +93,13 @@ public final class AndroidDeployInfoAction extends AbstractFileWriteAction {
       Artifact mergedManifest,
       ImmutableList<Artifact> additionalMergedManifests,
       ImmutableList<Artifact> apksToDeploy) {
-    Action action = new AndroidDeployInfoAction(ruleContext.getActionOwner(),
-        deployInfo, mergedManifest, additionalMergedManifests, apksToDeploy);
+    Action action =
+        new AndroidDeployInfoAction(
+            ruleContext.getActionOwner(),
+            deployInfo,
+            mergedManifest,
+            additionalMergedManifests,
+            apksToDeploy);
     ruleContext.registerAction(action);
   }
 
@@ -105,9 +114,8 @@ public final class AndroidDeployInfoAction extends AbstractFileWriteAction {
   }
 
   @Override
-  protected String computeKey() {
-    Fingerprint f = new Fingerprint()
-        .addString(GUID);
+  protected String computeKey(ActionKeyContext actionKeyContext) {
+    Fingerprint f = new Fingerprint().addString(GUID);
 
     try (InputStream in = getByteString().newInput()) {
       byte[] buffer = new byte[512];

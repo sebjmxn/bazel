@@ -19,7 +19,6 @@ import com.google.common.collect.Sets;
 import com.google.devtools.build.lib.actions.MutableActionGraph.ActionConflictException;
 import com.google.devtools.build.lib.actions.util.ActionsTestUtil.UncheckedActionConflictException;
 import com.google.devtools.build.lib.actions.util.TestAction;
-import com.google.devtools.build.lib.clock.BlazeClock;
 import com.google.devtools.build.lib.concurrent.AbstractQueueVisitor;
 import com.google.devtools.build.lib.concurrent.ErrorClassifier;
 import com.google.devtools.build.lib.vfs.FileSystem;
@@ -37,18 +36,22 @@ import org.junit.runners.JUnit4;
  */
 @RunWith(JUnit4.class)
 public class MapBasedActionGraphTest {
+  private final FileSystem fileSystem = new InMemoryFileSystem();
+  private final ActionKeyContext actionKeyContext = new ActionKeyContext();
+
   @Test
   public void testSmoke() throws Exception {
-    MutableActionGraph actionGraph = new MapBasedActionGraph();
-    FileSystem fileSystem = new InMemoryFileSystem(BlazeClock.instance());
-    Path path = fileSystem.getPath("/root/foo");
-    Artifact output = new Artifact(path, Root.asDerivedRoot(path));
+    MutableActionGraph actionGraph = new MapBasedActionGraph(actionKeyContext);
+    Path execRoot = fileSystem.getPath("/");
+    Path root = fileSystem.getPath("/root");
+    Path path = root.getRelative("foo");
+    Artifact output = new Artifact(path, ArtifactRoot.asDerivedRoot(execRoot, root));
     Action action = new TestAction(TestAction.NO_EFFECT,
         ImmutableSet.<Artifact>of(), ImmutableSet.of(output));
     actionGraph.registerAction(action);
     actionGraph.unregisterAction(action);
-    path = fileSystem.getPath("/root/bar");
-    output = new Artifact(path, Root.asDerivedRoot(path));
+    path = root.getRelative("bar");
+    output = new Artifact(path, ArtifactRoot.asDerivedRoot(execRoot, root));
     Action action2 = new TestAction(TestAction.NO_EFFECT,
         ImmutableSet.<Artifact>of(), ImmutableSet.of(output));
     actionGraph.registerAction(action);
@@ -58,10 +61,11 @@ public class MapBasedActionGraphTest {
 
   @Test
   public void testNoActionConflictWhenUnregisteringSharedAction() throws Exception {
-    MutableActionGraph actionGraph = new MapBasedActionGraph();
-    FileSystem fileSystem = new InMemoryFileSystem(BlazeClock.instance());
-    Path path = fileSystem.getPath("/root/foo");
-    Artifact output = new Artifact(path, Root.asDerivedRoot(path));
+    MutableActionGraph actionGraph = new MapBasedActionGraph(actionKeyContext);
+    Path execRoot = fileSystem.getPath("/");
+    Path root = fileSystem.getPath("/root");
+    Path path = root.getRelative("/root/foo");
+    Artifact output = new Artifact(path, ArtifactRoot.asDerivedRoot(execRoot, root));
     Action action = new TestAction(TestAction.NO_EFFECT,
         ImmutableSet.<Artifact>of(), ImmutableSet.of(output));
     actionGraph.registerAction(action);
@@ -71,8 +75,8 @@ public class MapBasedActionGraphTest {
     actionGraph.unregisterAction(action);
   }
 
-  private static class ActionRegisterer extends AbstractQueueVisitor {
-    private final MutableActionGraph graph = new MapBasedActionGraph();
+  private class ActionRegisterer extends AbstractQueueVisitor {
+    private final MutableActionGraph graph = new MapBasedActionGraph(new ActionKeyContext());
     private final Artifact output;
     // Just to occasionally add actions that were already present.
     private final Set<Action> allActions = Sets.newConcurrentHashSet();
@@ -87,11 +91,12 @@ public class MapBasedActionGraphTest {
           "action-graph-test",
           AbstractQueueVisitor.EXECUTOR_FACTORY,
           ErrorClassifier.DEFAULT);
-      FileSystem fileSystem = new InMemoryFileSystem(BlazeClock.instance());
-      Path path = fileSystem.getPath("/root/foo");
-      output = new Artifact(path, Root.asDerivedRoot(path));
-      allActions.add(new TestAction(TestAction.NO_EFFECT,
-          ImmutableSet.<Artifact>of(), ImmutableSet.of(output)));
+      Path execRoot = fileSystem.getPath("/");
+      Path root = fileSystem.getPath("/root");
+      Path path = root.getRelative("foo");
+      output = new Artifact(path, ArtifactRoot.asDerivedRoot(execRoot, root));
+      allActions.add(new TestAction(
+          TestAction.NO_EFFECT, ImmutableSet.<Artifact>of(), ImmutableSet.of(output)));
     }
 
     private void registerAction(final Action action) {
@@ -128,8 +133,8 @@ public class MapBasedActionGraphTest {
       if (Math.random() < 0.5) {
         action = Iterables.getFirst(allActions, null);
       } else {
-        action = new TestAction(TestAction.NO_EFFECT,
-            ImmutableSet.<Artifact>of(), ImmutableSet.of(output));
+        action = new TestAction(
+            TestAction.NO_EFFECT, ImmutableSet.<Artifact>of(), ImmutableSet.of(output));
         allActions.add(action);
       }
       if (Math.random() < 0.5) {

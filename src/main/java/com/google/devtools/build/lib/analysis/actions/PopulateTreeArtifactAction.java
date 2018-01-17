@@ -25,6 +25,7 @@ import com.google.devtools.build.lib.actions.ActionExecutionException;
 import com.google.devtools.build.lib.actions.ActionExecutionMetadata;
 import com.google.devtools.build.lib.actions.ActionInput;
 import com.google.devtools.build.lib.actions.ActionInputHelper;
+import com.google.devtools.build.lib.actions.ActionKeyContext;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.ActionResult;
 import com.google.devtools.build.lib.actions.Actions;
@@ -45,7 +46,6 @@ import java.io.IOException;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * An action that populates a TreeArtifact with the contents of an archive file.
@@ -191,7 +191,7 @@ public final class PopulateTreeArtifactAction extends AbstractAction {
     }
 
     // Execute the spawn.
-    Set<SpawnResult> spawnResults;
+    List<SpawnResult> spawnResults;
     try {
       spawnResults = getContext(actionExecutionContext).exec(spawn, actionExecutionContext);
     } catch (ExecException e) {
@@ -210,7 +210,7 @@ public final class PopulateTreeArtifactAction extends AbstractAction {
   }
 
   @Override
-  protected String computeKey() {
+  protected String computeKey(ActionKeyContext actionKeyContext) {
     Fingerprint f = new Fingerprint();
     f.addString(GUID);
     f.addString(getMnemonic());

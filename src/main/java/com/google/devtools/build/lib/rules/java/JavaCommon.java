@@ -26,7 +26,7 @@ import com.google.devtools.build.lib.actions.ActionAnalysisMetadata;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.AnalysisEnvironment;
 import com.google.devtools.build.lib.analysis.AnalysisUtils;
-import com.google.devtools.build.lib.analysis.OutputGroupProvider;
+import com.google.devtools.build.lib.analysis.OutputGroupInfo;
 import com.google.devtools.build.lib.analysis.PrerequisiteArtifacts;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
 import com.google.devtools.build.lib.analysis.RuleContext;
@@ -63,6 +63,7 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Stream;
 import javax.annotation.Nullable;
 
 /**
@@ -316,14 +317,13 @@ public class JavaCommon {
   public static void checkRuntimeDeps(
       RuleContext ruleContext, List<TransitiveInfoCollection> runtimeDepInfo) {
     for (TransitiveInfoCollection c : runtimeDepInfo) {
-      JavaNeverlinkInfoProvider neverLinkedness =
-          c.getProvider(JavaNeverlinkInfoProvider.class);
-      if (neverLinkedness == null) {
+          JavaInfo javaInfo = (JavaInfo) c.get(JavaInfo.PROVIDER.getKey());
+      if (javaInfo == null) {
         continue;
       }
       boolean reportError =
           !ruleContext.getFragment(JavaConfiguration.class).getAllowRuntimeDepsOnNeverLink();
-      if (neverLinkedness.isNeverlink()) {
+      if (javaInfo.isNeverlink()) {
         String msg = String.format("neverlink dep %s not allowed in runtime deps", c.getLabel());
         if (reportError) {
           ruleContext.attributeError("runtime_deps", msg);
@@ -460,24 +460,31 @@ public class JavaCommon {
 
   private ImmutableList<String> computeJavacOpts(Iterable<String> extraJavacOpts) {
     return Streams.concat(
-            JavaToolchainProvider.from(ruleContext).getJavacOptions().stream(),
+            toolchainJavacOpts(ruleContext),
             Streams.stream(extraJavacOpts),
             ruleContext.getExpander().withDataLocations().tokenized("javacopts").stream())
         .collect(toImmutableList());
   }
 
+  private Stream<String> toolchainJavacOpts(RuleContext ruleContext) {
+    JavaToolchainProvider toolchain = JavaToolchainProvider.from(ruleContext);
+    return Stream.concat(
+        toolchain.getJavacOptions().stream(),
+        // Enable any javacopts from java_toolchain.packages that are configured for the current
+        // package.
+        toolchain
+            .packageConfiguration()
+            .stream()
+            .filter(p -> p.matches(ruleContext.getLabel()))
+            .flatMap(p -> p.javacopts().stream()));
+  }
+
   public static PathFragment getHostJavaExecutable(RuleContext ruleContext) {
-    JavaRuntimeInfo javaRuntime = JavaHelper.getHostJavaRuntime(ruleContext);
-    return javaRuntime != null
-        ? javaRuntime.javaBinaryExecPath()
-        : ruleContext.getHostConfiguration().getFragment(Jvm.class).getJavaExecutable();
+    return JavaHelper.getHostJavaRuntime(ruleContext).javaBinaryExecPath();
   }
 
   public static PathFragment getJavaExecutable(RuleContext ruleContext) {
-    JavaRuntimeInfo javaRuntime = JavaHelper.getJavaRuntime(ruleContext);
-    return javaRuntime != null
-        ? javaRuntime.javaBinaryExecPath()
-        : ruleContext.getFragment(Jvm.class).getJavaExecutable();
+    return JavaHelper.getJavaRuntime(ruleContext).javaBinaryExecPath();
   }
 
   /**
@@ -487,16 +494,14 @@ public class JavaCommon {
    */
   public static String getJavaExecutableForStub(
       RuleContext ruleContext, @Nullable Artifact launcher) {
-    Preconditions.checkState(ruleContext.getConfiguration().hasFragment(Jvm.class));
+    Preconditions.checkState(ruleContext.getConfiguration().hasFragment(JavaConfiguration.class));
     PathFragment javaExecutable;
     JavaRuntimeInfo javaRuntime = JavaHelper.getJavaRuntime(ruleContext);
 
     if (launcher != null) {
       javaExecutable = launcher.getRootRelativePath();
-    } else if (javaRuntime != null) {
-      javaExecutable = javaRuntime.javaBinaryRunfilesPath();
     } else {
-      javaExecutable = ruleContext.getFragment(Jvm.class).getJavaExecutable();
+      javaExecutable = javaRuntime.javaBinaryRunfilesPath();
     }
 
     if (!javaExecutable.isAbsolute()) {
@@ -684,13 +689,16 @@ public class JavaCommon {
 
   public void addTransitiveInfoProviders(
       RuleConfiguredTargetBuilder builder,
+      JavaInfo.Builder javaInfoBuilder,
       NestedSet<Artifact> filesToBuild,
       @Nullable Artifact classJar) {
-    addTransitiveInfoProviders(builder, filesToBuild, classJar, JAVA_COLLECTION_SPEC);
+    addTransitiveInfoProviders(
+        builder, javaInfoBuilder, filesToBuild, classJar, JAVA_COLLECTION_SPEC);
   }
 
   public void addTransitiveInfoProviders(
       RuleConfiguredTargetBuilder builder,
+      JavaInfo.Builder javaInfoBuilder,
       NestedSet<Artifact> filesToBuild,
       @Nullable Artifact classJar,
       InstrumentationSpec instrumentationSpec) {
@@ -703,8 +711,11 @@ public class JavaCommon {
             InstrumentedFilesProvider.class,
             getInstrumentationFilesProvider(ruleContext, filesToBuild, instrumentationSpec))
         .add(JavaExportsProvider.class, exportsProvider)
-        .addOutputGroup(OutputGroupProvider.FILES_TO_COMPILE, getFilesToCompile(classJar))
+        .addOutputGroup(OutputGroupInfo.FILES_TO_COMPILE, getFilesToCompile(classJar))
         .add(JavaCompilationInfoProvider.class, compilationInfoProvider);
+
+    javaInfoBuilder.addProvider(JavaExportsProvider.class, exportsProvider);
+    javaInfoBuilder.addProvider(JavaCompilationInfoProvider.class, compilationInfoProvider);
   }
 
   private static InstrumentedFilesProvider getInstrumentationFilesProvider(RuleContext ruleContext,
@@ -721,6 +732,7 @@ public class JavaCommon {
 
   public void addGenJarsProvider(
       RuleConfiguredTargetBuilder builder,
+      JavaInfo.Builder javaInfoBuilder,
       @Nullable Artifact genClassJar,
       @Nullable Artifact genSourceJar) {
     JavaGenJarsProvider genJarsProvider = collectTransitiveGenJars(
@@ -734,6 +746,8 @@ public class JavaCommon {
     builder
         .add(JavaGenJarsProvider.class, genJarsProvider)
         .addOutputGroup(JavaSemantics.GENERATED_JARS_OUTPUT_GROUP, genJarsBuilder.build());
+
+    javaInfoBuilder.addProvider(JavaGenJarsProvider.class, genJarsProvider);
   }
 
   /**

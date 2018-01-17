@@ -17,7 +17,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
-import com.google.devtools.build.lib.analysis.FileProvider;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTargetFactory;
 import com.google.devtools.build.lib.analysis.RuleContext;
@@ -27,7 +26,6 @@ import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
 import com.google.devtools.build.lib.analysis.configuredtargets.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
-import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.rules.java.JavaCommon;
 import com.google.devtools.build.lib.rules.java.JavaCompilationArgsProvider;
 import com.google.devtools.build.lib.rules.java.JavaCompilationArtifacts;
@@ -44,7 +42,7 @@ import com.google.devtools.build.lib.vfs.PathFragment;
 /**
  * An implementation for the aar_import rule.
  *
- * AAR files are zip archives that contain an Android Manifest, JARs, resources, assets, native
+ * <p>AAR files are zip archives that contain an Android Manifest, JARs, resources, assets, native
  * libraries, Proguard configuration and lint jars. Currently the aar_import rule supports AARs with
  * an AndroidManifest.xml, classes.jar, libs/, res/ and jni/. Assets are not yet supported.
  *
@@ -63,9 +61,7 @@ public class AarImport implements RuleConfiguredTargetFactory {
   @Override
   public ConfiguredTarget create(RuleContext ruleContext)
       throws InterruptedException, RuleErrorException {
-    if (!AndroidSdkProvider.verifyPresence(ruleContext)) {
-      return null;
-    }
+    AndroidSdkProvider.verifyPresence(ruleContext);
 
     RuleConfiguredTargetBuilder ruleBuilder = new RuleConfiguredTargetBuilder(ruleContext);
     Artifact aar = ruleContext.getPrerequisiteArtifact("aar", Mode.TARGET);
@@ -80,18 +76,17 @@ public class AarImport implements RuleConfiguredTargetFactory {
 
     // AndroidManifest.xml is required in every AAR.
     Artifact androidManifestArtifact = createAarArtifact(ruleContext, ANDROID_MANIFEST);
-    ruleContext.registerAction(createSingleFileExtractorActions(
-        ruleContext, aar, ANDROID_MANIFEST, androidManifestArtifact));
+    ruleContext.registerAction(
+        createSingleFileExtractorActions(
+            ruleContext, aar, ANDROID_MANIFEST, androidManifestArtifact));
 
     Artifact resources = createAarTreeArtifact(ruleContext, "resources");
+    Artifact assets = createAarTreeArtifact(ruleContext, "assets");
     ruleContext.registerAction(
-        createAarResourcesExtractorActions(ruleContext, aar, resources));
+        createAarResourcesExtractorActions(ruleContext, aar, resources, assets));
 
     ApplicationManifest androidManifest =
         ApplicationManifest.fromExplicitManifest(ruleContext, androidManifestArtifact);
-
-    FileProvider resourcesProvider = new FileProvider(
-        new NestedSetBuilder<Artifact>(Order.NAIVE_LINK_ORDER).add(resources).build());
 
     Artifact resourcesZip =
         ruleContext.getImplicitOutputArtifact(AndroidRuleClasses.ANDROID_RESOURCES_ZIP);
@@ -99,8 +94,7 @@ public class AarImport implements RuleConfiguredTargetFactory {
     ResourceApk resourceApk =
         androidManifest.packAarWithDataAndResources(
             ruleContext,
-            LocalResourceContainer.forResourceFileProvider(
-                ruleContext, resourcesProvider, "resources"),
+            LocalResourceContainer.forAssetsAndResourcesDirectories(assets, resources),
             ResourceDependencies.fromRuleDeps(ruleContext, JavaCommon.isNeverLink(ruleContext)),
             ruleContext.getImplicitOutputArtifact(AndroidRuleClasses.ANDROID_R_TXT),
             ruleContext.getImplicitOutputArtifact(AndroidRuleClasses.ANDROID_LOCAL_SYMBOLS),
@@ -143,19 +137,21 @@ public class AarImport implements RuleConfiguredTargetFactory {
             .addCompileTimeJarAsFullJar(mergedJar)
             .build());
 
-    JavaInfo javaInfo = JavaInfo.Builder.create()
-        .addProvider(JavaCompilationArgsProvider.class,
-            JavaCompilationArgsProvider.create(
-                common.collectJavaCompilationArgs(
-                    /* recursive = */ false,
-                    JavaCommon.isNeverLink(ruleContext),
-                    /* srcLessDepsExport = */ false),
-                common.collectJavaCompilationArgs(
-                    /* recursive = */ true,
-                    JavaCommon.isNeverLink(ruleContext),
-                    /* srcLessDepsExport = */ false)))
-        .addProvider(JavaRuleOutputJarsProvider.class, jarProviderBuilder.build())
-        .build();
+    JavaInfo javaInfo =
+        JavaInfo.Builder.create()
+            .addProvider(
+                JavaCompilationArgsProvider.class,
+                JavaCompilationArgsProvider.create(
+                    common.collectJavaCompilationArgs(
+                        /* recursive = */ false,
+                        JavaCommon.isNeverLink(ruleContext),
+                        /* srcLessDepsExport = */ false),
+                    common.collectJavaCompilationArgs(
+                        /* recursive = */ true,
+                        JavaCommon.isNeverLink(ruleContext),
+                        /* srcLessDepsExport = */ false)))
+            .addProvider(JavaRuleOutputJarsProvider.class, jarProviderBuilder.build())
+            .build();
 
     return ruleBuilder
         .setFilesToBuild(filesToBuildBuilder.build())
@@ -164,7 +160,7 @@ public class AarImport implements RuleConfiguredTargetFactory {
         .addProvider(RunfilesProvider.class, RunfilesProvider.EMPTY)
         .addProvider(
             AndroidResourcesProvider.class,
-            resourceApk.toResourceProvider(ruleContext.getLabel(), /* isResourcesOnly = */ false))
+            resourceApk.toResourceProvider(ruleContext.getLabel()))
         .addProvider(
             NativeLibsZipsProvider.class,
             new NativeLibsZipsProvider(
@@ -175,8 +171,8 @@ public class AarImport implements RuleConfiguredTargetFactory {
         .build();
   }
 
-  private static Action[] createSingleFileExtractorActions(RuleContext ruleContext, Artifact aar,
-      String filename, Artifact outputArtifact) {
+  private static Action[] createSingleFileExtractorActions(
+      RuleContext ruleContext, Artifact aar, String filename, Artifact outputArtifact) {
     return new SpawnAction.Builder()
         .useDefaultShellEnvironment()
         .setExecutable(ruleContext.getExecutablePrerequisite(AarImportBaseRule.ZIPPER, Mode.HOST))
@@ -194,7 +190,7 @@ public class AarImport implements RuleConfiguredTargetFactory {
   }
 
   private static Action[] createAarResourcesExtractorActions(
-      RuleContext ruleContext, Artifact aar, Artifact outputTree) {
+      RuleContext ruleContext, Artifact aar, Artifact resourcesDir, Artifact assetsDir) {
     return new SpawnAction.Builder()
         .useDefaultShellEnvironment()
         .setExecutable(
@@ -202,17 +198,22 @@ public class AarImport implements RuleConfiguredTargetFactory {
                 AarImportBaseRule.AAR_RESOURCES_EXTRACTOR, Mode.HOST))
         .setMnemonic("AarResourcesExtractor")
         .addInput(aar)
-        .addOutput(outputTree)
+        .addOutput(resourcesDir)
+        .addOutput(assetsDir)
         .addCommandLine(
             CustomCommandLine.builder()
                 .addExecPath("--input_aar", aar)
-                .addExecPath("--output_res_dir", outputTree)
+                .addExecPath("--output_res_dir", resourcesDir)
+                .addExecPath("--output_assets_dir", assetsDir)
                 .build())
         .build(ruleContext);
   }
 
-  private static Action[] createAarEmbeddedJarsExtractorActions(RuleContext ruleContext,
-      Artifact aar, Artifact jarsTreeArtifact, Artifact singleJarParamFile) {
+  private static Action[] createAarEmbeddedJarsExtractorActions(
+      RuleContext ruleContext,
+      Artifact aar,
+      Artifact jarsTreeArtifact,
+      Artifact singleJarParamFile) {
     return new SpawnAction.Builder()
         .useDefaultShellEnvironment()
         .setExecutable(
@@ -232,8 +233,8 @@ public class AarImport implements RuleConfiguredTargetFactory {
         .build(ruleContext);
   }
 
-  private static Action[] createAarJarsMergingActions(RuleContext ruleContext,
-      Artifact jarsTreeArtifact, Artifact mergedJar, Artifact paramFile) {
+  private static Action[] createAarJarsMergingActions(
+      RuleContext ruleContext, Artifact jarsTreeArtifact, Artifact mergedJar, Artifact paramFile) {
     return singleJarSpawnActionBuilder(ruleContext)
         .setMnemonic("AarJarsMerger")
         .setProgressMessage("Merging AAR embedded jars")
@@ -249,8 +250,8 @@ public class AarImport implements RuleConfiguredTargetFactory {
         .build(ruleContext);
   }
 
-  private static Action[] createAarNativeLibsFilterActions(RuleContext ruleContext, Artifact aar,
-      Artifact outputZip) {
+  private static Action[] createAarNativeLibsFilterActions(
+      RuleContext ruleContext, Artifact aar, Artifact outputZip) {
     SpawnAction.Builder actionBuilder =
         new SpawnAction.Builder()
             .useDefaultShellEnvironment()

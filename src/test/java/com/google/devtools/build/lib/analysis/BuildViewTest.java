@@ -33,13 +33,14 @@ import com.google.devtools.build.lib.actions.FailAction;
 import com.google.devtools.build.lib.analysis.BuildView.AnalysisResult;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
+import com.google.devtools.build.lib.analysis.config.transitions.ConfigurationTransitionProxy;
 import com.google.devtools.build.lib.analysis.configuredtargets.InputFileConfiguredTarget;
 import com.google.devtools.build.lib.analysis.configuredtargets.OutputFileConfiguredTarget;
 import com.google.devtools.build.lib.analysis.util.BuildViewTestBase;
 import com.google.devtools.build.lib.analysis.util.ExpectedTrimmedConfigurationErrors;
 import com.google.devtools.build.lib.analysis.util.MockRule;
 import com.google.devtools.build.lib.cmdline.Label;
-import com.google.devtools.build.lib.packages.Attribute;
+import com.google.devtools.build.lib.events.OutputFilter.RegexOutputFilter;
 import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.testutil.Suite;
@@ -392,7 +393,7 @@ public class BuildViewTest extends BuildViewTestBase {
     Dependency innerDependency =
         Dependency.withTransitionAndAspects(
             Label.parseAbsolute("//package:inner"),
-            Attribute.ConfigurationTransition.NONE,
+            ConfigurationTransitionProxy.NONE,
             AspectCollection.EMPTY);
     Dependency fileDependency =
         Dependency.withNullConfiguration(
@@ -450,6 +451,62 @@ public class BuildViewTest extends BuildViewTestBase {
     }
     runAnalysisWithOutputFilter(Pattern.compile("^//java/c"));
     assertNoEvents();
+  }
+
+  @Test
+  public void testOutputFilterWithDebug() throws Exception {
+    scratch.file(
+        "java/a/BUILD",
+        "java_library(name = 'a',",
+        "  srcs = ['A.java'],",
+        "  deps = ['//java/b'])");
+    scratch.file(
+        "java/b/rules.bzl",
+        "def _impl(ctx):",
+        "  print('debug in b')",
+        "  ctx.file_action(",
+        "    output = ctx.outputs.my_output,",
+        "    content = 'foo',",
+        "  )",
+        "gen = rule(implementation = _impl, outputs = {'my_output': 'B.java'})");
+    scratch.file(
+        "java/b/BUILD",
+        "load(':rules.bzl', 'gen')",
+        "gen(name='src')",
+        "java_library(name = 'b', srcs = [':src'])");
+    reporter.setOutputFilter(RegexOutputFilter.forPattern(Pattern.compile("^//java/a")));
+
+    useConfiguration("--incompatible_show_all_print_messages=true");
+    update("//java/a:a");
+    assertContainsEvent("DEBUG /workspace/java/b/rules.bzl:2:3: debug in b");
+  }
+
+  @Test
+  public void testOutputFilterWithWarning() throws Exception {
+    scratch.file(
+        "java/a/BUILD",
+        "java_library(name = 'a',",
+        "  srcs = ['A.java'],",
+        "  deps = ['//java/b'])");
+    scratch.file(
+        "java/b/rules.bzl",
+        "def _impl(ctx):",
+        "  print('debug in b')",
+        "  ctx.file_action(",
+        "    output = ctx.outputs.my_output,",
+        "    content = 'foo',",
+        "  )",
+        "gen = rule(implementation = _impl, outputs = {'my_output': 'B.java'})");
+    scratch.file(
+        "java/b/BUILD",
+        "load(':rules.bzl', 'gen')",
+        "gen(name='src')",
+        "java_library(name = 'b', srcs = [':src'])");
+    reporter.setOutputFilter(RegexOutputFilter.forPattern(Pattern.compile("^//java/a")));
+
+    useConfiguration("--incompatible_show_all_print_messages=false");
+    update("//java/a:a");
+    assertDoesNotContainEvent("rules.bzl:2:3: debug in b");
   }
 
   @Test
@@ -595,7 +652,7 @@ public class BuildViewTest extends BuildViewTestBase {
         "        outs=['a.out'])");
     update("//pkg:a.out");
     assertWithMessage("Actions should not be compatible")
-        .that(Actions.canBeShared(action, getGeneratingAction(outputArtifact)))
+        .that(Actions.canBeShared(actionKeyContext, action, getGeneratingAction(outputArtifact)))
         .isFalse();
   }
 
@@ -1090,24 +1147,6 @@ public class BuildViewTest extends BuildViewTestBase {
   }
 
   @Test
-  public void testMissingJavabase() throws Exception {
-    // The javabase flag uses yet another code path with its own redirection logic on top of the
-    // redirect chaser.
-    scratch.file("jdk/BUILD",
-        "filegroup(name = 'jdk', srcs = [",
-        "    '//does/not/exist:a-piii', '//does/not/exist:b-k8', '//does/not/exist:c-default'])");
-    scratch.file("does/not/exist/BUILD");
-    useConfiguration("--javabase=//jdk");
-    reporter.removeHandler(failFastHandler);
-    try {
-      update(defaultFlags().with(Flag.KEEP_GOING));
-      fail();
-    } catch (InvalidConfigurationException e) {
-      // Expected
-    }
-  }
-
-  @Test
   public void testVisibilityReferencesNonexistentPackage() throws Exception {
     scratch.file("z/a/BUILD",
         "py_library(name='a', visibility=['//nonexistent:nothing'])");
@@ -1240,28 +1279,6 @@ public class BuildViewTest extends BuildViewTestBase {
     ConfiguredTarget topLevelTarget = Iterables.getOnlyElement(res.getTargetsToBuild());
     assertThat(topLevelTarget.getConfiguration().getAllFragments().keySet())
         .containsExactly(ruleClassProvider.getUniversalFragment());
-  }
-
-  @Test
-  public void errorOnMissingDepFragments() throws Exception {
-    scratch.file("foo/BUILD",
-        "cc_library(",
-        "    name = 'ccbin', ",
-        "    srcs = ['c.cc'],",
-        "    data = [':javalib'])",
-        "java_library(",
-        "    name = 'javalib',",
-        "    srcs = ['javalib.java'])");
-    useConfiguration("--experimental_dynamic_configs=on", "--experimental_disable_jvm");
-    reporter.removeHandler(failFastHandler);
-    try {
-      update("//foo:ccbin");
-      fail();
-    } catch (ViewCreationFailedException e) {
-      // Expected.
-    }
-    assertContainsEvent("//foo:ccbin: dependency //foo:javalib from attribute \"data\" is missing "
-        + "required config fragments: Jvm");
   }
 
   /**

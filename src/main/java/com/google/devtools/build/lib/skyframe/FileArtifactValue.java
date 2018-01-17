@@ -17,6 +17,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Preconditions;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.actions.FileStateType;
 import com.google.devtools.build.lib.actions.cache.DigestUtils;
 import com.google.devtools.build.lib.actions.cache.Metadata;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
@@ -45,15 +46,15 @@ import javax.annotation.Nullable;
 @Immutable @ThreadSafe
 public abstract class FileArtifactValue implements SkyValue, Metadata {
   private static final class SingletonMarkerValue extends FileArtifactValue implements Singleton {
+    @Override
+    public FileStateType getType() {
+      return FileStateType.NONEXISTENT;
+    }
+
     @Nullable
     @Override
     public byte[] getDigest() {
       return null;
-    }
-
-    @Override
-    public boolean isFile() {
-      return false;
     }
 
     @Override
@@ -74,12 +75,12 @@ public abstract class FileArtifactValue implements SkyValue, Metadata {
 
   private static final class OmittedFileValue extends FileArtifactValue implements Singleton {
     @Override
-    public byte[] getDigest() {
-      throw new UnsupportedOperationException();
+    public FileStateType getType() {
+      return FileStateType.NONEXISTENT;
     }
 
     @Override
-    public boolean isFile() {
+    public byte[] getDigest() {
       throw new UnsupportedOperationException();
     }
 
@@ -117,6 +118,11 @@ public abstract class FileArtifactValue implements SkyValue, Metadata {
       this.mtime = mtime;
     }
 
+    @Override
+    public FileStateType getType() {
+      return FileStateType.DIRECTORY;
+    }
+
     @Nullable
     @Override
     public byte[] getDigest() {
@@ -131,11 +137,6 @@ public abstract class FileArtifactValue implements SkyValue, Metadata {
     @Override
     public long getSize() {
       return 0;
-    }
-
-    @Override
-    public boolean isFile() {
-      return false;
     }
 
     @Override
@@ -154,13 +155,13 @@ public abstract class FileArtifactValue implements SkyValue, Metadata {
     }
 
     @Override
-    public byte[] getDigest() {
-      return digest;
+    public FileStateType getType() {
+      return FileStateType.REGULAR_FILE;
     }
 
     @Override
-    public boolean isFile() {
-      return true;
+    public byte[] getDigest() {
+      return digest;
     }
 
     @Override
@@ -182,30 +183,40 @@ public abstract class FileArtifactValue implements SkyValue, Metadata {
 
   @VisibleForTesting
   public static FileArtifactValue create(Artifact artifact) throws IOException {
-    Path path = artifact.getPath();
-    FileStatus stat = path.stat();
-    boolean isFile = stat.isFile();
-    return create(artifact, isFile, isFile ? stat.getSize() : 0, null);
+    return create(artifact.getPath());
   }
 
   static FileArtifactValue create(Artifact artifact, FileValue fileValue) throws IOException {
     boolean isFile = fileValue.isFile();
-    return create(artifact, isFile, isFile ? fileValue.getSize() : 0,
+    return create(artifact.getPath(), isFile, isFile ? fileValue.getSize() : 0,
         isFile ? fileValue.getDigest() : null);
   }
 
-  static FileArtifactValue create(Artifact artifact, boolean isFile, long size,
-      @Nullable byte[] digest) throws IOException {
+  static FileArtifactValue create(
+      Artifact artifact, FileValue fileValue, @Nullable byte[] injectedDigest) throws IOException {
+    boolean isFile = fileValue.isFile();
+    return create(artifact.getPath(), isFile, isFile ? fileValue.getSize() : 0, injectedDigest);
+  }
+
+  @VisibleForTesting
+  static FileArtifactValue create(Path path) throws IOException {
+    FileStatus stat = path.stat();
+    boolean isFile = stat.isFile();
+    return create(path, isFile, isFile ? stat.getSize() : 0, null);
+  }
+
+  private static FileArtifactValue create(
+      Path path, boolean isFile, long size, @Nullable byte[] digest) throws IOException {
     if (isFile && digest == null) {
-      digest = DigestUtils.getDigestOrFail(artifact.getPath(), size);
+      digest = DigestUtils.getDigestOrFail(path, size);
     }
     if (!isFile) {
       // In this case, we need to store the mtime because the action cache uses mtime for
       // directories to determine if this artifact has changed. We want this code path to go away
       // somehow (maybe by implementing FileSet in Skyframe).
-      return new DirectoryArtifactValue(artifact.getPath().getLastModifiedTime());
+      return new DirectoryArtifactValue(path.getLastModifiedTime());
     }
-    Preconditions.checkState(digest != null, artifact);
+    Preconditions.checkState(digest != null, path);
     return createNormalFile(digest, size);
   }
 
@@ -231,7 +242,7 @@ public abstract class FileArtifactValue implements SkyValue, Metadata {
   }
 
   @Override
-  public abstract boolean isFile();
+  public abstract FileStateType getType();
 
   @Nullable
   @Override
@@ -255,10 +266,13 @@ public abstract class FileArtifactValue implements SkyValue, Metadata {
       return false;
     }
     Metadata m = (Metadata) o;
-    if (isFile()) {
-      return m.isFile() && Arrays.equals(getDigest(), m.getDigest()) && getSize() == m.getSize();
+    if (getType() != m.getType()) {
+      return false;
+    }
+    if (getDigest() != null) {
+      return Arrays.equals(getDigest(), m.getDigest()) && getSize() == m.getSize();
     } else {
-      return !m.isFile() && getModifiedTime() == m.getModifiedTime();
+      return getModifiedTime() == m.getModifiedTime();
     }
   }
 
@@ -268,7 +282,7 @@ public abstract class FileArtifactValue implements SkyValue, Metadata {
       return System.identityHashCode(this);
     }
     // Hash digest by content, not reference.
-    if (isFile()) {
+    if (getDigest() != null) {
       return 37 * Long.hashCode(getSize()) + Arrays.hashCode(getDigest());
     } else {
       return Long.hashCode(getModifiedTime());

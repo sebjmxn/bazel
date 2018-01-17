@@ -104,23 +104,23 @@ public class GenRuleConfiguredTargetTest extends BuildViewTestCase {
   }
 
   @Test
-  public void testToolchainMakeVariableExpansion() throws Exception {
-    scratch.file("a/BUILD",
-        "genrule(name='gr', srcs=[], outs=['out'], cmd='$(FOO)', toolchains=[':v'])",
-        "make_variable_tester(name='v', variables={'FOO': 'FOOBAR'})");
-
-    String cmd = getCommand("//a:gr");
-    assertThat(cmd).endsWith("FOOBAR");
-  }
-
-  @Test
-  public void testToolchainOverridesConfiguration() throws Exception {
+  public void testToolchainOverridesJavabase() throws Exception {
     scratch.file("a/BUILD",
         "genrule(name='gr', srcs=[], outs=['out'], cmd='JAVABASE=$(JAVABASE)', toolchains=[':v'])",
         "make_variable_tester(name='v', variables={'JAVABASE': 'REPLACED'})");
 
     String cmd = getCommand("//a:gr");
     assertThat(cmd).endsWith("JAVABASE=REPLACED");
+  }
+
+  @Test
+  public void testToolchainDoesNotOverrideCcFlags() throws Exception {
+    scratch.file("a/BUILD",
+        "genrule(name='gr', srcs=[], outs=['out'], cmd='CC_FLAGS=$(CC_FLAGS)', toolchains=[':v'])",
+        "make_variable_tester(name='v', variables={'CC_FLAGS': 'REPLACED'})");
+
+    String cmd = getCommand("//a:gr");
+    assertThat(cmd).doesNotContain("CC_FLAGS=REPLACED");
   }
 
   @Test
@@ -348,32 +348,6 @@ public class GenRuleConfiguredTargetTest extends BuildViewTestCase {
     String ccToolchainAttr = ":cc_toolchain";
     assertThat(getPrerequisites(getConfiguredTarget("//foo:no_cc"), ccToolchainAttr)).isEmpty();
     assertThat(getPrerequisites(getConfiguredTarget("//foo:cc"), ccToolchainAttr)).isNotEmpty();
-  }
-
-  /** Ensure that Java make variables get expanded under the *host* configuration. */
-  @Test
-  public void testJavaMakeVarExpansion() throws Exception {
-    String ruleTemplate =
-        "genrule(name = '%s',"
-            + "  srcs = [],"
-            + "  cmd = 'echo $(%s) > $@',"
-            + "  outs = ['%s'])";
-
-    scratch.file(
-        "foo/BUILD",
-        String.format(ruleTemplate, "java_rule", "JAVA", "java.txt"),
-        String.format(ruleTemplate, "javabase_rule", "JAVABASE", "javabase.txt"));
-
-    Artifact javaOutput = getFileConfiguredTarget("//foo:java.txt").getArtifact();
-    Artifact javabaseOutput = getFileConfiguredTarget("//foo:javabase.txt").getArtifact();
-
-    String javaCommand =
-        ((SpawnAction) getGeneratingAction(javaOutput)).getArguments().get(2);
-    assertThat(javaCommand).containsMatch("jdk/bin/java(.exe)? >");
-
-    String javabaseCommand =
-        ((SpawnAction) getGeneratingAction(javabaseOutput)).getArguments().get(2);
-    assertThat(javabaseCommand).contains("jdk >");
   }
 
   // Returns the expansion of 'cmd' for the specified genrule.

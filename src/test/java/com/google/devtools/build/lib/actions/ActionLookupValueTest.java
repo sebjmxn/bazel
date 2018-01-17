@@ -21,6 +21,7 @@ import static org.mockito.Mockito.when;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.vfs.FileSystem;
+import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.inmemoryfs.InMemoryFileSystem;
 import org.junit.Before;
@@ -33,6 +34,7 @@ import org.junit.runners.JUnit4;
 public class ActionLookupValueTest {
 
   private FileSystem fs;
+  private final ActionKeyContext actionKeyContext = new ActionKeyContext();
 
   @Before
   public void setUp() {
@@ -45,7 +47,7 @@ public class ActionLookupValueTest {
     Artifact artifact = mock(Artifact.class);
     when(action.getOutputs()).thenReturn(ImmutableSet.of(artifact));
     when(action.canRemoveAfterExecution()).thenReturn(true);
-    ActionLookupValue underTest = new ActionLookupValue(action, false);
+    ActionLookupValue underTest = new ActionLookupValue(actionKeyContext, action, false);
     assertThat(underTest.getGeneratingActionIndex(artifact)).isEqualTo(0);
     assertThat(underTest.getAction(0)).isSameAs(action);
     underTest.actionEvaluated(0, action);
@@ -54,7 +56,9 @@ public class ActionLookupValueTest {
 
   @Test
   public void testActionNotPresentAfterEvaluation() {
-    Root root = Root.asDerivedRoot(fs.getRootDirectory());
+    Path execRoot = fs.getPath("/execroot");
+    Path outputRootPath = execRoot.getRelative("blaze-out");
+    ArtifactRoot root = ArtifactRoot.asDerivedRoot(execRoot, outputRootPath);
     Action normalAction = mock(Action.class);
     Artifact normalArtifact = new Artifact(PathFragment.create("normal"), root);
     when(normalAction.getOutputs()).thenReturn(ImmutableSet.of(normalArtifact));
@@ -65,7 +69,7 @@ public class ActionLookupValueTest {
     when(persistentAction.canRemoveAfterExecution()).thenReturn(false);
     ActionLookupValue underTest =
         new ActionLookupValue(
-            ImmutableList.<ActionAnalysisMetadata>of(normalAction, persistentAction), true);
+            actionKeyContext, ImmutableList.of(normalAction, persistentAction), true);
     assertThat(underTest.getGeneratingActionIndex(normalArtifact)).isEqualTo(0);
     assertThat(underTest.getAction(0)).isSameAs(normalAction);
     assertThat(underTest.getGeneratingActionIndex(persistentOutput)).isEqualTo(1);

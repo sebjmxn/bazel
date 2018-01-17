@@ -241,6 +241,19 @@ public class MemoizingEvaluatorTest {
   }
 
   @Test
+  public void interruptBitCleared() throws Exception {
+    SkyKey interruptKey = GraphTester.skyKey("interrupt");
+    tester.getOrCreate(interruptKey).setBuilder(INTERRUPT_BUILDER);
+    try {
+      tester.eval(/*keepGoing=*/ true, interruptKey);
+      fail("Expected interrupt");
+    } catch (InterruptedException e) {
+      // Expected.
+    }
+    assertThat(Thread.interrupted()).isFalse();
+  }
+
+  @Test
   public void crashAfterInterruptCrashes() throws Exception {
     SkyKey failKey = GraphTester.skyKey("fail");
     SkyKey badInterruptkey = GraphTester.skyKey("bad-interrupt");
@@ -1632,8 +1645,7 @@ public class MemoizingEvaluatorTest {
   /**
    * Regression test: tests that pass before other build actions fail yield crash in non -k builds.
    */
-  @Test
-  public void passThenFailToBuild() throws Exception {
+  private void passThenFailToBuild(boolean successFirst) throws Exception {
     CountDownLatch blocker = new CountDownLatch(1);
     SkyKey successKey = GraphTester.toSkyKey("success");
     tester.getOrCreate(successKey).setBuilder(
@@ -1646,30 +1658,26 @@ public class MemoizingEvaluatorTest {
             /*notifyFinish=*/null, /*waitForException=*/false, /*value=*/null,
             /*deps=*/ImmutableList.<SkyKey>of()));
 
-    EvaluationResult<StringValue> result = tester.eval(
-        /*keepGoing=*/false, successKey, slowFailKey);
-    assertThat(result.getError().getRootCauses()).containsExactly(slowFailKey);
+    EvaluationResult<StringValue> result;
+    if (successFirst) {
+      result = tester.eval(/*keepGoing=*/ false, successKey, slowFailKey);
+    } else {
+      result = tester.eval(/*keepGoing=*/ false, slowFailKey, successKey);
+    }
+    assertThatEvaluationResult(result)
+        .hasErrorEntryForKeyThat(slowFailKey)
+        .rootCauseOfExceptionIs(slowFailKey);
     assertThat(result.values()).containsExactly(new StringValue("yippee"));
   }
 
   @Test
-  public void passThenFailToBuildAlternateOrder() throws Exception {
-    CountDownLatch blocker = new CountDownLatch(1);
-    SkyKey successKey = GraphTester.toSkyKey("success");
-    tester.getOrCreate(successKey).setBuilder(
-        new ChainedFunction(/*notifyStart=*/null, /*waitToFinish=*/null,
-            /*notifyFinish=*/blocker, /*waitForException=*/false, new StringValue("yippee"),
-            /*deps=*/ImmutableList.<SkyKey>of()));
-    SkyKey slowFailKey = GraphTester.toSkyKey("slow_then_fail");
-    tester.getOrCreate(slowFailKey).setBuilder(
-        new ChainedFunction(/*notifyStart=*/null, /*waitToFinish=*/blocker,
-            /*notifyFinish=*/null, /*waitForException=*/false, /*value=*/null,
-            /*deps=*/ImmutableList.<SkyKey>of()));
+  public void passThenFailToBuild() throws Exception {
+    passThenFailToBuild(true);
+  }
 
-    EvaluationResult<StringValue> result = tester.eval(
-        /*keepGoing=*/false, slowFailKey, successKey);
-    assertThat(result.getError().getRootCauses()).containsExactly(slowFailKey);
-    assertThat(result.values()).containsExactly(new StringValue("yippee"));
+  @Test
+  public void passThenFailToBuildAlternateOrder() throws Exception {
+    passThenFailToBuild(false);
   }
 
   @Test
@@ -1736,7 +1744,6 @@ public class MemoizingEvaluatorTest {
 
   @Test
   public void continueWithErrorDepTurnedGood() throws Exception {
-    initializeTester();
     SkyKey errorKey = GraphTester.toSkyKey("my_error_value");
     tester.getOrCreate(errorKey).setHasError(true);
     tester.set("after", new StringValue("after"));
@@ -2664,7 +2671,6 @@ public class MemoizingEvaluatorTest {
 
   @Test
   public void changePruning() throws Exception {
-    initializeTester();
     SkyKey leaf = GraphTester.toSkyKey("leaf");
     SkyKey mid = GraphTester.toSkyKey("mid");
     SkyKey top = GraphTester.toSkyKey("top");
@@ -2722,7 +2728,6 @@ public class MemoizingEvaluatorTest {
 
   @Test
   public void changePruningAfterParentPrunes() throws Exception {
-    initializeTester();
     final SkyKey leaf = GraphTester.toSkyKey("leaf");
     SkyKey top = GraphTester.toSkyKey("top");
     tester.set(leaf, new StringValue("leafy"));

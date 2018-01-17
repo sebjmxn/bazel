@@ -355,6 +355,20 @@ public abstract class MockCcSupport {
           + "  }"
           + "}";
 
+  public static final String THIN_LTO_LINKSTATIC_TESTS_USE_SHARED_NONLTO_BACKENDS_CONFIGURATION =
+      "" + "feature {  name: 'thin_lto_linkstatic_tests_use_shared_nonlto_backends'}";
+
+  public static final String ENABLE_AFDO_THINLTO_CONFIGURATION =
+      ""
+          + "feature {"
+          + "  name: 'enable_afdo_thinlto'"
+          + "  requires { feature: 'autofdo_implicit_thinlto' }"
+          + "  implies: 'thin_lto'"
+          + "}";
+
+  public static final String AUTOFDO_IMPLICIT_THINLTO_CONFIGURATION =
+      "" + "feature {  name: 'autofdo_implicit_thinlto'}";
+
   public static final String AUTO_FDO_CONFIGURATION =
       ""
           + "feature {"
@@ -410,6 +424,14 @@ public abstract class MockCcSupport {
 
   public static final String COPY_DYNAMIC_LIBRARIES_TO_BINARY_CONFIGURATION =
       "" + "feature { " + "  name: 'copy_dynamic_libraries_to_binary'" + "}";
+
+  public static final String TARGETS_WINDOWS_CONFIGURATION =
+      ""
+          + "feature {"
+          + "   name: 'targets_windows'"
+          + "   implies: 'copy_dynamic_libraries_to_binary'"
+          + "   enabled: true"
+          + "}";
 
   public static final String STATIC_LINK_TWEAKED_CONFIGURATION =
       ""

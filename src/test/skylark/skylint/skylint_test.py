@@ -28,6 +28,7 @@ class SkylintTest(unittest.TestCase):
         testenv.SKYLINT_BINARY_PATH,
         os.path.join(testenv.SKYLINT_TESTDATA_PATH, "good.bzl.test")
     ])
+    output = output.decode("utf-8")
     self.assertEqual(output, "")
 
   def testBadFile(self):
@@ -38,7 +39,7 @@ class SkylintTest(unittest.TestCase):
           os.path.join(testenv.SKYLINT_TESTDATA_PATH, "bad.bzl.test")
       ])
     except subprocess.CalledProcessError as e:
-      issues = e.output
+      issues = e.output.decode("utf-8")
     self.assertIn("no module docstring", issues)
 
   def testNonexistingFile(self):
@@ -48,7 +49,7 @@ class SkylintTest(unittest.TestCase):
           [testenv.SKYLINT_BINARY_PATH, "does_not_exist.bzl"],
           stderr=subprocess.STDOUT)
     except subprocess.CalledProcessError as e:
-      output = e.output
+      output = e.output.decode("utf-8")
     self.assertEqual("File not found: does_not_exist.bzl\n", output)
 
   def testDisablingCheck(self):
@@ -56,13 +57,16 @@ class SkylintTest(unittest.TestCase):
         testenv.SKYLINT_BINARY_PATH, "--disable-checks=docstring",
         os.path.join(testenv.SKYLINT_TESTDATA_PATH, "bad.bzl.test")
     ])
+    output = output.decode("utf-8")
     self.assertEqual(output, "")
 
   def testDisablingCategory(self):
     output = subprocess.check_output([
-        testenv.SKYLINT_BINARY_PATH, "--disable-categories=missing-docstring",
+        testenv.SKYLINT_BINARY_PATH,
+        "--disable-categories=missing-module-docstring",
         os.path.join(testenv.SKYLINT_TESTDATA_PATH, "bad.bzl.test")
     ])
+    output = output.decode("utf-8")
     self.assertEqual(output, "")
 
   IMPORT_BZL_CONTENTS = """
@@ -89,7 +93,7 @@ def foo():
             os.path.join(temp_dir, "dependencies.bzl")
         ] + options)
       except subprocess.CalledProcessError as e:
-        output = e.output
+        output = e.output.decode("utf-8")
       return output
     finally:
       shutil.rmtree(temp_dir)

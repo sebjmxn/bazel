@@ -17,20 +17,21 @@ import java.io.IOException;
 import java.io.OutputStream;
 
 /**
- * An abstract partial implementation of FileSystem for read-only
- * implementations.
+ * An abstract partial implementation of FileSystem for read-only implementations.
  *
  * <p>Any ReadonlyFileSystem does not support the following:
+ *
  * <ul>
- * <li>{@link #createDirectory(Path)}</li>
- * <li>{@link #createSymbolicLink(Path, PathFragment)}</li>
- * <li>{@link #delete(Path)}</li>
- * <li>{@link #getOutputStream(Path)}</li>
- * <li>{@link #renameTo(Path, Path)}</li>
- * <li>{@link #setExecutable(Path, boolean)}</li>
- * <li>{@link #setLastModifiedTime(Path, long)}</li>
- * <li>{@link #setWritable(Path, boolean)}</li>
+ *   <li>{@link #createDirectory(Path)}
+ *   <li>{@link #createSymbolicLink(Path, PathFragment)}
+ *   <li>{@link #delete(Path)}
+ *   <li>{@link #getOutputStream(Path)}
+ *   <li>{@link #renameTo(Path, Path)}
+ *   <li>{@link #setExecutable(Path, boolean)}
+ *   <li>{@link #setLastModifiedTime(Path, long)}
+ *   <li>{@link #setWritable(Path, boolean)}
  * </ul>
+ *
  * The above calls will always result in an {@link IOException}.
  */
 public abstract class ReadonlyFileSystem extends AbstractFileSystem {
@@ -56,7 +57,7 @@ public abstract class ReadonlyFileSystem extends AbstractFileSystem {
   }
 
   @Override
-  protected void setWritable(Path path, boolean writable) throws IOException {
+  public void setWritable(Path path, boolean writable) throws IOException {
     throw modificationException();
   }
 
@@ -86,7 +87,12 @@ public abstract class ReadonlyFileSystem extends AbstractFileSystem {
   }
 
   @Override
-  protected boolean createDirectory(Path path) throws IOException {
+  public boolean createDirectory(Path path) throws IOException {
+    throw modificationException();
+  }
+
+  @Override
+  public void createDirectoryAndParents(Path path) throws IOException {
     throw modificationException();
   }
 
@@ -96,17 +102,17 @@ public abstract class ReadonlyFileSystem extends AbstractFileSystem {
   }
 
   @Override
-  protected void renameTo(Path sourcePath, Path targetPath) throws IOException {
+  public void renameTo(Path sourcePath, Path targetPath) throws IOException {
     throw modificationException();
   }
 
   @Override
-  protected boolean delete(Path path) throws IOException {
+  public boolean delete(Path path) throws IOException {
     throw modificationException();
   }
 
   @Override
-  protected void setLastModifiedTime(Path path, long newTime) throws IOException {
+  public void setLastModifiedTime(Path path, long newTime) throws IOException {
     throw modificationException();
   }
 

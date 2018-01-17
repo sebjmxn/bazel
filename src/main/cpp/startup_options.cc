@@ -91,6 +91,7 @@ StartupOptions::StartupOptions(const string &product_name,
       client_debug(false),
       java_logging_formatter(
           "com.google.devtools.build.lib.util.SingleLineFormatter"),
+      expand_configs_in_place(false),
       original_startup_options_(std::vector<RcStartupFlag>()) {
   bool testing = !blaze::GetEnv("TEST_TMPDIR").empty();
   if (testing) {
@@ -134,6 +135,7 @@ StartupOptions::StartupOptions(const string &product_name,
   RegisterNullaryStartupFlag("master_blazerc");
   RegisterNullaryStartupFlag("watchfs");
   RegisterNullaryStartupFlag("write_command_log");
+  RegisterNullaryStartupFlag("expand_configs_in_place");
   RegisterUnaryStartupFlag("bazelrc");
   RegisterUnaryStartupFlag("blazerc");
   RegisterUnaryStartupFlag("command_port");
@@ -329,6 +331,12 @@ blaze_exit_code::ExitCode StartupOptions::ProcessArg(
   } else if (GetNullaryOption(arg, "--noclient_debug")) {
     client_debug = false;
     option_sources["client_debug"] = rcfile;
+  } else if (GetNullaryOption(arg, "--expand_configs_in_place")) {
+    expand_configs_in_place = true;
+    option_sources["expand_configs_in_place"] = rcfile;
+  } else if (GetNullaryOption(arg, "--noexpand_configs_in_place")) {
+    expand_configs_in_place = false;
+    option_sources["expand_configs_in_place"] = rcfile;
   } else if ((value = GetUnaryOption(
       arg, next_arg, "--connect_timeout_secs")) != NULL) {
     if (!blaze_util::safe_strto32(value, &connect_timeout_secs) ||
@@ -502,8 +510,13 @@ void StartupOptions::AddJVMArgumentSuffix(const string &real_install_dir,
 }
 
 blaze_exit_code::ExitCode StartupOptions::AddJVMArguments(
-    const string &host_javabase, vector<string> *result,
+    const string &host_javabase, std::vector<string> *result,
     const vector<string> &user_options, string *error) const {
+  AddJVMLoggingArguments(result);
+  return AddJVMMemoryArguments(host_javabase, result, user_options, error);
+}
+
+void StartupOptions::AddJVMLoggingArguments(std::vector<string> *result) const {
   // Configure logging
   const string propFile =
       blaze_util::JoinPath(output_base, "javalog.properties");
@@ -524,6 +537,11 @@ blaze_exit_code::ExitCode StartupOptions::AddJVMArguments(
   } else {
     result->push_back("-Djava.util.logging.config.file=" + propFile);
   }
+}
+
+blaze_exit_code::ExitCode StartupOptions::AddJVMMemoryArguments(
+    const string &host_javabase, std::vector<string> *result,
+    const vector<string> &user_options, string *error) const {
   return blaze_exit_code::SUCCESS;
 }
 

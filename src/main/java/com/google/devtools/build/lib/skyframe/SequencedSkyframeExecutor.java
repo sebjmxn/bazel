@@ -26,6 +26,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Range;
 import com.google.common.collect.Sets;
+import com.google.devtools.build.lib.actions.ActionKeyContext;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.BuildView;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
@@ -39,6 +40,7 @@ import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.ExtendedEventHandler;
 import com.google.devtools.build.lib.packages.AspectClass;
+import com.google.devtools.build.lib.packages.BuildFileName;
 import com.google.devtools.build.lib.packages.Package;
 import com.google.devtools.build.lib.packages.PackageFactory;
 import com.google.devtools.build.lib.packages.RuleClass;
@@ -55,7 +57,6 @@ import com.google.devtools.build.lib.skyframe.ExternalFilesHelper.ExternalFilesK
 import com.google.devtools.build.lib.skyframe.ExternalFilesHelper.FileType;
 import com.google.devtools.build.lib.skyframe.PackageFunction.ActionOnIOExceptionReadingBuildFile;
 import com.google.devtools.build.lib.skyframe.PackageLookupFunction.CrossRepositoryLabelViolationStrategy;
-import com.google.devtools.build.lib.skyframe.PackageLookupValue.BuildFileName;
 import com.google.devtools.build.lib.util.AbruptExitException;
 import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.build.lib.util.ResourceUsage;
@@ -106,17 +107,13 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
 
   private boolean lastAnalysisDiscarded = false;
 
-  private enum IncrementalState {
-    NORMAL,
-    CLEAR_EDGES_AND_ACTIONS
-  }
-
   /**
-   * If {@link IncrementalState#CLEAR_EDGES_AND_ACTIONS}, the graph will not store edges, saving
-   * memory but making subsequent builds not incremental. Also, each action will be dereferenced
-   * once it is executed, saving memory.
+   * If false, the graph will not store state useful for incremental builds, saving memory but
+   * leaving the graph un-reusable. Subsequent builds will therefore not be incremental.
+   *
+   * <p>Avoids storing edges entirely and dereferences each action after execution.
    */
-  private IncrementalState incrementalState = IncrementalState.NORMAL;
+  private boolean trackIncrementalState = true;
 
   private boolean evaluatorNeedsReset = false;
 
@@ -133,13 +130,14 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
       PackageFactory pkgFactory,
       FileSystem fileSystem,
       BlazeDirectories directories,
+      ActionKeyContext actionKeyContext,
       Factory workspaceStatusActionFactory,
       ImmutableList<BuildInfoFactory> buildInfoFactories,
       Iterable<? extends DiffAwareness.Factory> diffAwarenessFactories,
-      Predicate<PathFragment> allowedMissingInputs,
       ImmutableMap<SkyFunctionName, SkyFunction> extraSkyFunctions,
       Iterable<SkyValueDirtinessChecker> customDirtinessCheckers,
-      PathFragment blacklistedPackagePrefixesFile,
+      ImmutableSet<PathFragment> hardcodedBlacklistedPackagePrefixes,
+      PathFragment additionalBlacklistedPackagePrefixesFile,
       CrossRepositoryLabelViolationStrategy crossRepositoryLabelViolationStrategy,
       List<BuildFileName> buildFilesByPriority,
       ActionOnIOExceptionReadingBuildFile actionOnIOExceptionReadingBuildFile) {
@@ -148,12 +146,13 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
         pkgFactory,
         fileSystem,
         directories,
+        actionKeyContext,
         workspaceStatusActionFactory,
         buildInfoFactories,
-        allowedMissingInputs,
         extraSkyFunctions,
         ExternalFileAction.DEPEND_ON_EXTERNAL_PKG_FOR_EXTERNAL_REPO_PATHS,
-        blacklistedPackagePrefixesFile,
+        hardcodedBlacklistedPackagePrefixes,
+        additionalBlacklistedPackagePrefixesFile,
         crossRepositoryLabelViolationStrategy,
         buildFilesByPriority,
         actionOnIOExceptionReadingBuildFile);
@@ -165,13 +164,14 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
       PackageFactory pkgFactory,
       FileSystem fileSystem,
       BlazeDirectories directories,
+      ActionKeyContext actionKeyContext,
       Factory workspaceStatusActionFactory,
       ImmutableList<BuildInfoFactory> buildInfoFactories,
       Iterable<? extends DiffAwareness.Factory> diffAwarenessFactories,
-      Predicate<PathFragment> allowedMissingInputs,
       ImmutableMap<SkyFunctionName, SkyFunction> extraSkyFunctions,
       Iterable<SkyValueDirtinessChecker> customDirtinessCheckers,
-      PathFragment blacklistedPackagePrefixesFile,
+      ImmutableSet<PathFragment> hardcodedBlacklistedPackagePrefixes,
+      PathFragment additionalBlacklistedPackagePrefixesFile,
       CrossRepositoryLabelViolationStrategy crossRepositoryLabelViolationStrategy,
       List<BuildFileName> buildFilesByPriority,
       ActionOnIOExceptionReadingBuildFile actionOnIOExceptionReadingBuildFile) {
@@ -181,13 +181,14 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
             pkgFactory,
             fileSystem,
             directories,
+            actionKeyContext,
             workspaceStatusActionFactory,
             buildInfoFactories,
             diffAwarenessFactories,
-            allowedMissingInputs,
             extraSkyFunctions,
             customDirtinessCheckers,
-            blacklistedPackagePrefixesFile,
+            hardcodedBlacklistedPackagePrefixes,
+            additionalBlacklistedPackagePrefixesFile,
             crossRepositoryLabelViolationStrategy,
             buildFilesByPriority,
             actionOnIOExceptionReadingBuildFile);
@@ -259,7 +260,9 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
           SkyFunctions.TARGET_PATTERN,
           SkyFunctions.PREPARE_DEPS_OF_PATTERN,
           SkyFunctions.WORKSPACE_FILE,
-          SkyFunctions.EXTERNAL_PACKAGE);
+          SkyFunctions.EXTERNAL_PACKAGE,
+          SkyFunctions.TARGET_PATTERN,
+          SkyFunctions.TARGET_PATTERN_PHASE);
 
   @Override
   protected void onNewPackageLocator(PathPackageLocator oldLocator, PathPackageLocator pkgLocator) {
@@ -462,6 +465,8 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
     incrementalBuildMonitor.accrue(changedKeysWithNewValues.keySet());
   }
 
+  private static final int MAX_NUMBER_OF_CHANGED_KEYS_TO_LOG = 10;
+
   private static void logDiffInfo(Iterable<Path> pathEntries,
                                   Collection<SkyKey> changedWithoutNewValue,
                                   Map<SkyKey, ? extends SkyValue> changedWithNewValue) {
@@ -477,12 +482,13 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
     if (numModified > 0) {
       Iterable<SkyKey> allModifiedKeys = Iterables.concat(changedWithoutNewValue,
           changedWithNewValue.keySet());
-      Iterable<SkyKey> trimmed = Iterables.limit(allModifiedKeys, 5);
+      Iterable<SkyKey> trimmed =
+          Iterables.limit(allModifiedKeys, MAX_NUMBER_OF_CHANGED_KEYS_TO_LOG);
 
       result.append(": ")
           .append(Joiner.on(", ").join(trimmed));
 
-      if (numModified > 5) {
+      if (numModified > MAX_NUMBER_OF_CHANGED_KEYS_TO_LOG) {
         result.append(", ...");
       }
     }
@@ -497,52 +503,63 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
         SkyFunctionName.functionIs(SkyFunctions.FILE_STATE)));
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * <p>Necessary conditions to not store graph edges are either
+   *
+   * <ol>
+   *   <li>batch (since incremental builds are not possible) and discard_analysis_cache (since
+   *       otherwise user isn't concerned about saving memory this way).
+   *   <li>track_incremental_state set to false.
+   * </ol>
+   */
   @Override
   public void decideKeepIncrementalState(
       boolean batch, OptionsProvider options, EventHandler eventHandler) {
     Preconditions.checkState(!active);
     BuildView.Options viewOptions = options.getOptions(BuildView.Options.class);
     BuildRequestOptions requestOptions = options.getOptions(BuildRequestOptions.class);
+    boolean oldState = trackIncrementalState;
+
+    // First check if the incrementality state should be kept around during the build.
     boolean explicitlyRequestedNoIncrementalData =
-        requestOptions != null && !requestOptions.keepIncrementalityData;
+        requestOptions != null && !requestOptions.trackIncrementalState;
     boolean implicitlyRequestedNoIncrementalData =
         batch && viewOptions != null && viewOptions.discardAnalysisCache;
-    boolean discardingEdges =
-        explicitlyRequestedNoIncrementalData || implicitlyRequestedNoIncrementalData;
+    trackIncrementalState =
+        !explicitlyRequestedNoIncrementalData && !implicitlyRequestedNoIncrementalData;
     if (explicitlyRequestedNoIncrementalData != implicitlyRequestedNoIncrementalData) {
       if (requestOptions != null && !explicitlyRequestedNoIncrementalData) {
         eventHandler.handle(
             Event.warn(
-                "--batch and --discard_analysis_cache specified, but --nokeep_incrementality_data "
+                "--batch and --discard_analysis_cache specified, but --notrack_incremental_state "
                     + "not specified: incrementality data is implicitly discarded, but you may need"
-                    + " to specify --nokeep_incrementality_data in the future if you want to "
+                    + " to specify --notrack_incremental_state in the future if you want to "
                     + "maximize memory savings."));
       }
       if (!batch) {
         eventHandler.handle(
             Event.warn(
-                "--batch not specified with --nokeep_incrementality_data: the server will "
+                "--batch not specified with --notrack_incremental_state: the server will "
                     + "remain running, but the next build will not be incremental on this one."));
       }
     }
-    IncrementalState oldState = incrementalState;
-    incrementalState =
-        discardingEdges ? IncrementalState.CLEAR_EDGES_AND_ACTIONS : IncrementalState.NORMAL;
-    if (oldState != incrementalState) {
-      logger.info("Set incremental state to " + incrementalState);
+
+    // Now check if it is necessary to wipe the previous state. We do this if either the previous
+    // or current incrementalStateRetentionStrategy requires the build to have been isolated.
+    if (oldState != trackIncrementalState) {
+      logger.info("Set incremental state to " + trackIncrementalState);
       evaluatorNeedsReset = true;
-      removeActionsAfterEvaluation.set(
-          incrementalState == IncrementalState.CLEAR_EDGES_AND_ACTIONS);
-    } else if (incrementalState == IncrementalState.CLEAR_EDGES_AND_ACTIONS) {
+      removeActionsAfterEvaluation.set(!trackIncrementalState);
+    } else if (!trackIncrementalState) {
       evaluatorNeedsReset = true;
     }
   }
 
   @Override
-  public boolean hasIncrementalState() {
-    // TODO(bazel-team): Combine this method with clearSkyframeRelevantCaches() once legacy
-    // execution is removed [skyframe-execution].
-    return incrementalState == IncrementalState.NORMAL;
+  public boolean tracksStateForIncrementality() {
+    return trackIncrementalState;
   }
 
   @Override
@@ -611,7 +628,7 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
    * phase. Instead, their analysis-time data is cleared while preserving the generating action info
    * needed for execution. The next build will delete the nodes (and recreate them if necessary).
    *
-   * <p>If {@link #hasIncrementalState} is false, then also delete loading-phase nodes (as
+   * <p>If {@link #tracksStateForIncrementality} is false, then also delete loading-phase nodes (as
    * determined by {@link #LOADING_TYPES}) from the graph, since there will be no future builds to
    * use them for.
    */
@@ -631,7 +648,7 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
         }
         SkyKey key = keyAndEntry.getKey();
         SkyFunctionName functionName = key.functionName();
-        if (!hasIncrementalState() && LOADING_TYPES.contains(functionName)) {
+        if (!tracksStateForIncrementality() && LOADING_TYPES.contains(functionName)) {
           it.remove();
           continue;
         }
@@ -726,7 +743,6 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
         // well as ActionExecutionValues, since they do not depend on ActionLookupValues.
         SkyFunctionName.functionIsIn(ImmutableSet.of(
             SkyFunctions.CONFIGURED_TARGET,
-            SkyFunctions.ACTION_LOOKUP,
             SkyFunctions.BUILD_INFO,
             SkyFunctions.TARGET_COMPLETION,
             SkyFunctions.BUILD_INFO_COLLECTION,

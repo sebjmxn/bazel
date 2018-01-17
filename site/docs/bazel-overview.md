@@ -44,7 +44,7 @@ Bazel offers the following advantages:
 
 Bazel supports the following:
 
-*  **Programming languages**: C++, Objective-C, Python, JavaScript, Go
+*  **Programming languages**: Java, C++, Objective-C, Python, JavaScript, Go
 
 *  **Operating systems**: Linux, macOS, Windows
 
@@ -57,11 +57,11 @@ To build or test a project with Bazel, you typically do the following:
 
 1.  **Set up Bazel.** Download and [install Bazel](https://docs.bazel.build/versions/master/install.html).
 
-2.  **Set up a project [workspace](https://docs.bazel.build/versions/master/tutorial/workspace.html)**,
+2.  **Set up a project [workspace](https://docs.bazel.build/versions/master/build-ref.html#workspaces)**,
     which is a directory where Bazel looks for build inputs and `BUILD` files,
     and where it stores build outputs.
 
-3.  **Write a `BUILD` file**, which which tells Bazel what to build and how to
+3.  **Write a `BUILD` file**, which tells Bazel what to build and how to
     build it.
 
     You write your `BUILD` file by declaring build targets using an abstract

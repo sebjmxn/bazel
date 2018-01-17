@@ -13,9 +13,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
-# Test sandboxing spawn strategy
-#
 
 set -euo pipefail
 
@@ -23,10 +20,18 @@ set -euo pipefail
 CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${CURRENT_DIR}/../integration_test_setup.sh" \
   || { echo "integration_test_setup.sh not found!" >&2; exit 1; }
+source "${CURRENT_DIR}/execution_statistics_utils.sh" \
+  || { echo "execution_statistics_utils.sh not found!" >&2; exit 1; }
+
+enable_errexit
+
+readonly CPU_TIME_SPENDER="${CURRENT_DIR}/../../../test/shell/integration/spend_cpu_time"
 
 readonly OUT_DIR="${TEST_TMPDIR}/out"
 readonly OUT="${OUT_DIR}/outfile"
 readonly ERR="${OUT_DIR}/errfile"
+
+readonly EXIT_STATUS_SIGALRM=$((128 + 14))
 
 function set_up() {
   rm -rf $OUT_DIR
@@ -68,7 +73,7 @@ function test_signal_catcher() {
   local code=0
   $process_wrapper --timeout=1 --kill_delay=10 --stdout=$OUT --stderr=$ERR /bin/sh -c \
     'trap "echo later; exit 0" INT TERM ALRM; sleep 10' &> $TEST_log || code=$?
-  assert_equals 142 "$code" # SIGNAL_BASE + SIGALRM = 128 + 14
+  assert_equals "${EXIT_STATUS_SIGALRM}" "$code"
   assert_stdout "later"
 }
 
@@ -87,7 +92,7 @@ function test_timeout_grace() {
   $process_wrapper --timeout=1 --kill_delay=10 --stdout=$OUT --stderr=$ERR /bin/sh -c \
     'trap "echo before; sleep 1; echo after; exit 0" INT TERM ALRM; sleep 10' \
     &> $TEST_log || code=$?
-  assert_equals 142 "$code" # SIGNAL_BASE + SIGALRM = 128 + 14
+  assert_equals "${EXIT_STATUS_SIGALRM}" "$code"
   assert_stdout 'before
 after'
 }
@@ -101,7 +106,7 @@ function test_timeout_kill() {
   $process_wrapper --timeout=1 --kill_delay=2 --stdout=$OUT --stderr=$ERR /bin/sh -c \
     'trap "echo before; sleep 10; echo after; exit 0" INT TERM ALRM; sleep 10' \
     &> $TEST_log || code=$?
-  assert_equals 142 "$code" # SIGNAL_BASE + SIGALRM = 128 + 14
+  assert_equals "${EXIT_STATUS_SIGALRM}" "$code"
   assert_stdout "before"
 }
 
@@ -110,6 +115,50 @@ function test_execvp_error_message() {
   $process_wrapper --stdout=$OUT --stderr=$ERR /bin/notexisting &> $TEST_log || code=$?
   assert_equals 1 "$code"
   assert_contains "\"execvp(/bin/notexisting, ...)\": No such file or directory" "$ERR"
+}
+
+function assert_process_wrapper_exec_time() {
+  local user_time_low="$1"; shift
+  local user_time_high="$1"; shift
+  local sys_time_low="$1"; shift
+  local sys_time_high="$1"; shift
+
+  local local_tmp="$(mktemp -d "${OUT_DIR}/assert_process_wrapper_timeXXXXXX")"
+  local stdout_path="${local_tmp}/stdout"
+  local stderr_path="${local_tmp}/stderr"
+  local stats_out_path="${local_tmp}/statsfile"
+  local stats_out_decoded_path="${local_tmp}/statsfile.decoded"
+
+  # Wrapped process will be terminated after 100 seconds if not self terminated.
+  local code=0
+  "${process_wrapper}" \
+      --timeout=100 \
+      --kill_delay=2 \
+      --stdout="${stdout_path}" \
+      --stderr="${stderr_path}" \
+      --stats="${stats_out_path}" \
+      "${CPU_TIME_SPENDER}" "${user_time_low}" "${sys_time_low}" \
+      &> "${TEST_log}" || code="$?"
+  assert_equals 0 "${code}"
+
+  assert_execution_time_in_range \
+      "${user_time_low}" \
+      "${user_time_high}" \
+      "${sys_time_low}" \
+      "${sys_time_high}" \
+      "${stats_out_path}"
+}
+
+function test_stats_high_user_time() {
+  assert_process_wrapper_exec_time 10 11 0 1
+}
+
+function test_stats_high_system_time() {
+  assert_process_wrapper_exec_time 0 1 10 11
+}
+
+function test_stats_high_user_time_and_high_system_time() {
+  assert_process_wrapper_exec_time 10 11 10 11
 }
 
 run_suite "process-wrapper"

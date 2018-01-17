@@ -35,6 +35,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Set;
+import javax.annotation.Nullable;
 
 /**
  * Parses options that the {@link JavaLibraryBuildRequest} needs to construct a build request from
@@ -71,6 +72,7 @@ public final class OptionsParser {
   private final List<String> processorNames = new ArrayList<>();
 
   private String outputJar;
+  private @Nullable String nativeHeaderOutput;
 
   private String classDir;
   private String tempDir;
@@ -104,11 +106,7 @@ public final class OptionsParser {
     for (String arg = argQueue.pollFirst(); arg != null; arg = argQueue.pollFirst()) {
       switch (arg) {
         case "--javacopts":
-          // Collect additional arguments to javac.
-          // Assumes that javac options do not start with "--".
-          // otherwise we have to do something like adding a "--"
-          // terminator to the passed arguments.
-          collectFlagArguments(javacOpts, argQueue, "--");
+          readJavacopts(javacOpts, argQueue);
           sourcePathFromJavacOpts();
           break;
         case "--direct_dependency":
@@ -156,27 +154,30 @@ public final class OptionsParser {
           collectFlagArguments(sourceJars, argQueue, "-");
           break;
         case "--classpath":
-          collectClassPathArguments(classPath, argQueue);
+          collectFlagArguments(classPath, argQueue, "-");
           break;
-          // TODO(#970): Consider wether we want to use --sourcepath for resolving of #970.
         case "--sourcepath":
-          collectClassPathArguments(sourcePath, argQueue);
+          // TODO(#970): Consider whether we want to use --sourcepath for resolving of #970.
+          collectFlagArguments(sourcePath, argQueue, "-");
           break;
         case "--bootclasspath":
-          collectClassPathArguments(bootClassPath, argQueue);
+          collectFlagArguments(bootClassPath, argQueue, "-");
           break;
         case "--processorpath":
-          collectClassPathArguments(processorPath, argQueue);
+          collectFlagArguments(processorPath, argQueue, "-");
           break;
         case "--processors":
           collectProcessorArguments(processorNames, argQueue, "-");
           break;
         case "--extclasspath":
         case "--extdir":
-          collectClassPathArguments(extClassPath, argQueue);
+          collectFlagArguments(extClassPath, argQueue, "-");
           break;
         case "--output":
           outputJar = getArgument(argQueue, arg);
+          break;
+        case "--native_header_output":
+          nativeHeaderOutput = getArgument(argQueue, arg);
           break;
         case "--classdir":
           classDir = getArgument(argQueue, arg);
@@ -290,19 +291,23 @@ public final class OptionsParser {
     }
   }
 
+  /**
+   * Returns a list of javacopts. Reads options until a terminating {@code "--"} is reached, to
+   * support parsing javacopts that start with {@code --} (e.g. --release).
+   */
+  private static void readJavacopts(List<String> javacopts, Deque<String> argumentDeque) {
+    while (!argumentDeque.isEmpty()) {
+      String arg = argumentDeque.pollFirst();
+      if (arg.equals("--")) {
+        return;
+      }
+      javacopts.add(arg);
+    }
+    throw new IllegalArgumentException("javacopts should be terminated by `--`");
+  }
+
   private static final Splitter CLASSPATH_SPLITTER =
       Splitter.on(File.pathSeparatorChar).trimResults().omitEmptyStrings();
-
-  // TODO(cushon): stop splitting classpaths once cl/127006119 is released
-  private static void collectClassPathArguments(Collection<String> output, Deque<String> args) {
-    for (String arg = args.pollFirst(); arg != null; arg = args.pollFirst()) {
-      if (arg.startsWith("-")) {
-        args.addFirst(arg);
-        break;
-      }
-      Iterables.addAll(output, CLASSPATH_SPLITTER.split(arg));
-    }
-  }
 
   /**
    * Collects the arguments for the --processors command line flag until it finds a flag that starts
@@ -422,6 +427,11 @@ public final class OptionsParser {
 
   public String getOutputJar() {
     return outputJar;
+  }
+
+  @Nullable
+  public String getNativeHeaderOutput() {
+    return nativeHeaderOutput;
   }
 
   public String getClassDir() {

@@ -26,6 +26,10 @@ import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
 import com.google.devtools.build.lib.analysis.Dependency;
 import com.google.devtools.build.lib.analysis.TargetAndConfiguration;
+import com.google.devtools.build.lib.analysis.config.transitions.ConfigurationTransitionProxy;
+import com.google.devtools.build.lib.analysis.config.transitions.PatchTransition;
+import com.google.devtools.build.lib.analysis.config.transitions.SplitTransition;
+import com.google.devtools.build.lib.analysis.config.transitions.Transition;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.concurrent.ThreadSafety;
 import com.google.devtools.build.lib.events.Event;
@@ -179,10 +183,10 @@ public final class ConfigurationResolver {
       }
 
       boolean sameFragments = depFragments.equals(ctgFragments);
-      Attribute.Transition transition = dep.getTransition();
+      Transition transition = dep.getTransition();
 
       if (sameFragments) {
-        if (transition == Attribute.ConfigurationTransition.NONE) {
+        if (transition == ConfigurationTransitionProxy.NONE) {
           // The dep uses the same exact configuration.
           putOnlyEntry(
               resolvedDeps,
@@ -291,11 +295,11 @@ public final class ConfigurationResolver {
     // Treat this as immutable. The only reason this isn't an ImmutableSet is because it
     // gets bound to a NestedSet.toSet() reference, which returns a Set interface.
     final Set<Class<? extends BuildConfiguration.Fragment>> fragments;
-    final Attribute.Transition transition;
+    final Transition transition;
     private final int hashCode;
 
     FragmentsAndTransition(Set<Class<? extends BuildConfiguration.Fragment>> fragments,
-        Attribute.Transition transition) {
+        Transition transition) {
       this.fragments = fragments;
       this.transition = transition;
       hashCode = Objects.hash(this.fragments, this.transition);
@@ -407,19 +411,17 @@ public final class ConfigurationResolver {
    */
   @VisibleForTesting
   public static List<BuildOptions> applyTransition(BuildOptions fromOptions,
-      Attribute.Transition transition,
+      Transition transition,
       Iterable<Class<? extends BuildConfiguration.Fragment>> requiredFragments,
       RuleClassProvider ruleClassProvider, boolean trimResults) {
     List<BuildOptions> result;
-    if (transition == Attribute.ConfigurationTransition.NONE) {
+    if (transition == ConfigurationTransitionProxy.NONE) {
       result = ImmutableList.<BuildOptions>of(fromOptions);
     } else if (transition instanceof PatchTransition) {
       // TODO(bazel-team): safety-check that this never mutates fromOptions.
-      result = ImmutableList.<BuildOptions>of(((PatchTransition) transition).apply(fromOptions));
-    } else if (transition instanceof Attribute.SplitTransition) {
-      @SuppressWarnings("unchecked") // Attribute.java doesn't have the BuildOptions symbol.
-      List<BuildOptions> toOptions =
-          ((Attribute.SplitTransition<BuildOptions>) transition).split(fromOptions);
+      result = ImmutableList.of(((PatchTransition) transition).apply(fromOptions));
+    } else if (transition instanceof SplitTransition) {
+      List<BuildOptions> toOptions = ((SplitTransition) transition).split(fromOptions);
       if (toOptions.isEmpty()) {
         // When the split returns an empty list, it's signaling it doesn't apply to this instance.
         // So return the original options.

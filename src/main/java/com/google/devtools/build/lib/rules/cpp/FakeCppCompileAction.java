@@ -39,7 +39,7 @@ import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import java.io.IOException;
-import java.util.Set;
+import java.util.List;
 import java.util.UUID;
 import java.util.logging.Logger;
 
@@ -66,6 +66,7 @@ public class FakeCppCompileAction extends CppCompileAction {
       boolean usePic,
       boolean useHeaderModules,
       NestedSet<Artifact> mandatoryInputs,
+      ImmutableList<Artifact> builtinIncludeFiles,
       NestedSet<Artifact> prunableInputs,
       Artifact outputFile,
       PathFragment tempOutputFile,
@@ -90,6 +91,7 @@ public class FakeCppCompileAction extends CppCompileAction {
         usePic,
         useHeaderModules,
         mandatoryInputs,
+        builtinIncludeFiles,
         prunableInputs,
         outputFile,
         dotdFile,
@@ -109,7 +111,6 @@ public class FakeCppCompileAction extends CppCompileAction {
         CppCompilationContext.disallowUndeclaredHeaders(context),
         actionContext,
         nocopts,
-        VOID_SPECIAL_INPUTS_HANDLER,
         lipoScannables,
         ImmutableList.<Artifact>of(),
         GUID,
@@ -126,7 +127,7 @@ public class FakeCppCompileAction extends CppCompileAction {
   public ActionResult execute(ActionExecutionContext actionExecutionContext)
       throws ActionExecutionException, InterruptedException {
     setModuleFileFlags();
-    Set<SpawnResult> spawnResults;
+    List<SpawnResult> spawnResults;
     // First, do a normal compilation, to generate the ".d" file. The generated object file is built
     // to a temporary location (tempOutputFile) and ignored afterwards.
     logger.info("Generating " + getDotdFile());
@@ -155,7 +156,6 @@ public class FakeCppCompileAction extends CppCompileAction {
           new HeaderDiscovery.Builder()
               .setAction(this)
               .setSourceFile(getSourceFile())
-              .setSpecialInputsHandler(specialInputsHandler)
               .setDependencies(processDepset(execRoot, reply).getDependencies())
               .setPermittedSystemIncludePrefixes(getPermittedSystemIncludePrefixes(execRoot))
               .setAllowedDerivedinputsMap(getAllowedDerivedInputsMap());

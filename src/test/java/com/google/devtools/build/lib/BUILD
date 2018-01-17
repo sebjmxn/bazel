@@ -1,11 +1,15 @@
 package(
-    default_visibility = ["//src/test/java/com/google/devtools/build/lib:__subpackages__"],
+    default_visibility = [
+        "//src/test/java/com/google/devtools/build/lib:__subpackages__",
+        "//tools/test:__pkg__",
+    ],
 )
 
 # Tests for Windows-specific functionality that can run cross-platform.
 CROSS_PLATFORM_WINDOWS_TESTS = [
     "util/DependencySetWindowsTest.java",
     "vfs/PathFragmentWindowsTest.java",
+    "vfs/WindowsLocalPathTest.java",
     "windows/PathWindowsTest.java",
 ]
 
@@ -22,9 +26,7 @@ WINDOWS_ON_WINDOWS_TESTS = glob(
 ALL_WINDOWS_TESTS = CROSS_PLATFORM_WINDOWS_TESTS + WINDOWS_ON_WINDOWS_TESTS
 
 JNI_LIB = select({
-    "//src:windows": ["//src/main/native/windows:windows_jni.dll"],
-    "//src:windows_msys": ["//src/main/native/windows:windows_jni.dll"],
-    "//src:windows_msvc": ["//src/main/native/windows:windows_jni.dll"],
+    "//src/conditions:windows": ["//src/main/native/windows:windows_jni.dll"],
     "//conditions:default": [
         "//src/main/native:libunix.dylib",
         "//src/main/native:libunix.so",
@@ -37,6 +39,7 @@ filegroup(
     name = "srcs",
     srcs = glob(["**"]) + [
         "//src/test/java/com/google/devtools/build/lib/analysis/platform:srcs",
+        "//src/test/java/com/google/devtools/build/lib/analysis/skylark/annotations/processor:srcs",
         "//src/test/java/com/google/devtools/build/lib/analysis/whitelisting:srcs",
         "//src/test/java/com/google/devtools/build/lib/bazel/repository/cache:srcs",
         "//src/test/java/com/google/devtools/build/lib/bazel/repository/downloader:srcs",
@@ -74,9 +77,11 @@ filegroup(
 
 java_library(
     name = "testutil",
+    testonly = 1,
     srcs = glob(["testutil/*.java"]),
     visibility = ["//visibility:public"],
     deps = [
+        ":guava_junit_truth",
         "//src/main/java/com/google/devtools/build/lib:bazel-main",
         "//src/main/java/com/google/devtools/build/lib:bazel-rules",
         "//src/main/java/com/google/devtools/build/lib:build-base",
@@ -94,21 +99,19 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/vfs",
         "//src/main/java/com/google/devtools/build/lib/vfs/inmemoryfs",
         "//src/main/protobuf:invocation_policy_java_proto",
-        "//third_party:guava",
-        "//third_party:guava-testlib",
-        "//third_party:junit4",
-        "//third_party:truth",
     ],
 )
 
 java_library(
     name = "foundations_testutil",
+    testonly = 1,
     srcs = glob([
         "vfs/util/*.java",
         "events/util/*.java",
     ]),
     data = JNI_LIB,
     deps = [
+        ":guava_junit_truth",
         ":testutil",
         "//src/main/java/com/google/devtools/build/lib:bazel-main",
         "//src/main/java/com/google/devtools/build/lib:events",
@@ -122,15 +125,12 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/vfs",
         "//src/main/java/com/google/devtools/build/lib/vfs/inmemoryfs",
         "//src/main/java/com/google/devtools/build/lib/windows",
-        "//third_party:guava",
-        "//third_party:guava-testlib",
-        "//third_party:junit4",
-        "//third_party:truth",
     ],
 )
 
 java_library(
     name = "test_runner",
+    testonly = 1,
     srcs = ["AllTests.java"],
     deps = [
         ":testutil",
@@ -139,21 +139,140 @@ java_library(
 )
 
 java_test(
-    name = "foundations_test",
+    name = "cmdline_test",
+    size = "small",
+    srcs = glob(["cmdline/*.java"]),
+    tags = [
+        "foundations",
+    ],
+    test_class = "com.google.devtools.build.lib.AllTests",
+    deps = [
+        ":guava_junit_truth",
+        ":test_runner",
+        ":testutil",
+        "//src/main/java/com/google/devtools/build/lib/cmdline",
+        "//src/main/java/com/google/devtools/build/lib/vfs",
+    ],
+)
+
+java_test(
+    name = "concurrent_test",
+    size = "small",
+    srcs = glob(["concurrent/*.java"]),
+    flaky = True,
+    tags = [
+        "foundations",
+    ],
+    test_class = "com.google.devtools.build.lib.AllTests",
+    deps = [
+        ":guava_junit_truth",
+        ":test_runner",
+        ":testutil",
+        "//src/main/java/com/google/devtools/build/lib/concurrent",
+    ],
+)
+
+java_test(
+    name = "collect_test",
+    size = "small",
+    srcs = glob(["collect/*.java"]),
+    tags = [
+        "foundations",
+    ],
+    test_class = "com.google.devtools.build.lib.AllTests",
+    deps = [
+        ":guava_junit_truth",
+        ":test_runner",
+        ":testutil",
+        "//src/main/java/com/google/devtools/build/lib/collect",
+        "//src/main/java/com/google/devtools/build/lib/collect/nestedset",
+    ],
+)
+
+java_test(
+    name = "collect_nestedset_test",
+    size = "small",
+    srcs = glob(["collect/nestedset/*.java"]),
+    tags = [
+        "foundations",
+    ],
+    test_class = "com.google.devtools.build.lib.AllTests",
+    deps = [
+        ":guava_junit_truth",
+        ":test_runner",
+        ":testutil",
+        "//src/main/java/com/google/devtools/build/lib:util",
+        "//src/main/java/com/google/devtools/build/lib/collect/nestedset",
+        "//src/main/java/com/google/devtools/build/lib/collect/nestedset:fingerprint_cache",
+        "//src/main/java/com/google/devtools/build/lib/collect/nestedset:serialization",
+        "//src/main/java/com/google/devtools/build/lib/skyframe/serialization",
+        "//src/main/java/com/google/devtools/build/lib/skyframe/serialization/testutils",
+    ],
+)
+
+java_test(
+    name = "events_test",
+    size = "small",
+    srcs = glob(["events/*.java"]),
+    tags = [
+        "foundations",
+    ],
+    test_class = "com.google.devtools.build.lib.AllTests",
+    deps = [
+        ":guava_junit_truth",
+        ":test_runner",
+        ":testutil",
+        "//src/main/java/com/google/devtools/build/lib:events",
+        "//src/main/java/com/google/devtools/build/lib:io",
+        "//src/main/java/com/google/devtools/build/lib/skyframe/serialization/testutils",
+        "//src/main/java/com/google/devtools/build/lib/vfs:pathfragment",
+    ],
+)
+
+java_test(
+    name = "testutil_test",
+    size = "small",
+    srcs = glob(["testutil/*Test.java"]),
+    tags = [
+        "foundations",
+    ],
+    test_class = "com.google.devtools.build.lib.AllTests",
+    deps = [
+        ":guava_junit_truth",
+        ":test_runner",
+        ":testutil",
+    ],
+)
+
+java_test(
+    name = "unix_test",
+    size = "large",
+    srcs = glob(["unix/*.java"]),
+    tags = [
+        "foundations",
+        # This test cannot run on Windows, because it uses native Posix
+        # functions via JNI.
+        "no_windows",
+    ],
+    test_class = "com.google.devtools.build.lib.AllTests",
+    deps = [
+        ":foundations_testutil",
+        ":guava_junit_truth",
+        ":test_runner",
+        ":testutil",
+        ":vfs_symlink_aware_filesystem_test",
+        "//src/main/java/com/google/devtools/build/lib:unix",
+        "//src/main/java/com/google/devtools/build/lib:util",
+        "//src/main/java/com/google/devtools/build/lib/vfs",
+    ],
+)
+
+java_test(
+    name = "util_test",
     size = "large",
     srcs = glob(
         [
-            "cmdline/*.java",
-            "concurrent/*.java",
-            "collect/*.java",
-            "collect/nestedset/*.java",
-            "events/*.java",
-            "testutil/*Test.java",
-            "unix/*.java",
             "util/*.java",
-            "util/io/*.java",
-            "vfs/*.java",
-            "vfs/inmemoryfs/*.java",
         ],
         exclude = [
             # java_rules_skylark doesn't support resource loading with
@@ -161,38 +280,118 @@ java_test(
             "util/ResourceFileLoaderTest.java",
         ] + ALL_WINDOWS_TESTS,
     ),
-    data = glob(["vfs/*.zip"]),
-    flaky = True,
     tags = [
         "foundations",
         "no_windows",
     ],
     test_class = "com.google.devtools.build.lib.AllTests",
     deps = [
-        ":foundations_testutil",
+        ":guava_junit_truth",
         ":test_runner",
         ":testutil",
-        "//src/main/java/com/google/devtools/build/lib:base-util",
-        "//src/main/java/com/google/devtools/build/lib:bazel-main",
-        "//src/main/java/com/google/devtools/build/lib:events",
-        "//src/main/java/com/google/devtools/build/lib:io",
-        "//src/main/java/com/google/devtools/build/lib:os_util",
-        "//src/main/java/com/google/devtools/build/lib:packages",
         "//src/main/java/com/google/devtools/build/lib:single-line-formatter",
-        "//src/main/java/com/google/devtools/build/lib:unix",
         "//src/main/java/com/google/devtools/build/lib:util",
-        "//src/main/java/com/google/devtools/build/lib/clock",
-        "//src/main/java/com/google/devtools/build/lib/collect",
-        "//src/main/java/com/google/devtools/build/lib/collect/nestedset",
-        "//src/main/java/com/google/devtools/build/lib/concurrent",
         "//src/main/java/com/google/devtools/build/lib/shell",
+        "//src/main/java/com/google/devtools/build/lib/skyframe/serialization/testutils",
         "//src/main/java/com/google/devtools/build/lib/vfs",
         "//src/main/java/com/google/devtools/build/lib/vfs/inmemoryfs",
         "//src/main/java/com/google/devtools/common/options",
-        "//third_party:guava",
-        "//third_party:guava-testlib",
-        "//third_party:junit4",
-        "//third_party:truth",
+    ],
+)
+
+java_test(
+    name = "util_io_test",
+    size = "large",
+    srcs = glob(["util/io/*.java"]),
+    tags = [
+        "foundations",
+        "no_windows",
+    ],
+    test_class = "com.google.devtools.build.lib.AllTests",
+    deps = [
+        ":guava_junit_truth",
+        ":test_runner",
+        ":testutil",
+        "//src/main/java/com/google/devtools/build/lib:io",
+        "//src/main/java/com/google/devtools/build/lib:util",
+    ],
+)
+
+java_test(
+    name = "vfs_test",
+    size = "large",
+    srcs = glob(
+        [
+            "vfs/*.java",
+        ],
+        exclude = ALL_WINDOWS_TESTS,
+    ),
+    tags = [
+        "foundations",
+        "no_windows",
+    ],
+    test_class = "com.google.devtools.build.lib.AllTests",
+    deps = [
+        ":guava_junit_truth",
+        ":foundations_testutil",
+        ":test_runner",
+        ":testutil",
+        # TODO(laszlocsomor): remove the .../lib:unix this dependency, because
+        # it prevents running the test on Windows.
+        "//src/main/java/com/google/devtools/build/lib:unix",
+        "//src/main/java/com/google/devtools/build/lib:util",
+        "//src/main/java/com/google/devtools/build/lib/clock",
+        "//src/main/java/com/google/devtools/build/lib/skyframe/serialization",
+        "//src/main/java/com/google/devtools/build/lib/skyframe/serialization/testutils",
+        "//src/main/java/com/google/devtools/build/lib/vfs",
+        "//src/main/java/com/google/devtools/build/lib/vfs/inmemoryfs",
+    ],
+)
+
+java_library(
+    name = "vfs_filesystem_test",
+    testonly = 1,
+    srcs = ["vfs/FileSystemTest.java"],
+    visibility = ["//visibility:private"],
+    deps = [
+        ":guava_junit_truth",
+        ":testutil",
+        "//src/main/java/com/google/devtools/build/lib:util",
+        # TODO(laszlocsomor): remove the .../lib:unix this dependency, because
+        # it prevents running the test on Windows.
+        "//src/main/java/com/google/devtools/build/lib:unix",
+        "//src/main/java/com/google/devtools/build/lib/vfs",
+    ],
+)
+
+java_library(
+    name = "vfs_symlink_aware_filesystem_test",
+    testonly = 1,
+    srcs = ["vfs/SymlinkAwareFileSystemTest.java"],
+    visibility = ["//visibility:private"],
+    deps = [
+        ":guava_junit_truth",
+        ":vfs_filesystem_test",
+        "//src/main/java/com/google/devtools/build/lib/vfs",
+    ],
+)
+
+java_test(
+    name = "vfs_inmemoryfs_test",
+    size = "small",
+    srcs = glob(["vfs/inmemoryfs/*.java"]),
+    tags = [
+        "foundations",
+    ],
+    test_class = "com.google.devtools.build.lib.AllTests",
+    deps = [
+        ":guava_junit_truth",
+        ":test_runner",
+        ":testutil",
+        ":vfs_symlink_aware_filesystem_test",
+        "//src/main/java/com/google/devtools/build/lib/clock",
+        "//src/main/java/com/google/devtools/build/lib/vfs",
+        "//src/main/java/com/google/devtools/build/lib/vfs/inmemoryfs",
     ],
 )
 
@@ -200,7 +399,7 @@ java_test(
 # systems
 java_test(
     name = "windows_test",
-    srcs = CROSS_PLATFORM_WINDOWS_TESTS,
+    srcs = CROSS_PLATFORM_WINDOWS_TESTS + ["vfs/LocalPathAbstractTest.java"],
     jvm_flags = [
         "-Dblaze.os=Windows",
         "-Dbazel.windows_unix_root=C:/fake/msys",
@@ -208,6 +407,7 @@ java_test(
     test_class = "com.google.devtools.build.lib.AllTests",
     deps = [
         ":foundations_testutil",
+        ":guava_junit_truth",
         ":test_runner",
         ":testutil",
         "//src/main/java/com/google/devtools/build/lib:bazel-main",
@@ -217,27 +417,21 @@ java_test(
         "//src/main/java/com/google/devtools/build/lib/vfs/inmemoryfs",
         "//src/main/java/com/google/devtools/build/lib/windows",
         "//src/main/java/com/google/devtools/common/options",
-        "//third_party:guava",
-        "//third_party:guava-testlib",
-        "//third_party:junit4",
-        "//third_party:truth",
     ],
 )
 
 java_library(
     name = "windows_testutil",
+    testonly = 1,
     srcs = [
         "windows/util/WindowsTestUtil.java",
     ],
     deps = [
+        ":guava_junit_truth",
         "//src/main/java/com/google/devtools/build/lib/vfs",
         "//src/main/java/com/google/devtools/build/lib/windows",
         "//src/main/java/com/google/devtools/build/lib/windows/jni",
         "//src/main/java/com/google/devtools/build/lib/windows/runfiles",
-        "//third_party:guava",
-        "//third_party:guava-testlib",
-        "//third_party:junit4",
-        "//third_party:truth",
     ],
 )
 
@@ -253,6 +447,7 @@ java_test(
     ],
     test_class = "com.google.devtools.build.lib.AllTests",
     deps = [
+        ":guava_junit_truth",
         ":test_runner",
         ":testutil",
         ":windows_testutil",
@@ -261,20 +456,20 @@ java_test(
         "//src/main/java/com/google/devtools/build/lib/vfs",
         "//src/main/java/com/google/devtools/build/lib/vfs/inmemoryfs",
         "//src/main/java/com/google/devtools/build/lib/windows",
+        "//src/main/java/com/google/devtools/build/lib/windows:windows_short_path",
         "//src/main/java/com/google/devtools/build/lib/windows/jni",
-        "//third_party:guava",
-        "//third_party:junit4",
-        "//third_party:truth",
     ],
 )
 
 java_library(
     name = "actions_testutil",
+    testonly = 1,
     srcs = glob([
         "actions/util/*.java",
     ]),
     deps = [
         ":foundations_testutil",
+        ":guava_junit_truth",
         ":test_runner",
         ":testutil",
         "//src/main/java/com/google/devtools/build/lib:bazel-main",
@@ -293,12 +488,8 @@ java_library(
         "//src/main/java/com/google/devtools/build/skyframe:skyframe-objects",
         "//src/main/java/com/google/devtools/common/options",
         "//src/main/protobuf:action_cache_java_proto",
-        "//third_party:guava",
-        "//third_party:guava-testlib",
         "//third_party:jsr305",
-        "//third_party:junit4",
         "//third_party:mockito",
-        "//third_party:truth",
     ],
 )
 
@@ -311,6 +502,7 @@ java_test(
     deps = [
         ":actions_testutil",
         ":foundations_testutil",
+        ":guava_junit_truth",
         ":test_runner",
         ":testutil",
         "//src/main/java/com/google/devtools/build/lib:bazel-main",
@@ -322,6 +514,7 @@ java_test(
         "//src/main/java/com/google/devtools/build/lib:packages",
         "//src/main/java/com/google/devtools/build/lib:util",
         "//src/main/java/com/google/devtools/build/lib/actions",
+        "//src/main/java/com/google/devtools/build/lib/analysis/platform",
         "//src/main/java/com/google/devtools/build/lib/clock",
         "//src/main/java/com/google/devtools/build/lib/collect",
         "//src/main/java/com/google/devtools/build/lib/collect/nestedset",
@@ -331,12 +524,8 @@ java_test(
         "//src/main/java/com/google/devtools/build/lib/vfs/inmemoryfs",
         "//src/main/java/com/google/devtools/common/options",
         "//src/main/protobuf:action_cache_java_proto",
-        "//third_party:guava",
-        "//third_party:guava-testlib",
         "//third_party:jsr305",
-        "//third_party:junit4",
         "//third_party:mockito",
-        "//third_party:truth",
         "//third_party:truth8",
     ],
 )
@@ -360,6 +549,7 @@ java_library(
     deps = [
         ":actions_testutil",
         ":foundations_testutil",
+        ":guava_junit_truth",
         ":packages_testutil",
         ":testutil",
         "//src/main/java/com/google/devtools/build/lib:android-rules",
@@ -372,12 +562,15 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib:io",
         "//src/main/java/com/google/devtools/build/lib:java-compilation",
         "//src/main/java/com/google/devtools/build/lib:java-rules",
+        "//src/main/java/com/google/devtools/build/lib:keep-going-option",
+        "//src/main/java/com/google/devtools/build/lib:loading-phase-threads-option",
         "//src/main/java/com/google/devtools/build/lib:packages",
         "//src/main/java/com/google/devtools/build/lib:proto-rules",
         "//src/main/java/com/google/devtools/build/lib:python-rules",
         "//src/main/java/com/google/devtools/build/lib:runtime",
         "//src/main/java/com/google/devtools/build/lib:util",
         "//src/main/java/com/google/devtools/build/lib/actions",
+        "//src/main/java/com/google/devtools/build/lib/analysis/platform",
         "//src/main/java/com/google/devtools/build/lib/clock",
         "//src/main/java/com/google/devtools/build/lib/collect",
         "//src/main/java/com/google/devtools/build/lib/collect/nestedset",
@@ -400,18 +593,15 @@ java_library(
         "//src/main/protobuf:extra_actions_base_java_proto",
         "//src/test/java/com/google/devtools/build/lib/skyframe:testutil",
         "//src/test/java/com/google/devtools/build/skyframe:testutil",
-        "//third_party:guava",
-        "//third_party:guava-testlib",
         "//third_party:jsr305",
-        "//third_party:junit4",
         "//third_party:mockito",
-        "//third_party:truth",
         "//third_party/protobuf:protobuf_java",
     ],
 )
 
 java_library(
     name = "integration_testutil",
+    testonly = 1,
     srcs = glob([
         "integration/util/*.java",
     ]),
@@ -433,6 +623,7 @@ java_test(
         ":actions_testutil",
         ":analysis_testutil",
         ":foundations_testutil",
+        ":guava_junit_truth",
         ":test_runner",
         ":testutil",
         "//src/main/java/com/google/devtools/build/lib:bazel-main",
@@ -443,12 +634,8 @@ java_test(
         "//src/main/java/com/google/devtools/build/lib/actions",
         "//src/main/java/com/google/devtools/build/lib/vfs",
         "//src/main/protobuf:extra_actions_base_java_proto",
-        "//third_party:guava",
-        "//third_party:guava-testlib",
         "//third_party:jsr305",
-        "//third_party:junit4",
         "//third_party:mockito",
-        "//third_party:truth",
     ],
 )
 
@@ -463,6 +650,7 @@ java_test(
         ":actions_testutil",
         ":analysis_testutil",
         ":foundations_testutil",
+        ":guava_junit_truth",
         ":test_runner",
         ":testutil",
         "//src/main/java/com/google/devtools/build/lib:bazel-main",
@@ -475,15 +663,13 @@ java_test(
         "//src/main/java/com/google/devtools/build/lib:util",
         "//src/main/java/com/google/devtools/build/lib/rules/cpp",
         "//src/main/java/com/google/devtools/build/lib/rules/objc",
+        "//src/main/java/com/google/devtools/build/lib/skyframe/serialization",
+        "//src/main/java/com/google/devtools/build/lib/skyframe/serialization/testutils",
         "//src/main/java/com/google/devtools/build/lib/vfs",
         "//src/main/java/com/google/devtools/common/options",
         "//src/main/protobuf:extra_actions_base_java_proto",
-        "//third_party:guava",
-        "//third_party:guava-testlib",
         "//third_party:jsr305",
-        "//third_party:junit4",
         "//third_party:mockito",
-        "//third_party:truth",
     ],
 )
 
@@ -498,6 +684,7 @@ java_test(
         ":actions_testutil",
         ":analysis_testutil",
         ":foundations_testutil",
+        ":guava_junit_truth",
         ":test_runner",
         ":testutil",
         "//src/main/java/com/google/devtools/build/lib:bazel-main",
@@ -506,9 +693,6 @@ java_test(
         "//src/main/java/com/google/devtools/build/lib:packages",
         "//src/main/java/com/google/devtools/build/lib:util",
         "//src/main/java/com/google/devtools/build/lib/vfs",
-        "//third_party:guava",
-        "//third_party:junit4",
-        "//third_party:truth",
     ],
 )
 
@@ -523,6 +707,7 @@ java_test(
         ":actions_testutil",
         ":analysis_testutil",
         ":foundations_testutil",
+        ":guava_junit_truth",
         ":packages_testutil",
         ":test_runner",
         ":testutil",
@@ -531,9 +716,6 @@ java_test(
         "//src/main/java/com/google/devtools/build/lib:build-base",
         "//src/main/java/com/google/devtools/build/lib:packages",
         "//src/main/java/com/google/devtools/build/lib/vfs",
-        "//third_party:guava",
-        "//third_party:junit4",
-        "//third_party:truth",
     ],
 )
 
@@ -552,6 +734,7 @@ java_test(
         ":actions_testutil",
         ":analysis_testutil",
         ":foundations_testutil",
+        ":guava_junit_truth",
         ":test_runner",
         ":testutil",
         "//src/main/java/com/google/devtools/build/lib:bazel-main",
@@ -567,18 +750,16 @@ java_test(
         "//src/main/java/com/google/devtools/build/lib/collect",
         "//src/main/java/com/google/devtools/build/lib/collect/nestedset",
         "//src/main/java/com/google/devtools/build/lib/rules/cpp",
+        "//src/main/java/com/google/devtools/build/lib/skyframe/serialization",
+        "//src/main/java/com/google/devtools/build/lib/skyframe/serialization/testutils",
         "//src/main/java/com/google/devtools/build/lib/vfs",
         "//src/main/java/com/google/devtools/build/lib/vfs/inmemoryfs",
         "//src/main/java/com/google/devtools/build/skyframe",
         "//src/main/java/com/google/devtools/build/skyframe:skyframe-objects",
         "//src/test/java/com/google/devtools/build/lib/skyframe:testutil",
         "//third_party:auto_value",
-        "//third_party:guava",
-        "//third_party:guava-testlib",
         "//third_party:jsr305",
-        "//third_party:junit4",
         "//third_party:mockito",
-        "//third_party:truth",
     ],
 )
 
@@ -590,6 +771,7 @@ java_test(
     test_class = "com.google.devtools.build.lib.AllTests",
     deps = [
         ":foundations_testutil",
+        ":guava_junit_truth",
         ":test_runner",
         ":testutil",
         "//src/main/java/com/google/devtools/build/lib:events",
@@ -597,14 +779,12 @@ java_test(
         "//src/main/java/com/google/devtools/build/lib/cmdline",
         "//src/main/java/com/google/devtools/build/lib/collect",
         "//src/main/java/com/google/devtools/build/lib/graph",
-        "//third_party:guava",
-        "//third_party:junit4",
-        "//third_party:truth",
     ],
 )
 
 java_library(
     name = "packages_testutil",
+    testonly = 1,
     srcs = glob([
         "packages/util/*.java",
     ]),
@@ -614,6 +794,7 @@ java_library(
     ],
     deps = [
         ":foundations_testutil",
+        ":guava_junit_truth",
         ":testutil",
         "//src/main/java/com/google/devtools/build/docgen:docgen_javalib",
         "//src/main/java/com/google/devtools/build/lib:bazel-main",
@@ -637,12 +818,8 @@ java_library(
         "//src/main/protobuf:build_java_proto",
         "//src/main/protobuf:crosstool_config_java_proto",
         "//src/main/protobuf:extra_actions_base_java_proto",
-        "//third_party:guava",
-        "//third_party:guava-testlib",
         "//third_party:jsr305",
-        "//third_party:junit4",
         "//third_party:mockito",
-        "//third_party:truth",
         "//third_party/protobuf:protobuf_java",
     ],
 )
@@ -662,6 +839,7 @@ java_test(
         ":actions_testutil",
         ":analysis_testutil",
         ":foundations_testutil",
+        ":guava_junit_truth",
         ":packages_testutil",
         ":test_runner",
         ":testutil",
@@ -677,11 +855,7 @@ java_test(
         "//src/main/java/com/google/devtools/build/skyframe",
         "//src/main/java/com/google/devtools/build/skyframe:skyframe-objects",
         "//src/main/protobuf:build_java_proto",
-        "//third_party:guava",
-        "//third_party:guava-testlib",
         "//third_party:jsr305",
-        "//third_party:junit4",
-        "//third_party:truth",
         "//third_party/protobuf:protobuf_java",
     ],
 )
@@ -696,58 +870,21 @@ java_test(
     test_class = "com.google.devtools.build.lib.AllTests",
     deps = [
         ":analysis_testutil",
+        ":guava_junit_truth",
         ":packages_testutil",
         ":test_runner",
         "//src/main/java/com/google/devtools/build/lib:bazel-rules",
         "//src/main/java/com/google/devtools/build/lib:build-base",
         "//src/main/java/com/google/devtools/build/lib:io",
         "//src/main/java/com/google/devtools/build/lib:packages",
+        "//src/main/java/com/google/devtools/build/lib/actions",
         "//src/main/java/com/google/devtools/build/lib/vfs/inmemoryfs",
         "//src/main/java/com/google/devtools/build/skyframe",
         "//src/main/java/com/google/devtools/build/skyframe:skyframe-objects",
         "//src/main/java/com/google/devtools/common/options",
         "//src/main/java/com/google/devtools/common/options:invocation_policy",
         "//src/test/java/com/google/devtools/build/lib:testutil",
-        "//third_party:guava",
         "//third_party:jsr305",
-        "//third_party:junit4",
-        "//third_party:truth",
-    ],
-)
-
-cc_binary(
-    name = "shell/killmyself",
-    srcs = ["shell/killmyself.cc"],
-)
-
-java_test(
-    name = "shell_test",
-    srcs = glob([
-        "shell/*.java",
-    ]),
-    data = [
-        ":shell/killmyself",
-    ],
-    flaky = True,
-    tags = [
-        "no_windows",
-        "shell",
-    ],
-    test_class = "com.google.devtools.build.lib.AllTests",
-    deps = [
-        ":foundations_testutil",
-        ":test_runner",
-        ":testutil",
-        "//src/main/java/com/google/devtools/build/lib:bazel-main",
-        "//src/main/java/com/google/devtools/build/lib/collect",
-        "//src/main/java/com/google/devtools/build/lib/shell",
-        "//third_party:guava",
-        "//third_party:guava-testlib",
-        "//third_party:jsr305",
-        "//third_party:junit4",
-        "//third_party:mockito",
-        "//third_party:truth",
-        "//third_party:truth8",
     ],
 )
 
@@ -763,6 +900,7 @@ java_test(
     test_class = "com.google.devtools.build.lib.AllTests",
     deps = [
         ":foundations_testutil",
+        ":guava_junit_truth",
         ":test_runner",
         ":testutil",
         "//src/main/java/com/google/devtools/build/lib:bazel-main",
@@ -773,12 +911,8 @@ java_test(
         "//src/main/java/com/google/devtools/build/lib/collect",
         "//src/main/java/com/google/devtools/build/lib/vfs",
         "//src/main/protobuf:command_server_java_proto",
-        "//third_party:guava",
-        "//third_party:guava-testlib",
         "//third_party:jsr305",
-        "//third_party:junit4",
         "//third_party:mockito",
-        "//third_party:truth",
         "//third_party/grpc:grpc-jar",
         "//third_party/protobuf:protobuf_java",
     ],
@@ -792,6 +926,7 @@ java_test(
     test_class = "com.google.devtools.build.lib.AllTests",
     deps = [
         ":foundations_testutil",
+        ":guava_junit_truth",
         ":syntax_testutil",
         ":test_runner",
         ":testutil",
@@ -806,12 +941,9 @@ java_test(
         "//src/main/java/com/google/devtools/build/lib/collect",
         "//src/main/java/com/google/devtools/build/lib/collect/nestedset",
         "//src/main/java/com/google/devtools/build/lib/concurrent",
+        "//src/main/java/com/google/devtools/build/lib/skyframe/serialization/testutils",
         "//src/main/java/com/google/devtools/build/lib/vfs",
-        "//third_party:guava",
-        "//third_party:guava-testlib",
         "//third_party:jsr305",
-        "//third_party:junit4",
-        "//third_party:truth",
     ],
 )
 
@@ -826,6 +958,7 @@ java_test(
     test_class = "com.google.devtools.build.lib.AllTests",
     deps = [
         ":foundations_testutil",
+        ":guava_junit_truth",
         ":syntax_testutil",
         ":test_runner",
         ":testutil",
@@ -833,11 +966,7 @@ java_test(
         "//src/main/java/com/google/devtools/build/lib/profiler",
         "//src/main/java/com/google/devtools/build/lib/profiler:profiler-output",
         "//src/main/java/com/google/devtools/build/lib/vfs",
-        "//third_party:guava",
-        "//third_party:guava-testlib",
         "//third_party:jsr305",
-        "//third_party:junit4",
-        "//third_party:truth",
     ],
 )
 
@@ -851,28 +980,27 @@ java_test(
     test_class = "com.google.devtools.build.lib.packages.BazelDocumentationTest",
     deps = [
         ":foundations_testutil",
+        ":guava_junit_truth",
         ":packages_testutil",
         ":windows_testutil",
         "//src/main/java/com/google/devtools/build/lib:bazel-main",
         "//src/main/java/com/google/devtools/build/lib:bazel-rules",
         "//src/main/java/com/google/devtools/build/lib:os_util",
         "//src/main/java/com/google/devtools/build/lib:packages",
-        "//third_party:guava",
-        "//third_party:guava-testlib",
         "//third_party:jsr305",
-        "//third_party:junit4",
-        "//third_party:truth",
     ],
 )
 
 java_library(
     name = "syntax_testutil",
+    testonly = 1,
     srcs = glob([
         "syntax/util/*.java",
     ]),
     visibility = ["//visibility:public"],
     deps = [
         ":foundations_testutil",
+        ":guava_junit_truth",
         ":test_runner",
         ":testutil",
         "//src/main/java/com/google/devtools/build/lib:bazel-main",
@@ -884,11 +1012,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/collect",
         "//src/main/java/com/google/devtools/build/lib/concurrent",
         "//src/main/java/com/google/devtools/build/lib/vfs",
-        "//third_party:guava",
-        "//third_party:guava-testlib",
         "//third_party:jsr305",
-        "//third_party:junit4",
-        "//third_party:truth",
     ],
 )
 
@@ -900,6 +1024,7 @@ java_test(
     deps = [
         ":actions_testutil",
         ":analysis_testutil",
+        ":guava_junit_truth",
         ":testutil",
         "//src/main/java/com/google/devtools/build/lib:bazel-main",
         "//src/main/java/com/google/devtools/build/lib:bazel-rules",
@@ -908,11 +1033,7 @@ java_test(
         "//src/main/java/com/google/devtools/build/lib:java-rules",
         "//src/main/java/com/google/devtools/build/lib:util",
         "//src/main/java/com/google/devtools/build/lib/vfs",
-        "//third_party:guava",
-        "//third_party:guava-testlib",
         "//third_party:jsr305",
-        "//third_party:junit4",
-        "//third_party:truth",
     ],
 )
 
@@ -924,6 +1045,7 @@ java_test(
     deps = [
         ":actions_testutil",
         ":analysis_testutil",
+        ":guava_junit_truth",
         ":testutil",
         "//src/main/java/com/google/devtools/build/lib:bazel-main",
         "//src/main/java/com/google/devtools/build/lib:bazel-rules",
@@ -936,11 +1058,7 @@ java_test(
         "//src/main/java/com/google/devtools/build/lib/collect",
         "//src/main/java/com/google/devtools/build/lib/collect/nestedset",
         "//src/main/java/com/google/devtools/build/lib/vfs",
-        "//third_party:guava",
-        "//third_party:guava-testlib",
         "//third_party:jsr305",
-        "//third_party:junit4",
-        "//third_party:truth",
     ],
 )
 
@@ -949,10 +1067,9 @@ java_test(
     srcs = ["rules/java/proto/StrictDepsUtilsTest.java"],
     deps = [
         ":analysis_testutil",
+        ":guava_junit_truth",
         "//src/main/java/com/google/devtools/build/lib:build-base",
         "//src/main/java/com/google/devtools/build/lib:java-rules",
-        "//third_party:junit4",
-        "//third_party:truth",
     ],
 )
 
@@ -963,9 +1080,8 @@ java_test(
     test_class = "com.google.devtools.build.lib.rules.test.SkylarkTestingModuleTest",
     deps = [
         ":analysis_testutil",
+        ":guava_junit_truth",
         "//src/main/java/com/google/devtools/build/lib:build-base",
-        "//third_party:junit4",
-        "//third_party:truth",
         "//third_party/protobuf:protobuf_java",
     ],
 )
@@ -983,6 +1099,7 @@ java_test(
     deps = [
         ":analysis_testutil",
         ":foundations_testutil",
+        ":guava_junit_truth",
         ":test_runner",
         ":testutil",
         "//src/main/java/com/google/devtools/build/lib:android-rules",
@@ -990,6 +1107,7 @@ java_test(
         "//src/main/java/com/google/devtools/build/lib:bazel-rules",
         "//src/main/java/com/google/devtools/build/lib:build-base",
         "//src/main/java/com/google/devtools/build/lib:core-rules",
+        "//src/main/java/com/google/devtools/build/lib:core-workspace-rules",
         "//src/main/java/com/google/devtools/build/lib:events",
         "//src/main/java/com/google/devtools/build/lib:java-compilation",
         "//src/main/java/com/google/devtools/build/lib:packages-internal",
@@ -998,24 +1116,27 @@ java_test(
         "//src/main/java/com/google/devtools/build/lib/actions",
         "//src/main/java/com/google/devtools/build/lib/cmdline",
         "//src/main/java/com/google/devtools/build/lib/collect/nestedset",
+        "//src/main/java/com/google/devtools/build/lib/rules/config",
         "//src/main/java/com/google/devtools/build/lib/rules/cpp",
         "//src/main/java/com/google/devtools/build/lib/vfs",
         "//src/main/java/com/google/devtools/common/options",
         "//src/main/protobuf:crosstool_config_java_proto",
         "//src/test/java/com/google/devtools/build/lib:actions_testutil",
         "//src/test/java/com/google/devtools/build/lib:packages_testutil",
-        "//third_party:guava",
-        "//third_party:junit4",
-        "//third_party:truth",
+        "//src/test/java/com/google/devtools/build/lib/rules/android:AndroidLocalTestTest",
     ],
 )
 
 java_test(
     name = "runtime-tests",
-    srcs = glob(["runtime/*.java"]),
+    srcs = glob([
+        "runtime/*.java",
+        "runtime/commands/*.java",
+    ]),
     test_class = "com.google.devtools.build.lib.AllTests",
     deps = [
         ":foundations_testutil",
+        ":guava_junit_truth",
         ":test_runner",
         ":testutil",
         "//src/main/java/com/google/devtools/build/lib:bazel-rules",
@@ -1039,10 +1160,7 @@ java_test(
         "//src/main/protobuf:invocation_policy_java_proto",
         "//src/main/protobuf:test_status_java_proto",
         "//src/test/java/com/google/devtools/common/options:testutils",
-        "//third_party:guava",
-        "//third_party:junit4",
         "//third_party:mockito",
-        "//third_party:truth",
     ],
 )
 
@@ -1053,6 +1171,7 @@ java_test(
     deps = [
         ":analysis_testutil",
         ":foundations_testutil",
+        ":guava_junit_truth",
         ":test_runner",
         ":testutil",
         "//src/main/java/com/google/devtools/build/lib:build-base",
@@ -1061,15 +1180,13 @@ java_test(
         "//src/main/java/com/google/devtools/build/lib:io",
         "//src/main/java/com/google/devtools/build/lib/actions",
         "//src/main/java/com/google/devtools/build/lib/authandtls",
+        "//src/main/java/com/google/devtools/build/lib/clock",
         "//src/main/java/com/google/devtools/build/lib/remote",
         "//src/main/java/com/google/devtools/build/lib/vfs",
         "//src/main/java/com/google/devtools/build/lib/vfs/inmemoryfs",
         "//src/main/java/com/google/devtools/common/options",
         "//third_party:api_client",
-        "//third_party:guava",
-        "//third_party:junit4",
         "//third_party:mockito",
-        "//third_party:truth",
         "//third_party/grpc:grpc-jar",
         "//third_party/protobuf:protobuf_java",
         "@googleapis//:google_bytestream_bytestream_java_grpc",
@@ -1095,6 +1212,7 @@ java_test(
         ":actions_testutil",
         ":analysis_testutil",
         ":foundations_testutil",
+        ":guava_junit_truth",
         ":testutil",
         "//src/main/java/com/google/devtools/build/lib:bazel-rules",
         "//src/main/java/com/google/devtools/build/lib:build-base",
@@ -1107,9 +1225,6 @@ java_test(
         "//src/main/java/com/google/devtools/build/lib/shell",
         "//src/main/java/com/google/devtools/build/lib/vfs",
         "//src/main/java/com/google/devtools/common/options",
-        "//third_party:guava",
-        "//third_party:junit4",
-        "//third_party:truth",
     ],
 )
 
@@ -1123,6 +1238,7 @@ java_test(
         ":actions_testutil",
         ":analysis_testutil",
         ":foundations_testutil",
+        ":guava_junit_truth",
         ":integration_testutil",
         ":testutil",
         "//src/main/java/com/google/devtools/build/lib:bazel-rules",
@@ -1134,14 +1250,12 @@ java_test(
         "//src/main/java/com/google/devtools/build/lib/actions",
         "//src/main/java/com/google/devtools/build/lib/clock",
         "//src/main/java/com/google/devtools/build/lib/exec/local",
+        "//src/main/java/com/google/devtools/build/lib/exec/local:options",
         "//src/main/java/com/google/devtools/build/lib/rules/apple",
         "//src/main/java/com/google/devtools/build/lib/shell",
         "//src/main/java/com/google/devtools/build/lib/standalone",
         "//src/main/java/com/google/devtools/build/lib/vfs",
         "//src/main/java/com/google/devtools/common/options",
-        "//third_party:guava",
-        "//third_party:junit4",
-        "//third_party:truth",
     ],
 )
 
@@ -1154,6 +1268,7 @@ java_test(
         ":actions_testutil",
         ":analysis_testutil",
         ":foundations_testutil",
+        ":guava_junit_truth",
         ":test_runner",
         ":testutil",
         "//src/main/java/com/google/devtools/build/lib:bazel-rules",
@@ -1166,10 +1281,7 @@ java_test(
         "//src/main/java/com/google/devtools/build/lib/vfs",
         "//src/main/java/com/google/devtools/build/lib/vfs/inmemoryfs",
         "//src/main/java/com/google/devtools/common/options",
-        "//third_party:guava",
-        "//third_party:junit4",
         "//third_party:mockito",
-        "//third_party:truth",
         "//third_party/protobuf:protobuf_java",
     ],
 )
@@ -1181,19 +1293,22 @@ java_test(
     test_class = "com.google.devtools.build.lib.AllTests",
     deps = [
         ":analysis_testutil",
+        ":guava_junit_truth",
         "//src/main/java/com/google/devtools/build/lib:build-base",
         "//src/main/java/com/google/devtools/build/lib:io",
+        "//src/main/java/com/google/devtools/build/lib:unix",
         "//src/main/java/com/google/devtools/build/lib:util",
         "//src/main/java/com/google/devtools/build/lib/actions",
         "//src/main/java/com/google/devtools/build/lib/exec/local",
+        "//src/main/java/com/google/devtools/build/lib/exec/local:options",
         "//src/main/java/com/google/devtools/build/lib/shell",
         "//src/main/java/com/google/devtools/build/lib/vfs",
         "//src/main/java/com/google/devtools/build/lib/vfs/inmemoryfs",
         "//src/main/java/com/google/devtools/common/options",
-        "//third_party:guava",
-        "//third_party:junit4",
+        "//src/main/tools:process-wrapper",
+        "//src/test/java/com/google/devtools/build/lib:testutil",
+        "//src/test/shell/integration:spend_cpu_time",
         "//third_party:mockito",
-        "//third_party:truth",
         "//third_party:truth8",
     ],
 )
@@ -1203,6 +1318,7 @@ java_test(
     srcs = ["rules/proto/ProtoCompileActionBuilderTest.java"],
     deps = [
         ":actions_testutil",
+        ":guava_junit_truth",
         "//src/main/java/com/google/devtools/build/lib:build-base",
         "//src/main/java/com/google/devtools/build/lib:proto-rules",
         "//src/main/java/com/google/devtools/build/lib:util",
@@ -1212,10 +1328,7 @@ java_test(
         "//src/main/java/com/google/devtools/build/lib/collect/nestedset",
         "//src/main/java/com/google/devtools/build/lib/vfs",
         "//src/main/java/com/google/devtools/build/lib/vfs/inmemoryfs",
-        "//third_party:guava",
-        "//third_party:junit4",
         "//third_party:mockito",
-        "//third_party:truth",
     ],
 )
 
@@ -1225,13 +1338,11 @@ java_test(
     deps = [
         ":actions_testutil",
         ":analysis_testutil",
+        ":guava_junit_truth",
         "//src/main/java/com/google/devtools/build/lib:build-base",
         "//src/main/java/com/google/devtools/build/lib:proto-rules",
         "//src/main/java/com/google/devtools/build/lib:util",
         "//src/main/java/com/google/devtools/build/lib/cmdline",
-        "//third_party:guava",
-        "//third_party:junit4",
-        "//third_party:truth",
     ],
 )
 
@@ -1241,12 +1352,10 @@ java_test(
     deps = [
         ":actions_testutil",
         ":analysis_testutil",
+        ":guava_junit_truth",
         "//src/main/java/com/google/devtools/build/lib:build-base",
         "//src/main/java/com/google/devtools/build/lib:proto-rules",
         "//src/main/java/com/google/devtools/build/lib/actions",
-        "//third_party:guava",
-        "//third_party:junit4",
-        "//third_party:truth",
     ],
 )
 
@@ -1257,6 +1366,7 @@ java_test(
     deps = [
         ":actions_testutil",
         ":analysis_testutil",
+        ":guava_junit_truth",
         "//src/main/java/com/google/devtools/build/lib:build-base",
         "//src/main/java/com/google/devtools/build/lib:events",
         "//src/main/java/com/google/devtools/build/lib:io",
@@ -1271,9 +1381,6 @@ java_test(
         "//src/test/java/com/google/devtools/build/lib:packages_testutil",
         "//src/test/java/com/google/devtools/build/lib:testutil",
         "//third_party:auto_value",
-        "//third_party:guava",
-        "//third_party:junit4",
-        "//third_party:truth",
     ],
 )
 
@@ -1283,14 +1390,24 @@ java_test(
     test_class = "com.google.devtools.build.lib.AllTests",
     deps = [
         ":foundations_testutil",
+        ":guava_junit_truth",
         ":test_runner",
         "//src/main/java/com/google/devtools/build/lib:os_util",
         "//src/main/java/com/google/devtools/build/lib/vfs",
         "//src/main/java/com/google/devtools/build/lib/vfs/inmemoryfs",
         "//src/main/java/com/google/devtools/build/lib/worker",
         "//src/main/protobuf:worker_protocol_java_proto",
+    ],
+)
+
+java_library(
+    name = "guava_junit_truth",
+    testonly = 1,
+    visibility = ["//visibility:private"],
+    exports = [
         "//third_party:guava",
         "//third_party:guava-testlib",
+        "//third_party:junit4",
         "//third_party:truth",
     ],
 )
@@ -1362,16 +1479,21 @@ test_suite(
     tests = [
         ":windows_tests",
         "//src/test/java/com/google/devtools/build/lib/analysis/platform:all_windows_tests",
+        "//src/test/java/com/google/devtools/build/lib/analysis/skylark/annotations/processor:all_windows_tests",
         "//src/test/java/com/google/devtools/build/lib/analysis/whitelisting:all_windows_tests",
         "//src/test/java/com/google/devtools/build/lib/bazel/repository:all_windows_tests",
         "//src/test/java/com/google/devtools/build/lib/buildeventservice:all_windows_tests",
         "//src/test/java/com/google/devtools/build/lib/buildeventstream/transports:all_windows_tests",
         "//src/test/java/com/google/devtools/build/lib/buildtool:all_windows_tests",
+        "//src/test/java/com/google/devtools/build/lib/profiler/callcounts:all_windows_tests",
+        "//src/test/java/com/google/devtools/build/lib/profiler/memory:all_windows_tests",
         "//src/test/java/com/google/devtools/build/lib/rules/android:all_windows_tests",
         "//src/test/java/com/google/devtools/build/lib/rules/apple:all_windows_tests",
         "//src/test/java/com/google/devtools/build/lib/rules/config:all_windows_tests",
+        "//src/test/java/com/google/devtools/build/lib/rules/cpp:all_windows_tests",
         "//src/test/java/com/google/devtools/build/lib/rules/platform:all_windows_tests",
         "//src/test/java/com/google/devtools/build/lib/rules/repository:all_windows_tests",
+        "//src/test/java/com/google/devtools/build/lib/shell:all_windows_tests",
         "//src/test/java/com/google/devtools/build/lib/skyframe:all_windows_tests",
         "//src/test/java/com/google/devtools/build/lib/skylark:all_windows_tests",
     ],

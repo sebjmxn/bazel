@@ -16,7 +16,6 @@ package com.google.devtools.build.lib.rules.java;
 import static com.google.devtools.build.lib.packages.BuildType.NODEP_LABEL_LIST;
 
 import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.analysis.AnalysisUtils;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
 import com.google.devtools.build.lib.analysis.configuredtargets.RuleConfiguredTarget.Mode;
@@ -137,6 +136,20 @@ public abstract class JavaHelper {
     return rootRelativePath.relativeTo(prefix);
   }
 
+  /** Returns the configured target found under the {@code :host_jdk} attribute of a given rule. */
+  public static TransitiveInfoCollection getHostJavabaseTarget(RuleContext ruleContext) {
+    return getHostJavabaseTarget(ruleContext, "");
+  }
+
+  /**
+   * Returns the configured target found under the {@code :host_jdk + implicitAttributesSuffix}
+   * attribute of a given rule.
+   * */
+  public static TransitiveInfoCollection getHostJavabaseTarget(
+      RuleContext ruleContext, String implicitAttributesSuffix) {
+    return ruleContext.getPrerequisite(":host_jdk" + implicitAttributesSuffix, Mode.HOST);
+  }
+
   /** Returns the artifacts required to invoke {@code javahome} relative binary in the action. */
   public static NestedSet<Artifact> getHostJavabaseInputs(RuleContext ruleContext) {
     return getHostJavabaseInputs(ruleContext, "");
@@ -145,8 +158,9 @@ public abstract class JavaHelper {
   /** Returns the artifacts required to invoke {@code javahome} relative binary in the action. */
   public static NestedSet<Artifact> getHostJavabaseInputs(
       RuleContext ruleContext, String implicitAttributesSuffix) {
-    return AnalysisUtils.getMiddlemanFor(
-        ruleContext, ":host_jdk" + implicitAttributesSuffix, Mode.HOST);
+    return ruleContext.getPrerequisite(":host_jdk" + implicitAttributesSuffix, Mode.HOST)
+        .get(JavaRuntimeInfo.PROVIDER)
+        .javaBaseInputsMiddleman();
   }
 
   public static JavaRuntimeInfo getJavaRuntime(RuleContext ruleContext) {

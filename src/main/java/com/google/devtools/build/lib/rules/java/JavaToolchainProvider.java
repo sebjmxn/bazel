@@ -64,7 +64,9 @@ public class JavaToolchainProvider extends ToolchainInfo {
 
   public static JavaToolchainProvider create(
       Label label,
-      JavaToolchainData data,
+      ImmutableList<String> javacOptions,
+      ImmutableList<String> jvmOptions,
+      boolean javacSupportsWorkers,
       NestedSet<Artifact> bootclasspath,
       NestedSet<Artifact> extclasspath,
       List<String> defaultJavacFlags,
@@ -80,14 +82,12 @@ public class JavaToolchainProvider extends ToolchainInfo {
       @Nullable Artifact resourceJarBuilder,
       @Nullable Artifact timezoneData,
       FilesToRunProvider ijar,
-      ImmutableListMultimap<String, String> compatibleJavacOptions) {
+      ImmutableListMultimap<String, String> compatibleJavacOptions,
+      ImmutableList<JavaPackageConfigurationProvider> packageConfiguration) {
     return new JavaToolchainProvider(
         label,
-        data.getSourceVersion(),
-        data.getTargetVersion(),
         bootclasspath,
         extclasspath,
-        data.getEncoding(),
         javac,
         tools,
         javaBuilder,
@@ -103,20 +103,15 @@ public class JavaToolchainProvider extends ToolchainInfo {
         compatibleJavacOptions,
         // merges the defaultJavacFlags from
         // {@link JavaConfiguration} with the flags from the {@code java_toolchain} rule.
-        ImmutableList.<String>builder()
-            .addAll(data.getJavacOptions())
-            .addAll(defaultJavacFlags)
-            .build(),
-        data.getJvmOptions(),
-        data.getJavacSupportsWorkers());
+        ImmutableList.<String>builder().addAll(javacOptions).addAll(defaultJavacFlags).build(),
+        jvmOptions,
+        javacSupportsWorkers,
+        packageConfiguration);
   }
 
   private final Label label;
-  private final String sourceVersion;
-  private final String targetVersion;
   private final NestedSet<Artifact> bootclasspath;
   private final NestedSet<Artifact> extclasspath;
-  private final String encoding;
   private final Artifact javac;
   private final NestedSet<Artifact> tools;
   private final FilesToRunProvider javaBuilder;
@@ -133,14 +128,12 @@ public class JavaToolchainProvider extends ToolchainInfo {
   private final ImmutableList<String> javacOptions;
   private final ImmutableList<String> jvmOptions;
   private final boolean javacSupportsWorkers;
+  private final ImmutableList<JavaPackageConfigurationProvider> packageConfiguration;
 
   private JavaToolchainProvider(
       Label label,
-      String sourceVersion,
-      String targetVersion,
       NestedSet<Artifact> bootclasspath,
       NestedSet<Artifact> extclasspath,
-      String encoding,
       Artifact javac,
       NestedSet<Artifact> tools,
       FilesToRunProvider javaBuilder,
@@ -156,15 +149,13 @@ public class JavaToolchainProvider extends ToolchainInfo {
       ImmutableListMultimap<String, String> compatibleJavacOptions,
       ImmutableList<String> javacOptions,
       ImmutableList<String> jvmOptions,
-      boolean javacSupportsWorkers) {
+      boolean javacSupportsWorkers,
+      ImmutableList<JavaPackageConfigurationProvider> packageConfiguration) {
     super(ImmutableMap.of(), Location.BUILTIN);
 
     this.label = label;
-    this.sourceVersion = sourceVersion;
-    this.targetVersion = targetVersion;
     this.bootclasspath = bootclasspath;
     this.extclasspath = extclasspath;
-    this.encoding = encoding;
     this.javac = javac;
     this.tools = tools;
     this.javaBuilder = javaBuilder;
@@ -181,21 +172,12 @@ public class JavaToolchainProvider extends ToolchainInfo {
     this.javacOptions = javacOptions;
     this.jvmOptions = jvmOptions;
     this.javacSupportsWorkers = javacSupportsWorkers;
+    this.packageConfiguration = packageConfiguration;
   }
 
   /** Returns the label for this {@code java_toolchain}. */
   public Label getToolchainLabel() {
     return label;
-  }
-
-  /** @return the input Java language level */
-  public String getSourceVersion() {
-    return sourceVersion;
-  }
-
-  /** @return the target Java language level */
-  public String getTargetVersion() {
-    return targetVersion;
   }
 
   /** @return the target Java bootclasspath */
@@ -206,11 +188,6 @@ public class JavaToolchainProvider extends ToolchainInfo {
   /** @return the target Java extclasspath */
   public NestedSet<Artifact> getExtclasspath() {
     return extclasspath;
-  }
-
-  /** @return the encoding for Java source files */
-  public String getEncoding() {
-    return encoding;
   }
 
   /** Returns the {@link Artifact} of the javac jar */
@@ -310,5 +287,10 @@ public class JavaToolchainProvider extends ToolchainInfo {
   /** @return whether JavaBuilders supports running as a persistent worker or not */
   public boolean getJavacSupportsWorkers() {
     return javacSupportsWorkers;
+  }
+
+  /** Returns the global {@code java_plugin_configuration} data. */
+  public ImmutableList<JavaPackageConfigurationProvider> packageConfiguration() {
+    return packageConfiguration;
   }
 }

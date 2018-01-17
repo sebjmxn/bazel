@@ -41,6 +41,10 @@ import com.google.devtools.build.lib.analysis.actions.ParameterFileWriteAction;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
 import com.google.devtools.build.lib.analysis.actions.SymlinkAction;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.analysis.config.BuildConfiguration.Options;
+import com.google.devtools.build.lib.analysis.config.BuildConfiguration.Options.MakeVariableSource;
+import com.google.devtools.build.lib.analysis.config.CompilationMode;
+import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
 import com.google.devtools.build.lib.analysis.configuredtargets.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.platform.ToolchainInfo;
 import com.google.devtools.build.lib.cmdline.Label;
@@ -48,12 +52,14 @@ import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
+import com.google.devtools.build.lib.packages.RuleClass.ConfiguredTargetFactory.RuleErrorException;
 import com.google.devtools.build.lib.packages.RuleErrorConsumer;
 import com.google.devtools.build.lib.rules.cpp.CcLinkParams.Linkstamp;
 import com.google.devtools.build.lib.rules.cpp.CcToolchainFeatures.FeatureConfiguration;
 import com.google.devtools.build.lib.rules.cpp.CcToolchainFeatures.Tool;
 import com.google.devtools.build.lib.rules.cpp.CcToolchainFeatures.Variables;
 import com.google.devtools.build.lib.rules.cpp.CppCompilationContext.Builder;
+import com.google.devtools.build.lib.rules.cpp.CppConfiguration.DynamicMode;
 import com.google.devtools.build.lib.rules.cpp.Link.LinkTargetType;
 import com.google.devtools.build.lib.shell.ShellUtils;
 import com.google.devtools.build.lib.syntax.Type;
@@ -76,6 +82,7 @@ import javax.annotation.Nullable;
 public class CppHelper {
 
   static final PathFragment OBJS = PathFragment.create("_objs");
+  static final PathFragment PIC_OBJS = PathFragment.create("_pic_objs");
 
   private static final String GREPPED_INCLUDES_SUFFIX = ".includes";
 
@@ -93,11 +100,6 @@ public class CppHelper {
 
   /** Base label of the c++ toolchain category. */
   public static final String TOOLCHAIN_TYPE_LABEL = "//tools/cpp:toolchain_type";
-
-  /** Returns label used to select resolved cc_toolchain instances based on platform. */
-  public static Label getCcToolchainType(String toolsRepository) {
-    return Label.parseAbsoluteUnchecked(toolsRepository + TOOLCHAIN_TYPE_LABEL);
-  }
 
   private CppHelper() {
     // prevents construction
@@ -143,6 +145,20 @@ public class CppHelper {
 
   public static TransitiveInfoCollection mallocForTarget(RuleContext ruleContext) {
     return mallocForTarget(ruleContext, "malloc");
+  }
+
+  /**
+   * Returns true if this target should obtain c++ make variables from the toolchain instead of from
+   * the configuration.
+   */
+  public static boolean shouldUseToolchainForMakeVariables(RuleContext ruleContext) {
+    Label toolchainType = getToolchainTypeFromRuleClass(ruleContext);
+    return (ruleContext.getConfiguration().getOptions().get(Options.class).makeVariableSource
+            == MakeVariableSource.TOOLCHAIN)
+        && (ruleContext
+            .getFragment(PlatformConfiguration.class)
+            .getEnabledToolchainTypes()
+            .contains(toolchainType));
   }
 
   /**
@@ -225,6 +241,134 @@ public class CppHelper {
   }
 
   /**
+   * Returns the default options to use for compiling C, C++, and assembler. This is just the
+   * options that should be used for all three languages. There may be additional C-specific or
+   * C++-specific options that should be used, in addition to the ones returned by this method.
+   */
+  //TODO(b/70784100): Figure out if these methods can be moved to CcToolchainProvider.
+  public static ImmutableList<String> getCompilerOptions(
+      CppConfiguration config, CcToolchainProvider toolchain, Iterable<String> features) {
+    ImmutableList.Builder<String> coptsBuilder =
+        ImmutableList.<String>builder()
+            .addAll(toolchain.getToolchainCompilerFlags())
+            .addAll(toolchain.getCFlagsByCompilationMode().get(config.getCompilationMode()))
+            .addAll(toolchain.getLipoCFlags().get(config.getLipoMode()));
+
+    if (config.isOmitfp()) {
+      coptsBuilder.add("-fomit-frame-pointer");
+      coptsBuilder.add("-fasynchronous-unwind-tables");
+      coptsBuilder.add("-DNO_FRAME_POINTER");
+    }
+
+    FlagList compilerFlags =
+        new FlagList(
+            coptsBuilder.build(),
+            FlagList.convertOptionalOptions(toolchain.getOptionalCompilerFlags()),
+            ImmutableList.copyOf(config.getCopts()));
+
+    return compilerFlags.evaluate(features);
+  }
+
+  /**
+   * Returns the list of additional C++-specific options to use for compiling C++. These should be
+   * go on the command line after the common options returned by {@link #getCompilerOptions}.
+   */
+  public static ImmutableList<String> getCxxOptions(
+      CppConfiguration config, CcToolchainProvider toolchain, Iterable<String> features) {
+    ImmutableList.Builder<String> cxxOptsBuilder =
+        ImmutableList.<String>builder()
+            .addAll(toolchain.getToolchainCxxFlags())
+            .addAll(toolchain.getCxxFlagsByCompilationMode().get(config.getCompilationMode()))
+            .addAll(toolchain.getLipoCxxFlags().get(config.getLipoMode()));
+
+    FlagList cxxFlags =
+        new FlagList(
+            cxxOptsBuilder.build(),
+            FlagList.convertOptionalOptions(toolchain.getOptionalCxxFlags()),
+            ImmutableList.copyOf(config.getCxxopts()));
+
+    return cxxFlags.evaluate(features);
+  }
+
+  /**
+   * Returns the immutable list of linker options for fully statically linked outputs. Does not
+   * include command-line options passed via --linkopt or --linkopts.
+   *
+   * @param config the CppConfiguration for this build
+   * @param toolchain the c++ toolchain
+   * @param features default settings affecting this link
+   * @param sharedLib true if the output is a shared lib, false if it's an executable
+   */
+  public static ImmutableList<String> getFullyStaticLinkOptions(
+      CppConfiguration config,
+      CcToolchainProvider toolchain,
+      Iterable<String> features,
+      Boolean sharedLib) {
+    if (sharedLib) {
+      return toolchain.getSharedLibraryLinkOptions(
+          toolchain.getMostlyStaticLinkFlags(config.getCompilationMode(), config.getLipoMode()),
+          features);
+    } else {
+      return toolchain
+          .getFullyStaticLinkFlags(config.getCompilationMode(), config.getLipoMode())
+          .evaluate(features);
+    }
+  }
+
+  /**
+   * Returns the immutable list of linker options for mostly statically linked outputs. Does not
+   * include command-line options passed via --linkopt or --linkopts.
+   *
+   * @param config the CppConfiguration for this build
+   * @param toolchain the c++ toolchain
+   * @param features default settings affecting this link
+   * @param sharedLib true if the output is a shared lib, false if it's an executable
+   */
+  public static ImmutableList<String> getMostlyStaticLinkOptions(
+      CppConfiguration config,
+      CcToolchainProvider toolchain,
+      Iterable<String> features,
+      Boolean sharedLib) {
+    if (sharedLib) {
+      return toolchain.getSharedLibraryLinkOptions(
+          toolchain.supportsEmbeddedRuntimes()
+              ? toolchain.getMostlyStaticSharedLinkFlags(
+                  config.getCompilationMode(), config.getLipoMode())
+              : toolchain.getDynamicLinkFlags(config.getCompilationMode(), config.getLipoMode()),
+          features);
+    } else {
+      return toolchain
+          .getMostlyStaticLinkFlags(config.getCompilationMode(), config.getLipoMode())
+          .evaluate(features);
+    }
+  }
+
+  /**
+   * Returns the immutable list of linker options for artifacts that are not fully or mostly
+   * statically linked. Does not include command-line options passed via --linkopt or --linkopts.
+   *
+   * @param config the CppConfiguration for this build
+   * @param toolchain the c++ toolchain
+   * @param features default settings affecting this link
+   * @param sharedLib true if the output is a shared lib, false if it's an executable
+   */
+  public static ImmutableList<String> getDynamicLinkOptions(
+      CppConfiguration config,
+      CcToolchainProvider toolchain,
+      Iterable<String> features,
+      Boolean sharedLib) {
+    if (sharedLib) {
+      return toolchain.getSharedLibraryLinkOptions(
+          toolchain.getDynamicLinkFlags(config.getCompilationMode(), config.getLipoMode()),
+          features);
+    } else {
+      return toolchain
+          .getDynamicLinkFlags(config.getCompilationMode(), config.getLipoMode())
+          .evaluate(features);
+    }
+  }
+
+  /**
    * Determines if a linkopt can be a label. Linkopts come in 2 varieties:
    * literals -- flags like -Xl and makefile vars like $(LD) -- and labels,
    * which we should expand into filenames.
@@ -265,6 +409,28 @@ public class CppHelper {
     }
     linkopts.add(labelName);
     return false;
+  }
+
+  /**
+   * Returns the dynamic linking mode (full, off, or default) implied by the given configuration and
+   * toolchain.
+   */
+  public static DynamicMode getDynamicMode(CppConfiguration config, CcToolchainProvider toolchain) {
+    // With LLVM, ThinLTO is automatically used in place of LIPO. ThinLTO works fine with dynamic
+    // linking (and in fact creates a lot more work when dynamic linking is off).
+    if (config.getLipoMode() == LipoMode.BINARY && !toolchain.isLLVMCompiler()) {
+      // TODO(bazel-team): implement dynamic linking with LIPO
+      return DynamicMode.OFF;
+    } else {
+      return config.getDynamicModeFlag();
+    }
+  }
+
+  /** Returns true if LIPO optimization should be applied for this configuration and toolchain. */
+  public static boolean isLipoOptimization(CppConfiguration config, CcToolchainProvider toolchain) {
+    // The LIPO optimization bits are set in the LIPO context collector configuration, too.
+    // If compiler is LLVM, then LIPO gets auto-converted to ThinLTO.
+    return config.lipoOptimizationIsActivated() && !toolchain.isLLVMCompiler();
   }
 
   /**
@@ -385,11 +551,18 @@ public class CppHelper {
     return (CcToolchainProvider) dep.get(ToolchainInfo.PROVIDER);
   }
 
-  /**
-   * Returns the directory where object files are created.
-   */
+  /** Returns the directory where object files are created. */
+  public static PathFragment getObjDirectory(Label ruleLabel, boolean usePic) {
+    if (usePic) {
+      return AnalysisUtils.getUniqueDirectory(ruleLabel, PIC_OBJS);
+    } else {
+      return AnalysisUtils.getUniqueDirectory(ruleLabel, OBJS);
+    }
+  }
+
+  /** Returns the directory where object files are created. */
   public static PathFragment getObjDirectory(Label ruleLabel) {
-    return AnalysisUtils.getUniqueDirectory(ruleLabel, OBJS);
+    return getObjDirectory(ruleLabel, false);
   }
 
   /**
@@ -477,13 +650,10 @@ public class CppHelper {
   }
 
   /**
-   * Resolves the linkstamp collection from the {@code CcLinkParams} into a map.
-   *
-   * <p>Emits a warning on the rule if there are identical linkstamp artifacts with different
+   * Emits a warning on the rule if there are identical linkstamp artifacts with different
    * compilation contexts.
    */
-  public static Map<Artifact, NestedSet<Artifact>> resolveLinkstamps(
-      RuleErrorConsumer listener, CcLinkParams linkParams) {
+  public static void checkLinkstampsUnique(RuleErrorConsumer listener, CcLinkParams linkParams) {
     Map<Artifact, NestedSet<Artifact>> result = new LinkedHashMap<>();
     for (Linkstamp pair : linkParams.getLinkstamps()) {
       Artifact artifact = pair.getArtifact();
@@ -493,7 +663,6 @@ public class CppHelper {
       }
       result.put(artifact, pair.getDeclaredIncludeSrcs());
     }
-    return result;
   }
 
   public static void addTransitiveLipoInfoForCommonAttributes(
@@ -534,22 +703,42 @@ public class CppHelper {
   // TODO(bazel-team): figure out a way to merge these 2 methods. See the Todo in
   // CcCommonConfiguredTarget.noCoptsMatches().
   /**
-   * Determines if we should apply -fPIC for this rule's C++ compilations. This determination
-   * is generally made by the global C++ configuration settings "needsPic" and
-   * and "usePicForBinaries". However, an individual rule may override these settings by applying
-   * -fPIC" to its "nocopts" attribute. This allows incompatible rules to "opt out" of global PIC
-   * settings (see bug: "Provide a way to turn off -fPIC for targets that can't be built that way").
+   * Determines if we should apply -fPIC for this rule's C++ compilations. This determination is
+   * generally made by the global C++ configuration settings "needsPic" and "usePicForBinaries".
+   * However, an individual rule may override these settings by applying -fPIC" to its "nocopts"
+   * attribute. This allows incompatible rules to "opt out" of global PIC settings (see bug:
+   * "Provide a way to turn off -fPIC for targets that can't be built that way").
    *
    * @param ruleContext the context of the rule to check
    * @param forBinary true if compiling for a binary, false if for a shared library
    * @return true if this rule's compilations should apply -fPIC, false otherwise
    */
-  public static boolean usePic(RuleContext ruleContext, boolean forBinary) {
+  public static boolean usePic(
+      RuleContext ruleContext, CcToolchainProvider toolchain, boolean forBinary) {
     if (CcCommon.noCoptsMatches("-fPIC", ruleContext)) {
       return false;
     }
     CppConfiguration config = ruleContext.getFragment(CppConfiguration.class);
-    return forBinary ? config.usePicObjectsForBinaries() : config.needsPic();
+    return forBinary ? usePicObjectsForBinaries(config, toolchain) : needsPic(config, toolchain);
+  }
+
+  /** Returns whether binaries must be compiled with position independent code. */
+  public static boolean usePicForBinaries(CppConfiguration config, CcToolchainProvider toolchain) {
+    return toolchain.toolchainNeedsPic() && config.getCompilationMode() != CompilationMode.OPT;
+  }
+
+  /** Returns true iff we should use ".pic.o" files when linking executables. */
+  public static boolean usePicObjectsForBinaries(
+      CppConfiguration config, CcToolchainProvider toolchain) {
+    return config.forcePic() || usePicForBinaries(config, toolchain);
+  }
+
+  /**
+   * Returns true if shared libraries must be compiled with position independent code for the build
+   * implied by the given config and toolchain.
+   */
+  public static boolean needsPic(CppConfiguration config, CcToolchainProvider toolchain) {
+    return config.forcePic() || toolchain.toolchainNeedsPic();
   }
 
   /**
@@ -772,25 +961,41 @@ public class CppHelper {
         config.getBinDirectory(ruleContext.getRule().getRepository()));
   }
 
-  /**
-   * Returns the corresponding compiled TreeArtifact given the source TreeArtifact.
-   */
+  /** Returns the corresponding compiled TreeArtifact given the source TreeArtifact. */
   public static Artifact getCompileOutputTreeArtifact(
-      RuleContext ruleContext, Artifact sourceTreeArtifact) {
-    PathFragment objectDir = getObjDirectory(ruleContext.getLabel());
+      RuleContext ruleContext, Artifact sourceTreeArtifact, boolean usePic) {
+    PathFragment objectDir = getObjDirectory(ruleContext.getLabel(), usePic);
     PathFragment rootRelativePath = sourceTreeArtifact.getRootRelativePath();
     return ruleContext.getTreeArtifact(
         objectDir.getRelative(rootRelativePath), sourceTreeArtifact.getRoot());
   }
 
-  static String getArtifactNameForCategory(RuleContext ruleContext, CcToolchainProvider toolchain,
-      ArtifactCategory category, String outputName) {
-    return toolchain.getFeatures().getArtifactNameForCategory(category, outputName);
+  /** Returns the corresponding compiled TreeArtifact given the source TreeArtifact. */
+  public static Artifact getCompileOutputTreeArtifact(
+      RuleContext ruleContext, Artifact sourceTreeArtifact) {
+    return getCompileOutputTreeArtifact(ruleContext, sourceTreeArtifact, false);
+  }
+
+  static String getArtifactNameForCategory(
+      RuleContext ruleContext,
+      CcToolchainProvider toolchain,
+      ArtifactCategory category,
+      String outputName)
+      throws RuleErrorException {
+    try {
+      return toolchain.getFeatures().getArtifactNameForCategory(category, outputName);
+    } catch (InvalidConfigurationException e) {
+      ruleContext.throwWithRuleError(e.getMessage());
+      throw new IllegalStateException("Should not be reached");
+    }
   }
 
   static String getDotdFileName(
-      RuleContext ruleContext, CcToolchainProvider toolchain, ArtifactCategory outputCategory,
-      String outputName) {
+      RuleContext ruleContext,
+      CcToolchainProvider toolchain,
+      ArtifactCategory outputCategory,
+      String outputName)
+      throws RuleErrorException {
     String baseName = outputCategory == ArtifactCategory.OBJECT_FILE
         || outputCategory == ArtifactCategory.PROCESSED_HEADER
         ? outputName
@@ -861,5 +1066,40 @@ public class CppHelper {
             .setMnemonic("DefParser")
             .build(ruleContext));
     return defFile;
+  }
+
+  /**
+   * Returns true if the build implied by the given config and toolchain uses --start-lib/--end-lib
+   * ld options.
+   */
+  public static boolean useStartEndLib(CppConfiguration config, CcToolchainProvider toolchain) {
+    return config.startEndLibIsRequested() && toolchain.supportsStartEndLib();
+  }
+
+  /**
+   * Returns the type of archives being used by the build implied by the given config and toolchain.
+   */
+  public static Link.ArchiveType getArchiveType(
+      CppConfiguration config, CcToolchainProvider toolchain) {
+    return useStartEndLib(config, toolchain)
+        ? Link.ArchiveType.START_END_LIB
+        : Link.ArchiveType.REGULAR;
+  }
+
+  /**
+   * Returns true if interface shared objects should be used in the build implied by the given
+   * config and toolchain.
+   */
+  public static boolean useInterfaceSharedObjects(
+      CppConfiguration config, CcToolchainProvider toolchain) {
+    return toolchain.supportsInterfaceSharedObjects() && config.getUseInterfaceSharedObjects();
+  }
+
+  /**
+   * Returns true if Fission is specified and supported by the CROSSTOOL for the build implied by
+   * the given configuration and toolchain.
+   */
+  public static boolean useFission(CppConfiguration config, CcToolchainProvider toolchain) {
+    return config.fissionIsActiveForCurrentCompilationMode() && toolchain.supportsFission();
   }
 }

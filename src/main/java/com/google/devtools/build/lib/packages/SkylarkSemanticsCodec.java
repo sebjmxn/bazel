@@ -44,16 +44,17 @@ public final class SkylarkSemanticsCodec implements ObjectCodec<SkylarkSemantics
     codedOut.writeBoolNoTag(semantics.incompatibleCheckedArithmetic());
     codedOut.writeBoolNoTag(semantics.incompatibleComprehensionVariablesDoNotLeak());
     codedOut.writeBoolNoTag(semantics.incompatibleDepsetIsNotIterable());
+    codedOut.writeBoolNoTag(semantics.incompatibleDepsetUnion());
     codedOut.writeBoolNoTag(semantics.incompatibleDictLiteralHasNoDuplicates());
+    codedOut.writeBoolNoTag(semantics.incompatibleDisableGlobTracking());
     codedOut.writeBoolNoTag(semantics.incompatibleDisallowDictPlus());
     codedOut.writeBoolNoTag(semantics.incompatibleDisallowKeywordOnlyArgs());
-    codedOut.writeBoolNoTag(semantics.incompatibleDisallowSetConstructor());
     codedOut.writeBoolNoTag(semantics.incompatibleDisallowToplevelIfStatement());
-    codedOut.writeBoolNoTag(semantics.incompatibleListPlusEqualsInplace());
+    codedOut.writeBoolNoTag(semantics.incompatibleDisallowUncalledSetConstructor());
     codedOut.writeBoolNoTag(semantics.incompatibleLoadArgumentIsLabel());
     codedOut.writeBoolNoTag(semantics.incompatibleNewActionsApi());
+    codedOut.writeBoolNoTag(semantics.incompatibleShowAllPrintMessages());
     codedOut.writeBoolNoTag(semantics.incompatibleStringIsNotIterable());
-    codedOut.writeBoolNoTag(semantics.internalDoNotExportBuiltins());
     codedOut.writeBoolNoTag(semantics.internalSkylarkFlagTestCanary());
   }
 
@@ -67,16 +68,17 @@ public final class SkylarkSemanticsCodec implements ObjectCodec<SkylarkSemantics
     builder.incompatibleCheckedArithmetic(codedIn.readBool());
     builder.incompatibleComprehensionVariablesDoNotLeak(codedIn.readBool());
     builder.incompatibleDepsetIsNotIterable(codedIn.readBool());
+    builder.incompatibleDepsetUnion(codedIn.readBool());
     builder.incompatibleDictLiteralHasNoDuplicates(codedIn.readBool());
+    builder.incompatibleDisableGlobTracking(codedIn.readBool());
     builder.incompatibleDisallowDictPlus(codedIn.readBool());
     builder.incompatibleDisallowKeywordOnlyArgs(codedIn.readBool());
-    builder.incompatibleDisallowSetConstructor(codedIn.readBool());
     builder.incompatibleDisallowToplevelIfStatement(codedIn.readBool());
-    builder.incompatibleListPlusEqualsInplace(codedIn.readBool());
+    builder.incompatibleDisallowUncalledSetConstructor(codedIn.readBool());
     builder.incompatibleLoadArgumentIsLabel(codedIn.readBool());
     builder.incompatibleNewActionsApi(codedIn.readBool());
+    builder.incompatibleShowAllPrintMessages(codedIn.readBool());
     builder.incompatibleStringIsNotIterable(codedIn.readBool());
-    builder.internalDoNotExportBuiltins(codedIn.readBool());
     builder.internalSkylarkFlagTestCanary(codedIn.readBool());
 
     return builder.build();

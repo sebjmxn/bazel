@@ -40,9 +40,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/**
- * Tests {@link OptionsParser}.
- */
+/** Tests {@link OptionsParser}. */
 @RunWith(JUnit4.class)
 public class OptionsParserTest {
 
@@ -795,7 +793,7 @@ public class OptionsParserTest {
     assertThat(optionValue.getCanonicalInstances()).hasSize(1);
 
     ParsedOptionDescription effectiveInstance = optionValue.getCanonicalInstances().get(0);
-    assertThat(effectiveInstance.getExpandedFrom())
+    assertThat(effectiveInstance.getExpandedFrom().getOptionDefinition())
         .isSameAs(expansionDescription.getOptionDefinition());
     assertThat(effectiveInstance.getImplicitDependent()).isNull();
 
@@ -813,7 +811,7 @@ public class OptionsParserTest {
     assertThat(options.underlying).isEqualTo("from_expansion");
     assertThat(parser.getWarnings())
         .containsExactly(
-            "option '--expands' was expanded and now overrides a previous explicitly specified "
+            "option '--expands' was expanded and now overrides the explicit option "
                 + "--underlying=direct_value with --underlying=from_expansion");
   }
 
@@ -991,7 +989,7 @@ public class OptionsParserTest {
     assertThat(parser.getWarnings())
         .containsExactly(
             "option '--second' is implicitly defined by both option '--first' and "
-                + "option '--third'");
+                + "option '--third=third'");
   }
 
   @Test
@@ -1038,6 +1036,94 @@ public class OptionsParserTest {
     // implicit requirement.
     assertThat(second.getCanonicalInstances()).isNotNull();
     assertThat(second.getCanonicalInstances()).hasSize(0);
+    assertThat(parser.getWarnings()).isEmpty();
+  }
+
+  /**
+   * Options for testing the behavior of canonicalization when an option implicitly requires a
+   * repeatable option.
+   */
+  public static class ImplicitDependencyOnAllowMultipleOptions extends OptionsBase {
+    @Option(
+      name = "first",
+      implicitRequirements = "--second=requiredByFirst",
+      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
+      effectTags = {OptionEffectTag.NO_OP},
+      defaultValue = "false"
+    )
+    public boolean first;
+
+    @Option(
+      name = "second",
+      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
+      effectTags = {OptionEffectTag.NO_OP},
+      defaultValue = "null",
+      allowMultiple = true
+    )
+    public List<String> second;
+
+    @Option(
+      name = "third",
+      implicitRequirements = "--second=requiredByThird",
+      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
+      effectTags = {OptionEffectTag.NO_OP},
+      defaultValue = "null"
+    )
+    public String third;
+  }
+
+  @Test
+  public void testCanonicalizeExcludesImplicitDependencyOnRepeatableOption()
+      throws OptionsParsingException {
+    OptionsParser parser =
+        OptionsParser.newOptionsParser(ImplicitDependencyOnAllowMultipleOptions.class);
+    parser.parse(
+        OptionPriority.PriorityCategory.COMMAND_LINE,
+        null,
+        Arrays.asList("--first", "--second=explicitValue"));
+    OptionValueDescription first = parser.getOptionValueDescription("first");
+    assertThat(first).isNotNull();
+    assertThat(first.getCanonicalInstances()).hasSize(1);
+
+    OptionValueDescription second = parser.getOptionValueDescription("second");
+    assertThat(second).isNotNull();
+    assertThat(second.getSourceString()).matches("implicit requirement of option '--first', null");
+    // Implicit requirements don't get listed as canonical. Check that this excludes the implicit
+    // value, but still tracks the explicit one.
+    assertThat(second.getCanonicalInstances()).isNotNull();
+    assertThat(second.getCanonicalInstances()).hasSize(1);
+    assertThat(parser.canonicalize()).containsExactly("--first=1", "--second=explicitValue");
+
+    ImplicitDependencyOnAllowMultipleOptions options =
+        parser.getOptions(ImplicitDependencyOnAllowMultipleOptions.class);
+    assertThat(options.first).isTrue();
+    assertThat(options.second).containsExactly("explicitValue", "requiredByFirst");
+    assertThat(parser.getWarnings()).isEmpty();
+  }
+
+  @Test
+  public void testCanonicalizeExcludesImplicitDependencyForOtherwiseUnmentionedRepeatableOption()
+      throws OptionsParsingException {
+    OptionsParser parser =
+        OptionsParser.newOptionsParser(ImplicitDependencyOnAllowMultipleOptions.class);
+    parser.parse(OptionPriority.PriorityCategory.COMMAND_LINE, null, Arrays.asList("--first"));
+    OptionValueDescription first = parser.getOptionValueDescription("first");
+    assertThat(first).isNotNull();
+    assertThat(first.getCanonicalInstances()).hasSize(1);
+
+    OptionValueDescription second = parser.getOptionValueDescription("second");
+    assertThat(second).isNotNull();
+    assertThat(second.getSourceString()).matches("implicit requirement of option '--first'");
+    // Implicit requirements don't get listed as canonical. Check that this excludes the implicit
+    // value, leaving behind no mention of second.
+    assertThat(second.getCanonicalInstances()).isNotNull();
+    assertThat(second.getCanonicalInstances()).isEmpty();
+    assertThat(parser.canonicalize()).containsExactly("--first=1");
+
+    ImplicitDependencyOnAllowMultipleOptions options =
+        parser.getOptions(ImplicitDependencyOnAllowMultipleOptions.class);
+    assertThat(options.first).isTrue();
+    assertThat(options.second).containsExactly("requiredByFirst");
     assertThat(parser.getWarnings()).isEmpty();
   }
 
@@ -1209,7 +1295,7 @@ public class OptionsParserTest {
     parser.parse("--underlying=underlying", "--first");
     assertThat(parser.getWarnings())
         .containsExactly(
-            "option '--first' was expanded and now overrides a previous explicitly specified "
+            "option '--first' was expanded and now overrides the explicit option "
                 + "--underlying=underlying with --underlying=expandedFromFirst");
   }
 
@@ -1785,72 +1871,6 @@ public class OptionsParserTest {
     } catch (OptionsParsingException e) {
       assertThat(e).hasMessageThat().contains("Unrecognized option: --no_foo");
     }
-  }
-
-  public static class WrapperOptionExample extends OptionsBase {
-    @Option(
-      name = "wrapper",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      metadataTags = {OptionMetadataTag.DEPRECATED},
-      effectTags = {OptionEffectTag.NO_OP},
-      defaultValue = "null",
-        deprecationWarning = "wrapper options are deprecated, including this one.",
-      wrapperOption = true
-    )
-    public Void wrapperOption;
-
-    @Option(
-      name = "flag1",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.NO_OP},
-      defaultValue = "false"
-    )
-    public boolean flag1;
-
-    @Option(
-      name = "flag2",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.NO_OP},
-      defaultValue = "42"
-    )
-    public int flag2;
-
-    @Option(
-      name = "flag3",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.NO_OP},
-      defaultValue = "foo"
-    )
-    public String flag3;
-  }
-
-  @Test
-  public void testWrapperOption() throws OptionsParsingException {
-    OptionsParser parser = newOptionsParser(WrapperOptionExample.class);
-    parser.parse("--wrapper=--flag1=true", "--wrapper=--flag2=87", "--wrapper=--flag3=bar");
-    WrapperOptionExample result = parser.getOptions(WrapperOptionExample.class);
-    assertThat(result.flag1).isTrue();
-    assertThat(result.flag2).isEqualTo(87);
-    assertThat(result.flag3).isEqualTo("bar");
-  }
-
-  @Test
-  public void testInvalidWrapperOptionFormat() {
-    OptionsParser parser = newOptionsParser(WrapperOptionExample.class);
-    try {
-      parser.parse("--wrapper=foo");
-      fail();
-    } catch (OptionsParsingException e) {
-      // Check that the message looks like it's suggesting the correct format.
-      assertThat(e).hasMessageThat().contains("--foo");
-    }
-  }
-
-  @Test
-  public void testWrapperCanonicalization() throws OptionsParsingException {
-    List<String> canonicalized = canonicalize(WrapperOptionExample.class,
-        "--wrapper=--flag1=true", "--wrapper=--flag2=87", "--wrapper=--flag3=bar");
-    assertThat(canonicalized).isEqualTo(Arrays.asList("--flag1=1", "--flag2=87", "--flag3=bar"));
   }
 
   /** Dummy options that declares it uses only core types. */

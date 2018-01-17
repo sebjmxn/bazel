@@ -506,8 +506,11 @@ public class WorkspaceFactory {
       if (workspaceDir != null) {
         workspaceEnv.update("__workspace_dir__", workspaceDir.getPathString());
       }
-      File jreDirectory = new File(System.getProperty("java.home"));
-      workspaceEnv.update("DEFAULT_SERVER_JAVABASE", jreDirectory.getParentFile().toString());
+      File javaHome = new File(System.getProperty("java.home"));
+      if (javaHome.getName().equalsIgnoreCase("jre")) {
+        javaHome = javaHome.getParentFile();
+      }
+      workspaceEnv.update("DEFAULT_SERVER_JAVABASE", javaHome.toString());
 
       for (EnvironmentExtension extension : environmentExtensions) {
         extension.updateWorkspace(workspaceEnv);
@@ -523,8 +526,9 @@ public class WorkspaceFactory {
   private static ClassObject newNativeModule(
       ImmutableMap<String, BaseFunction> workspaceFunctions, String version) {
     ImmutableMap.Builder<String, Object> builder = new ImmutableMap.Builder<>();
-    for (String nativeFunction : Runtime.getFunctionNames(SkylarkNativeModule.class)) {
-      builder.put(nativeFunction, Runtime.getFunction(SkylarkNativeModule.class, nativeFunction));
+    Runtime.BuiltinRegistry builtins = Runtime.getBuiltinRegistry();
+    for (String nativeFunction : builtins.getFunctionNames(SkylarkNativeModule.class)) {
+      builder.put(nativeFunction, builtins.getFunction(SkylarkNativeModule.class, nativeFunction));
     }
     for (Map.Entry<String, BaseFunction> function : workspaceFunctions.entrySet()) {
       builder.put(function.getKey(), function.getValue());

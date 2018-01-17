@@ -25,6 +25,7 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.common.eventbus.EventBus;
 import com.google.devtools.build.lib.actions.ActionAnalysisMetadata;
+import com.google.devtools.build.lib.actions.ActionKeyContext;
 import com.google.devtools.build.lib.actions.ActionLookupValue;
 import com.google.devtools.build.lib.actions.ArtifactFactory;
 import com.google.devtools.build.lib.actions.ArtifactOwner;
@@ -39,7 +40,6 @@ import com.google.devtools.build.lib.analysis.CachingAnalysisEnvironment;
 import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.ConfiguredTargetFactory;
-import com.google.devtools.build.lib.analysis.LabelAndConfiguration;
 import com.google.devtools.build.lib.analysis.ToolchainContext;
 import com.google.devtools.build.lib.analysis.ViewCreationFailedException;
 import com.google.devtools.build.lib.analysis.buildinfo.BuildInfoFactory;
@@ -60,7 +60,6 @@ import com.google.devtools.build.lib.pkgcache.LoadingFailureEvent;
 import com.google.devtools.build.lib.pkgcache.LoadingPhaseRunner;
 import com.google.devtools.build.lib.skyframe.AspectFunction.AspectCreationException;
 import com.google.devtools.build.lib.skyframe.AspectValue.AspectValueKey;
-import com.google.devtools.build.lib.skyframe.BuildInfoCollectionValue.BuildInfoKeyAndConfig;
 import com.google.devtools.build.lib.skyframe.ConfiguredTargetFunction.ConfiguredValueCreationException;
 import com.google.devtools.build.lib.skyframe.SkyframeActionExecutor.ConflictException;
 import com.google.devtools.build.lib.skyframe.SkylarkImportLookupFunction.SkylarkImportFailedException;
@@ -217,15 +216,19 @@ public final class SkyframeBuildView {
         skyframeExecutor.findArtifactConflicts();
 
     Collection<AspectValue> goodAspects = Lists.newArrayListWithCapacity(values.size());
-    NestedSetBuilder<Package> packages = NestedSetBuilder.stableOrder();
+    Path singleSourceRoot = skyframeExecutor.getForcedSingleSourceRootIfNoExecrootSymlinkCreation();
+    NestedSetBuilder<Package> packages =
+        singleSourceRoot == null ? NestedSetBuilder.stableOrder() : null;
     for (AspectValueKey aspectKey : aspectKeys) {
-      AspectValue value = (AspectValue) result.get(aspectKey.getSkyKey());
+      AspectValue value = (AspectValue) result.get(aspectKey);
       if (value == null) {
         // Skip aspects that couldn't be applied to targets.
         continue;
       }
       goodAspects.add(value);
-      packages.addTransitive(value.getTransitivePackages());
+      if (packages != null) {
+        packages.addTransitive(value.getTransitivePackagesForPackageRootResolution());
+      }
     }
 
     // Filter out all CTs that have a bad action and convert to a list of configured targets. This
@@ -233,15 +236,15 @@ public final class SkyframeBuildView {
     // list of values, i.e., that the order is deterministic.
     Collection<ConfiguredTarget> goodCts = Lists.newArrayListWithCapacity(values.size());
     for (ConfiguredTargetKey value : values) {
-      ConfiguredTargetValue ctValue =
-          (ConfiguredTargetValue) result.get(ConfiguredTargetValue.key(value));
+      ConfiguredTargetValue ctValue = (ConfiguredTargetValue) result.get(value);
       if (ctValue == null) {
         continue;
       }
       goodCts.add(ctValue.getConfiguredTarget());
-      packages.addTransitive(ctValue.getTransitivePackages());
+      if (packages != null) {
+        packages.addTransitive(ctValue.getTransitivePackagesForPackageRootResolution());
+      }
     }
-    Path singleSourceRoot = skyframeExecutor.getForcedSingleSourceRootIfNoExecrootSymlinkCreation();
     PackageRoots packageRoots =
         singleSourceRoot == null
             ? new MapAsPackageRoots(
@@ -342,8 +345,11 @@ public final class SkyframeBuildView {
           Event.warn("errors encountered while analyzing target '"
               + topLevelLabel + "': it will not be built"));
       if (analysisRootCause != null) {
-        eventBus.post(new AnalysisFailureEvent(
-            LabelAndConfiguration.of(topLevelLabel, label.getConfiguration()), analysisRootCause));
+        eventBus.post(
+            new AnalysisFailureEvent(
+                ConfiguredTargetKey.of(
+                    topLevelLabel, label.getConfigurationKey(), label.isHostConfiguration()),
+                analysisRootCause));
       }
     }
 
@@ -443,13 +449,13 @@ public final class SkyframeBuildView {
       BuildConfiguration config,
       ImmutableMap<BuildInfoKey, BuildInfoFactory> buildInfoFactories)
       throws InterruptedException {
-    env.getValue(WorkspaceStatusValue.SKY_KEY);
+    env.getValue(WorkspaceStatusValue.BUILD_INFO_KEY);
     // These factories may each create their own build info artifacts, all depending on the basic
     // build-info.txt and build-changelist.txt.
     List<SkyKey> depKeys = Lists.newArrayList();
     for (BuildInfoKey key : buildInfoFactories.keySet()) {
       if (buildInfoFactories.get(key).isEnabled(config)) {
-        depKeys.add(BuildInfoCollectionValue.key(new BuildInfoKeyAndConfig(key, config)));
+        depKeys.add(BuildInfoCollectionValue.key(key, config));
       }
     }
     env.getValues(depKeys);
@@ -472,7 +478,13 @@ public final class SkyframeBuildView {
     boolean extendedSanityChecks = config != null && config.extendedSanityChecks();
     boolean allowRegisteringActions = config == null || config.isActionsEnabled();
     return new CachingAnalysisEnvironment(
-        artifactFactory, owner, isSystemEnv, extendedSanityChecks, eventHandler, env,
+        artifactFactory,
+        skyframeExecutor.getActionKeyContext(),
+        owner,
+        isSystemEnv,
+        extendedSanityChecks,
+        eventHandler,
+        env,
         allowRegisteringActions);
   }
 
@@ -616,6 +628,10 @@ public final class SkyframeBuildView {
    */
   public void enableAnalysis(boolean enable) {
     this.enableAnalysis = enable;
+  }
+
+  public ActionKeyContext getActionKeyContext() {
+    return skyframeExecutor.getActionKeyContext();
   }
 
   private class ConfiguredTargetValueProgressReceiver

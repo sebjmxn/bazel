@@ -81,35 +81,40 @@ def _macos_sdk_version_flag_impl(ctx):
   return struct(providers = [
       config_common.FeatureFlagInfo(value = _strip_version(
           xcode_config.sdk_version_for_platform(
-              apple_common.platform.macos_device)))])
+              apple_common.platform.macos)))])
 
 
 xcode_version_flag = rule(
     implementation = _xcode_version_flag_impl,
     attrs = {
-        "_xcode_config": attr.label(default=Label("//tools/osx:current_xcode_config")),
+        "_xcode_config": attr.label(default=configuration_field(
+                fragment="apple", name="xcode_config_label")),
     })
 
 ios_sdk_version_flag = rule(
     implementation = _ios_sdk_version_flag_impl,
     attrs = {
-        "_xcode_config": attr.label(default=Label("//tools/osx:current_xcode_config")),
+        "_xcode_config": attr.label(default=configuration_field(
+                fragment="apple", name="xcode_config_label")),
     })
 
 tvos_sdk_version_flag = rule(
     implementation = _tvos_sdk_version_flag_impl,
     attrs = {
-        "_xcode_config": attr.label(default=Label("//tools/osx:current_xcode_config")),
+        "_xcode_config": attr.label(default=configuration_field(
+                fragment="apple", name="xcode_config_label")),
     })
 
 watchos_sdk_version_flag = rule(
     implementation = _watchos_sdk_version_flag_impl,
     attrs = {
-        "_xcode_config": attr.label(default=Label("//tools/osx:current_xcode_config")),
+        "_xcode_config": attr.label(default=configuration_field(
+                fragment="apple", name="xcode_config_label")),
     })
 
 macos_sdk_version_flag = rule(
     implementation = _macos_sdk_version_flag_impl,
     attrs = {
-        "_xcode_config": attr.label(default=Label("//tools/osx:current_xcode_config")),
+        "_xcode_config": attr.label(default=configuration_field(
+                fragment="apple", name="xcode_config_label")),
     })

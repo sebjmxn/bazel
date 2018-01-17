@@ -43,38 +43,53 @@ public abstract class SkylarkSemantics {
   public abstract boolean incompatibleCheckedArithmetic();
   public abstract boolean incompatibleComprehensionVariablesDoNotLeak();
   public abstract boolean incompatibleDepsetIsNotIterable();
+
+  public abstract boolean incompatibleDepsetUnion();
+
   public abstract boolean incompatibleDictLiteralHasNoDuplicates();
+
+  public abstract boolean incompatibleDisableGlobTracking();
+
   public abstract boolean incompatibleDisallowDictPlus();
   public abstract boolean incompatibleDisallowKeywordOnlyArgs();
-  public abstract boolean incompatibleDisallowSetConstructor();
   public abstract boolean incompatibleDisallowToplevelIfStatement();
-  public abstract boolean incompatibleListPlusEqualsInplace();
+  public abstract boolean incompatibleDisallowUncalledSetConstructor();
   public abstract boolean incompatibleLoadArgumentIsLabel();
   public abstract boolean incompatibleNewActionsApi();
+  public abstract boolean incompatibleShowAllPrintMessages();
   public abstract boolean incompatibleStringIsNotIterable();
-  public abstract boolean internalDoNotExportBuiltins();
   public abstract boolean internalSkylarkFlagTestCanary();
+
+  /** Returns a {@link Builder} initialized with the values of this instance. */
+  public abstract Builder toBuilder();
 
   public static Builder builder() {
     return new AutoValue_SkylarkSemantics.Builder();
   }
 
-  public static final SkylarkSemantics DEFAULT_SEMANTICS = builder()
-      // <== Add new options here in alphabetic order ==>
-      .incompatibleBzlDisallowLoadAfterStatement(false)
-      .incompatibleCheckedArithmetic(true)
-      .incompatibleComprehensionVariablesDoNotLeak(true)
-      .incompatibleDepsetIsNotIterable(false)
-      .incompatibleDictLiteralHasNoDuplicates(true)
-      .incompatibleDisallowDictPlus(false)
-      .incompatibleDisallowKeywordOnlyArgs(true)
-      .incompatibleDisallowSetConstructor(true)
-      .incompatibleDisallowToplevelIfStatement(true)
-      .incompatibleListPlusEqualsInplace(true)
-      .incompatibleLoadArgumentIsLabel(false)
-      .incompatibleNewActionsApi(false)
+  /** Returns a {@link Builder} initialized with default values for all options. */
+  public static Builder builderWithDefaults() {
+    return DEFAULT_SEMANTICS.toBuilder();
+  }
+
+  public static final SkylarkSemantics DEFAULT_SEMANTICS =
+      builder()
+          // <== Add new options here in alphabetic order ==>
+          .incompatibleBzlDisallowLoadAfterStatement(false)
+          .incompatibleCheckedArithmetic(true)
+          .incompatibleComprehensionVariablesDoNotLeak(true)
+          .incompatibleDepsetIsNotIterable(false)
+          .incompatibleDepsetUnion(false)
+          .incompatibleDictLiteralHasNoDuplicates(true)
+          .incompatibleDisableGlobTracking(false)
+          .incompatibleDisallowDictPlus(false)
+          .incompatibleDisallowKeywordOnlyArgs(true)
+          .incompatibleDisallowToplevelIfStatement(true)
+          .incompatibleDisallowUncalledSetConstructor(true)
+          .incompatibleLoadArgumentIsLabel(true)
+          .incompatibleNewActionsApi(false)
+          .incompatibleShowAllPrintMessages(true)
       .incompatibleStringIsNotIterable(false)
-      .internalDoNotExportBuiltins(false)
       .internalSkylarkFlagTestCanary(false)
       .build();
 
@@ -87,16 +102,21 @@ public abstract class SkylarkSemantics {
     public abstract Builder incompatibleCheckedArithmetic(boolean value);
     public abstract Builder incompatibleComprehensionVariablesDoNotLeak(boolean value);
     public abstract Builder incompatibleDepsetIsNotIterable(boolean value);
+
+    public abstract Builder incompatibleDepsetUnion(boolean value);
+
     public abstract Builder incompatibleDictLiteralHasNoDuplicates(boolean value);
+
+    public abstract Builder incompatibleDisableGlobTracking(boolean value);
+
     public abstract Builder incompatibleDisallowDictPlus(boolean value);
     public abstract Builder incompatibleDisallowKeywordOnlyArgs(boolean value);
-    public abstract Builder incompatibleDisallowSetConstructor(boolean value);
     public abstract Builder incompatibleDisallowToplevelIfStatement(boolean value);
-    public abstract Builder incompatibleListPlusEqualsInplace(boolean value);
+    public abstract Builder incompatibleDisallowUncalledSetConstructor(boolean value);
     public abstract Builder incompatibleLoadArgumentIsLabel(boolean value);
     public abstract Builder incompatibleNewActionsApi(boolean value);
+    public abstract Builder incompatibleShowAllPrintMessages(boolean value);
     public abstract Builder incompatibleStringIsNotIterable(boolean value);
-    public abstract Builder internalDoNotExportBuiltins(boolean value);
     public abstract Builder internalSkylarkFlagTestCanary(boolean value);
 
     public abstract SkylarkSemantics build();

@@ -11,14 +11,7 @@ filegroup(
 cc_test(
     name = "blaze_util_test",
     srcs = select({
-        "//src:windows": [
-            "blaze_util_windows_test.cc",
-        ],
-        "//src:windows_msys": [
-            "blaze_util_test.cc",
-            "blaze_util_windows_test.cc",
-        ],
-        "//src:windows_msvc": [
+        "//src/conditions:windows": [
             "blaze_util_windows_test.cc",
         ],
         "//conditions:default": [

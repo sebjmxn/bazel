@@ -14,7 +14,6 @@
 
 package com.google.devtools.build.lib.rules.config;
 
-import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSortedMap;
 import com.google.common.hash.Hasher;
@@ -26,12 +25,15 @@ import com.google.devtools.build.lib.analysis.config.ConfigurationEnvironment;
 import com.google.devtools.build.lib.analysis.config.ConfigurationFragmentFactory;
 import com.google.devtools.build.lib.analysis.config.FragmentOptions;
 import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.skyframe.serialization.ObjectCodec;
+import com.google.devtools.build.lib.skyframe.serialization.autocodec.AutoCodec;
 import com.google.devtools.common.options.Converter;
 import com.google.devtools.common.options.Option;
 import com.google.devtools.common.options.OptionDocumentationCategory;
 import com.google.devtools.common.options.OptionEffectTag;
 import com.google.devtools.common.options.OptionMetadataTag;
 import java.util.Map;
+import java.util.Optional;
 import java.util.SortedMap;
 import javax.annotation.Nullable;
 
@@ -39,7 +41,10 @@ import javax.annotation.Nullable;
  * Configuration fragment for Android's config_feature_flag, flags which can be defined in BUILD
  * files.
  */
+@AutoCodec
 public final class ConfigFeatureFlagConfiguration extends BuildConfiguration.Fragment {
+  public static final ObjectCodec<ConfigFeatureFlagConfiguration> CODEC =
+      new ConfigFeatureFlagConfiguration_AutoCodec();
 
   /** A converter used by the flag options which always returns an empty map, ignoring input. */
   public static final class EmptyImmutableSortedMapConverter
@@ -56,7 +61,11 @@ public final class ConfigFeatureFlagConfiguration extends BuildConfiguration.Fra
   }
 
   /** The options fragment which defines {@link ConfigFeatureFlagConfiguration}. */
+  @AutoCodec(strategy = AutoCodec.Strategy.PUBLIC_FIELDS)
   public static final class Options extends FragmentOptions {
+    public static final ObjectCodec<Options> CODEC =
+        new ConfigFeatureFlagConfiguration_Options_AutoCodec();
+
     /** The mapping from config_feature_flag rules to their values. */
     @Option(
       name = "config_feature_flag values (private)",
@@ -112,7 +121,12 @@ public final class ConfigFeatureFlagConfiguration extends BuildConfiguration.Fra
 
   /** Creates a new configuration fragment from the given {@link Options} fragment. */
   public ConfigFeatureFlagConfiguration(Options options) {
-    this.flagValues = options.getFlagValues();
+    this(options.getFlagValues());
+  }
+
+  @AutoCodec.Constructor
+  ConfigFeatureFlagConfiguration(ImmutableSortedMap<Label, String> flagValues) {
+    this.flagValues = flagValues;
     this.flagHash = this.flagValues.isEmpty() ? null : hashFlags(this.flagValues);
   }
 
@@ -141,7 +155,7 @@ public final class ConfigFeatureFlagConfiguration extends BuildConfiguration.Fra
    * ArtifactOwner for a rule, call {@code ruleContext.getOwner()}.
    */
   public Optional<String> getFeatureFlagValue(ArtifactOwner owner) {
-    return Optional.fromNullable(flagValues.get(owner.getLabel()));
+    return Optional.ofNullable(flagValues.get(owner.getLabel()));
   }
 
   /**

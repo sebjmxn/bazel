@@ -99,6 +99,19 @@ public class SkylarkSemanticsOptions extends OptionsBase implements Serializable
   public boolean incompatibleComprehensionVariablesDoNotLeak;
 
   @Option(
+    name = "incompatible_depset_union",
+    defaultValue = "false",
+    category = "incompatible changes",
+    documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
+    effectTags = {OptionEffectTag.UNKNOWN},
+    metadataTags = {OptionMetadataTag.INCOMPATIBLE_CHANGE},
+    help =
+        "If set to true, depset union using `+`, `|` or `.union` are forbidden. "
+            + "Use the `depset` constructor instead."
+  )
+  public boolean incompatibleDepsetUnion;
+
+  @Option(
     name = "incompatible_depset_is_not_iterable",
     defaultValue = "false",
     category = "incompatible changes",
@@ -124,6 +137,17 @@ public class SkylarkSemanticsOptions extends OptionsBase implements Serializable
   public boolean incompatibleDictLiteralHasNoDuplicates;
 
   @Option(
+    name = "incompatible_disable_glob_tracking",
+    defaultValue = "false",
+    category = "incompatible changes",
+    documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
+    effectTags = {OptionEffectTag.UNKNOWN},
+    metadataTags = {OptionMetadataTag.INCOMPATIBLE_CHANGE},
+    help = "If set to true, do not track the values of globs (this is used by rare specific cases"
+  )
+  public boolean incompatibleDisableGlobTracking;
+
+  @Option(
     name = "incompatible_disallow_dict_plus",
     defaultValue = "false",
     category = "incompatible changes",
@@ -146,17 +170,6 @@ public class SkylarkSemanticsOptions extends OptionsBase implements Serializable
   public boolean incompatibleDisallowKeywordOnlyArgs;
 
   @Option(
-    name = "incompatible_disallow_set_constructor",
-    defaultValue = "true",
-    category = "incompatible changes",
-    documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-    effectTags = {OptionEffectTag.UNKNOWN},
-    metadataTags = {OptionMetadataTag.INCOMPATIBLE_CHANGE},
-    help = "If set to true, disables the deprecated `set` constructor for depsets."
-  )
-  public boolean incompatibleDisallowSetConstructor;
-
-  @Option(
     name = "incompatible_disallow_toplevel_if_statement",
     defaultValue = "true",
     category = "incompatible changes",
@@ -170,21 +183,19 @@ public class SkylarkSemanticsOptions extends OptionsBase implements Serializable
   public boolean incompatibleDisallowToplevelIfStatement;
 
   @Option(
-    name = "incompatible_list_plus_equals_inplace",
+    name = "incompatible_disallow_uncalled_set_constructor",
     defaultValue = "true",
     category = "incompatible changes",
     documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
     effectTags = {OptionEffectTag.UNKNOWN},
     metadataTags = {OptionMetadataTag.INCOMPATIBLE_CHANGE},
-    help =
-        "If set to true, `+=` on lists works like the `extend` method mutating the original "
-            + "list. Otherwise it copies the original list without mutating it."
+    help = "If set to true, it's not allowed to use `set()` even if that code is never executed."
   )
-  public boolean incompatibleListPlusEqualsInplace;
+  public boolean incompatibleDisallowUncalledSetConstructor;
 
   @Option(
     name = "incompatible_load_argument_is_label",
-    defaultValue = "false",
+    defaultValue = "true",
     category = "incompatible changes",
     documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
     effectTags = {OptionEffectTag.UNKNOWN},
@@ -208,6 +219,20 @@ public class SkylarkSemanticsOptions extends OptionsBase implements Serializable
   public boolean incompatibleNewActionsApi;
 
   @Option(
+    name = "incompatible_show_all_print_messages",
+    defaultValue = "true",
+    category = "incompatible changes",
+    documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
+    effectTags = {OptionEffectTag.UNKNOWN},
+    metadataTags = {OptionMetadataTag.INCOMPATIBLE_CHANGE},
+    help =
+        "If set to true, the print function will generate DEBUG messages that aren't affected by "
+            + "the --output_filter option. Otherwise it will generate filterable WARNING "
+            + "messages."
+  )
+  public boolean incompatibleShowAllPrintMessages;
+
+  @Option(
     name = "incompatible_string_is_not_iterable",
     defaultValue = "false",
     category = "incompatible changes",
@@ -219,20 +244,6 @@ public class SkylarkSemanticsOptions extends OptionsBase implements Serializable
             + "are still allowed."
   )
   public boolean incompatibleStringIsNotIterable;
-
-  /**
-   * Used in testing to produce a truly minimalistic Extension object for certain evaluation
-   * contexts. This flag is Bazel-specific.
-   */
-  // TODO(bazel-team): A pending incompatible change will make it so that load()ed and built-in
-  // symbols do not get re-exported, making this flag obsolete.
-  @Option(
-    name = "internal_do_not_export_builtins",
-    defaultValue = "false",
-    documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
-    effectTags = {OptionEffectTag.UNKNOWN}
-  )
-  public boolean internalDoNotExportBuiltins;
 
   /** Used in an integration test to confirm that flags are visible to the interpreter. */
   @Option(
@@ -251,16 +262,17 @@ public class SkylarkSemanticsOptions extends OptionsBase implements Serializable
         .incompatibleCheckedArithmetic(incompatibleCheckedArithmetic)
         .incompatibleComprehensionVariablesDoNotLeak(incompatibleComprehensionVariablesDoNotLeak)
         .incompatibleDepsetIsNotIterable(incompatibleDepsetIsNotIterable)
+        .incompatibleDepsetUnion(incompatibleDepsetUnion)
         .incompatibleDictLiteralHasNoDuplicates(incompatibleDictLiteralHasNoDuplicates)
+        .incompatibleDisableGlobTracking(incompatibleDisableGlobTracking)
         .incompatibleDisallowDictPlus(incompatibleDisallowDictPlus)
         .incompatibleDisallowKeywordOnlyArgs(incompatibleDisallowKeywordOnlyArgs)
-        .incompatibleDisallowSetConstructor(incompatibleDisallowSetConstructor)
         .incompatibleDisallowToplevelIfStatement(incompatibleDisallowToplevelIfStatement)
-        .incompatibleListPlusEqualsInplace(incompatibleListPlusEqualsInplace)
+        .incompatibleDisallowUncalledSetConstructor(incompatibleDisallowUncalledSetConstructor)
         .incompatibleLoadArgumentIsLabel(incompatibleLoadArgumentIsLabel)
         .incompatibleNewActionsApi(incompatibleNewActionsApi)
+        .incompatibleShowAllPrintMessages(incompatibleShowAllPrintMessages)
         .incompatibleStringIsNotIterable(incompatibleStringIsNotIterable)
-        .internalDoNotExportBuiltins(internalDoNotExportBuiltins)
         .internalSkylarkFlagTestCanary(internalSkylarkFlagTestCanary)
         .build();
   }

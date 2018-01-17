@@ -43,9 +43,10 @@ std::string GetBinaryPathWithExtension(const std::string& binary);
 // Escape a command line argument.
 //
 // If the argument has space, then we quote it.
-// Escape \ to \\
 // Escape " to \"
-std::string GetEscapedArgument(const std::string& argument);
+// Escape \ to \\ if escape_backslash is true
+std::string GetEscapedArgument(const std::string& argument,
+                               bool escape_backslash);
 
 // Convert a path to an absolute Windows path with \\?\ prefix.
 // This method will print an error and exit if it cannot convert the path.
@@ -74,6 +75,15 @@ bool SetEnv(const std::string& env_name, const std::string& value);
 // Return a random string with a given length.
 // The string consists of a-zA-Z0-9
 std::string GetRandomStr(size_t len);
+
+// Normalize a path to a Windows path in lower case
+bool NormalizePath(const std::string& path, std::string* result);
+
+// Calculate a relative path from `path` to `base`.
+// This function expects normalized Windows path in lower case.
+// `path` and `base` should be both absolute or both relative.
+bool RelativeTo(const std::string& path, const std::string& base,
+                std::string* result);
 
 }  // namespace launcher
 }  // namespace bazel

@@ -8,16 +8,14 @@ md5_cmd = "set -e -o pipefail && cat $(SRCS) | sort | %s | awk '{ print $$1; }' 
 filegroup(
     name = "libunix",
     srcs = select({
-        ":darwin": ["//src/main/native:libunix.dylib"],
-        ":darwin_x86_64": ["//src/main/native:libunix.dylib"],
-        ":windows": ["//src/main/native/windows:windows_jni.dll"],
-        ":windows_msys": ["//src/main/native/windows:windows_jni.dll"],
-        ":windows_msvc": ["//src/main/native/windows:windows_jni.dll"],
+        "//src/conditions:darwin": ["//src/main/native:libunix.dylib"],
+        "//src/conditions:darwin_x86_64": ["//src/main/native:libunix.dylib"],
+        "//src/conditions:windows": ["//src/main/native/windows:windows_jni.dll"],
         "//conditions:default": ["//src/main/native:libunix.so"],
     }),
     visibility = [
         "//src/test/java:__pkg__",
-        "//src/tools/remote_worker:__subpackages__",
+        "//src/tools/remote:__subpackages__",
     ],
 )
 
@@ -34,9 +32,9 @@ filegroup(
     ] + embedded_tools_target,
     outs = ["install_base_key" + suffix],
     cmd = select({
-        ":darwin": md5_cmd % "/sbin/md5",
-        ":darwin_x86_64": md5_cmd % "/sbin/md5",
-        ":freebsd": md5_cmd % "/sbin/md5",
+        "//src/conditions:darwin": md5_cmd % "/sbin/md5",
+        "//src/conditions:darwin_x86_64": md5_cmd % "/sbin/md5",
+        "//src/conditions:freebsd": md5_cmd % "/sbin/md5",
         "//conditions:default": md5_cmd % "md5sum",
     }),
 ) for suffix, embedded_tools_target in {
@@ -109,7 +107,7 @@ filegroup(
         "//src/tools/xcode/realpath:realpath",
         "//tools/osx:xcode_locator.m",
     ] + select({
-        ":iphonesdk": ["//src/tools/xcode/stdredirect:StdRedirect.dylib"],
+        "//src/conditions:iphonesdk": ["//src/tools/xcode/stdredirect:StdRedirect.dylib"],
         "//conditions:default": [":dummy_darwin_tool_src_tools_xcode_stdredirect_StdRedirect.dylib"],
     }),
 )
@@ -149,10 +147,11 @@ py_binary(
         "//third_party/py/concurrent:srcs",
         "//third_party/py/gflags:srcs",
         "//third_party/py/six:srcs",
+        "//src/conditions:embedded_tools",
         "//src/java_tools/buildjar/java/com/google/devtools/build/buildjar/jarhelper:srcs",
         "//src/tools/android/java/com/google/devtools/build/android:embedded_tools",
         "//src/tools/launcher:srcs",
-        "//src/tools/runfiles:srcs",
+        "//src/tools/runfiles:embedded_tools",
         "//src/tools/singlejar:embedded_tools",
         "//src/main/cpp/util:embedded_tools",
         "//src/main/native:embedded_tools",
@@ -171,10 +170,10 @@ py_binary(
         "//third_party/java/jacoco:srcs",
         "//third_party/zlib:embedded_tools",
     ] + select({
-        ":darwin": [
+        "//src/conditions:darwin": [
             ":darwin_tools",
         ],
-        ":darwin_x86_64": [
+        "//src/conditions:darwin_x86_64": [
             ":darwin_tools",
         ],
         "//conditions:default": [
@@ -183,41 +182,25 @@ py_binary(
     }) + select({
         # TODO(bazel-team): Once https://github.com/bazelbuild/bazel/issues/2241
         # is resolved, use cc implementation of singlejar on windows
-        ":windows": [
+        "//src/conditions:windows": [
             "//src/java_tools/singlejar:SingleJar_deploy.jar",
             "//src/tools/launcher:launcher",
             "//third_party/def_parser:def_parser",
         ],
-        ":windows_msys": [
-            "//src/java_tools/singlejar:SingleJar_deploy.jar",
-            "//src/tools/launcher:launcher",
-            "//third_party/def_parser:def_parser",
-        ],
-        ":windows_msvc": [
-            "//src/java_tools/singlejar:SingleJar_deploy.jar",
-            "//src/tools/launcher:launcher",
-            "//third_party/def_parser:def_parser",
-        ],
-        ":arm": [
+        "//src/conditions:arm": [
             "//src/java_tools/singlejar:SingleJar_deploy.jar",
         ],
         "//conditions:default": [
             "//src/tools/singlejar:singlejar",
         ],
     }) + (select({
-        ":darwin": [
+        "//src/conditions:darwin": [
             "@openjdk_macos//file",
         ],
-        ":darwin_x86_64": [
+        "//src/conditions:darwin_x86_64": [
             "@openjdk_macos//file",
         ],
-        ":windows_msys": [
-            "@openjdk_win//file",
-        ],
-        ":windows_msvc": [
-            "@openjdk_win//file",
-        ],
-        ":windows": [
+        "//src/conditions:windows": [
             "@openjdk_win//file",
         ],
         "//conditions:default": [
@@ -334,69 +317,10 @@ genrule(
     "_with_jdk",
 ]]
 
-config_setting(
-    name = "linux_x86_64",
-    values = {"cpu": "k8"},
-    visibility = ["//visibility:public"],
-)
-
-config_setting(
-    name = "darwin",
-    values = {"cpu": "darwin"},
-    visibility = ["//visibility:public"],
-)
-
-config_setting(
-    name = "darwin_x86_64",
-    values = {"cpu": "darwin_x86_64"},
-    visibility = ["//visibility:public"],
-)
-
-config_setting(
-    name = "iphonesdk",
-    values = {"define": "IPHONE_SDK=1"},
-    visibility = ["//visibility:public"],
-)
-
-config_setting(
-    name = "freebsd",
-    values = {"cpu": "freebsd"},
-    visibility = ["//visibility:public"],
-)
-
-config_setting(
-    name = "windows",
-    values = {"cpu": "x64_windows"},
-    visibility = ["//visibility:public"],
-)
-
-config_setting(
-    name = "windows_msvc",
-    values = {"cpu": "x64_windows_msvc"},
-    visibility = ["//visibility:public"],
-)
-
-config_setting(
-    name = "windows_msys",
-    values = {"cpu": "x64_windows_msys"},
-    visibility = ["//visibility:public"],
-)
-
-config_setting(
-    name = "arm",
-    values = {"cpu": "arm"},
-    visibility = ["//visibility:public"],
-)
-
-config_setting(
-    name = "remote",
-    values = {"define": "EXECUTOR=remote"},
-    visibility = ["//visibility:public"],
-)
-
 filegroup(
     name = "srcs",
     srcs = glob(["**"]) + [
+        "//src/conditions:srcs",
         "//src/java_tools/buildjar:srcs",
         "//src/java_tools/junitrunner:srcs",
         "//src/java_tools/singlejar:srcs",
@@ -419,6 +343,7 @@ filegroup(
         "//src/test/java/com/google/devtools/build/android:srcs",
         "//src/test/java/com/google/devtools/build/docgen:srcs",
         "//src/test/java/com/google/devtools/build/lib:srcs",
+        "//src/test/java/com/google/devtools/build/lib/shell:srcs",
         "//src/test/java/com/google/devtools/build/skyframe:srcs",
         "//src/test/java/com/google/devtools/common/options:srcs",
         "//src/test/py/bazel:srcs",
@@ -437,7 +362,7 @@ filegroup(
         "//src/tools/xcode/stdredirect:srcs",
         "//src/tools/xcode/swiftstdlibtoolwrapper:srcs",
         "//src/tools/xcode-common:srcs",
-        "//src/tools/remote_worker:srcs",
+        "//src/tools/remote:srcs",
         "//tools/osx:srcs",
     ],
     visibility = ["//:__pkg__"],
@@ -452,6 +377,10 @@ genrule(
     ],
     outs = ["derived_java_srcs.zip"],
     cmd = "$(location :combine_derived_java_srcs.sh) $(JAVABASE) $@ $(SRCS)",
+    # Technically, this should be prefixed with @bazel_tools, but in order to
+    # avoid having to wait a Bazel release which has this target under
+    # @bazel_tools, we use it from the main repository. It's the same anyway.
+    toolchains = ["@bazel_tools//tools/jdk:current_java_runtime"],
     tools = ["combine_derived_java_srcs.sh"],
     visibility = ["//:__pkg__"],
 )
@@ -483,4 +412,11 @@ test_suite(
         "//src/tools/runfiles:all_windows_tests",
         "//third_party/def_parser:all_windows_tests",
     ],
+)
+
+# config_setting alias left here because bazel-only third_party code is pointing to it
+alias(
+    name = "windows",
+    actual = "//src/conditions:windows",
+    visibility = ["//visibility:public"],
 )

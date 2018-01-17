@@ -22,7 +22,6 @@ filegroup(
     name = "test-deps",
     testonly = 1,
     srcs = [
-        "bazel_sandboxing_test_utils.sh",
         "remote_helpers.sh",
         "testing_server.py",
         ":langtools-copy",
@@ -41,15 +40,11 @@ filegroup(
         "//third_party/java/jdk/langtools:test-srcs",
         "//tools:srcs",
         "@local_jdk//:bootclasspath",
-        # TODO(cushon): migrate to extclasspath and delete
-        "@local_jdk//:extdir",
         "@local_jdk//:jdk",
     ] + select({
         # TODO(bazel-team): Once https://github.com/bazelbuild/bazel/issues/2241
         # is resolved, use cc implementation of singlejar on windows
-        "//src:windows": ["//src/java_tools/singlejar:SingleJar_deploy.jar"],
-        "//src:windows_msys": ["//src/java_tools/singlejar:SingleJar_deploy.jar"],
-        "//src:windows_msvc": ["//src/java_tools/singlejar:SingleJar_deploy.jar"],
+        "//src/conditions:windows": ["//src/java_tools/singlejar:SingleJar_deploy.jar"],
         "//conditions:default": ["//src/tools/singlejar:singlejar"],
     }),
     visibility = [
@@ -175,11 +170,9 @@ sh_test(
     size = "medium",
     srcs = ["bazel_toolchain_test.sh"],
     data = [":test-deps"] + select({
-        "//src:darwin": [],
-        "//src:darwin_x86_64": [],
-        "//src:windows": [],
-        "//src:windows_msys": [],
-        "//src:windows_msvc": [],
+        "//src/conditions:darwin": [],
+        "//src/conditions:darwin_x86_64": [],
+        "//src/conditions:windows": [],
         "//conditions:default": ["//src/test/shell/bazel/testdata:bazel_toolchain_test_project_pkg"],
     }),
     tags = [
@@ -245,6 +238,13 @@ sh_test(
     srcs = ["external_integration_test.sh"],
     data = [":test-deps"],
     shard_count = 3,
+)
+
+sh_test(
+    name = "external_patching_test",
+    size = "medium",
+    srcs = ["external_patching_test.sh"],
+    data = [":test-deps"],
 )
 
 sh_test(
@@ -361,16 +361,16 @@ sh_test(
 )
 
 sh_test(
-    name = "linux_sandbox_test",
-    size = "large",
-    srcs = ["linux-sandbox_test.sh"],
+    name = "cc_integration_test",
+    size = "medium",
+    srcs = ["cc_integration_test.sh"],
     data = [":test-deps"],
 )
 
 sh_test(
-    name = "cc_integration_test",
+    name = "cc_static_binary_test",
     size = "medium",
-    srcs = ["cc_integration_test.sh"],
+    srcs = ["cc_static_binary_test.sh"],
     data = [":test-deps"],
 )
 
@@ -380,6 +380,7 @@ sh_test(
     srcs = ["bazel_sandboxing_test.sh"],
     data = [
         ":test-deps",
+        "//src/test/shell:sandboxing_test_utils.sh",
         "@mount_path_toolchain//file",
     ],
     tags = ["local"],
@@ -388,7 +389,10 @@ sh_test(
 sh_test(
     name = "bazel_sandboxing_cpp_test",
     srcs = ["bazel_sandboxing_cpp_test.sh"],
-    data = [":test-deps"],
+    data = [
+        ":test-deps",
+        "//src/test/shell:sandboxing_test_utils.sh",
+    ],
     tags = ["local"],
 )
 
@@ -416,7 +420,17 @@ sh_test(
     srcs = ["remote_execution_test.sh"],
     data = [
         ":test-deps",
-        "//src/tools/remote_worker",
+        "//src/tools/remote:worker",
+    ],
+)
+
+sh_test(
+    name = "remote_execution_http_test",
+    size = "large",
+    srcs = ["remote_execution_http_test.sh"],
+    data = [
+        ":test-deps",
+        "//src/tools/remote:worker",
     ],
 )
 
@@ -426,7 +440,8 @@ sh_test(
     srcs = ["remote_execution_sandboxing_test.sh"],
     data = [
         ":test-deps",
-        "//src/tools/remote_worker",
+        "//src/test/shell:sandboxing_test_utils.sh",
+        "//src/tools/remote:worker",
     ],
 )
 
@@ -516,6 +531,8 @@ sh_test(
     size = "large",
     srcs = ["toolchain_test.sh"],
     data = [":test-deps"],
+    # TODO(b/70984583): remove when no longer flaky
+    flaky = 1,
     shard_count = 5,
 )
 
@@ -525,6 +542,7 @@ sh_test(
     srcs = ["java_launcher_test.sh"],
     args = ["$(JAVABASE)"],
     data = [":test-deps"],
+    toolchains = ["@bazel_tools//tools/jdk:current_java_runtime"],
 )
 
 genquery(

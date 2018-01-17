@@ -21,13 +21,9 @@ import com.google.devtools.build.lib.analysis.actions.CustomCommandLine.VectorAr
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
 import com.google.devtools.build.lib.analysis.configuredtargets.RuleConfiguredTarget.Mode;
 
-/**
- * Builder for creating a zip filter action.
- */
+/** Builder for creating a zip filter action. */
 public class ZipFilterBuilder {
-  /**
-   * Type of compression to apply to output archive.
-   */
+  /** Type of compression to apply to output archive. */
   public enum Compression {
     /** Output should be compressed. */
     COMPRESSED,
@@ -44,6 +40,7 @@ public class ZipFilterBuilder {
   private final ImmutableSet.Builder<String> filterFileTypesBuilder;
   private final ImmutableSet.Builder<String> explicitFilterBuilder;
   private Compression outputMode = Compression.DONT_CHANGE;
+  private boolean checkHashMismatch = true;
 
   /** Creates a builder using the configuration of the rule as the action configuration. */
   public ZipFilterBuilder(RuleContext ruleContext) {
@@ -89,6 +86,12 @@ public class ZipFilterBuilder {
     return this;
   }
 
+  /** Enable checking of hash mismatches for files with the same name. */
+  public ZipFilterBuilder setCheckHashMismatch(boolean enabled) {
+    this.checkHashMismatch = enabled;
+    return this;
+  }
+
   /** Builds the action as configured. */
   public void build() {
     ImmutableSet<Artifact> filterZips = filterZipsBuilder.build();
@@ -106,6 +109,9 @@ public class ZipFilterBuilder {
     }
     if (!explicitFilters.isEmpty()) {
       args.addAll("--explicitFilters", VectorArg.join(",").each(explicitFilters));
+    }
+    if (!checkHashMismatch) {
+      args.add("--checkHashMismatch").add("IGNORE");
     }
     args.add("--outputMode");
     switch (outputMode) {

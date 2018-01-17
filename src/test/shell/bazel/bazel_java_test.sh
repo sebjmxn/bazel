@@ -195,7 +195,7 @@ java_custom_library = rule(
     "exports": attr.label_list(),
     "resources": attr.label_list(allow_files=True),
     "_java_toolchain": attr.label(default = Label("@bazel_tools//tools/jdk:toolchain")),
-    "_host_javabase": attr.label(default = Label("//tools/defaults:jdk"))
+    "_host_javabase": attr.label(default = Label("@bazel_tools//tools/jdk:current_host_java_runtime"))
   },
   fragments = ["java"]
 )
@@ -208,14 +208,12 @@ function test_build_hello_world() {
   bazel build //java/main:main &> $TEST_log || fail "build failed"
 }
 
-# This test builds a simple java deploy jar using a java_toolchain which
-# compiles singlejar and ijar from source.
-function test_build_hello_world_with_customized_java_toolchain() {
+# This test builds a simple java deploy jar using remote singlejar and ijar
+# targets which compile them from source.
+function test_build_hello_world_with_remote_embedded_tool_targets() {
   write_hello_library_files
 
-  bazel build //java/main:main_deploy.jar \
-    --host_java_toolchain=@bazel_tools//tools/jdk:remote_toolchain \
-    --java_toolchain=@bazel_tools//tools/jdk:remote_toolchain \
+  bazel build //java/main:main_deploy.jar --define EXECUTOR=remote \
     &> $TEST_log || fail "build failed"
 }
 
@@ -321,7 +319,7 @@ java_custom_library = rule(
     "srcs": attr.label_list(allow_files=True),
     "sourcepath": attr.label_list(),
     "_java_toolchain": attr.label(default = Label("@bazel_tools//tools/jdk:toolchain")),
-    "_host_javabase": attr.label(default = Label("//tools/defaults:jdk"))
+    "_host_javabase": attr.label(default = Label("@bazel_tools//tools/jdk:current_host_java_runtime"))
   },
   fragments = ["java"]
 )
@@ -398,7 +396,7 @@ java_custom_library = rule(
     "srcs": attr.label_list(allow_files=True),
     "sourcepath": attr.label_list(),
     "_java_toolchain": attr.label(default = Label("@bazel_tools//tools/jdk:toolchain")),
-    "_host_javabase": attr.label(default = Label("//tools/defaults:jdk"))
+    "_host_javabase": attr.label(default = Label("@bazel_tools//tools/jdk:current_host_java_runtime"))
   },
   fragments = ["java"]
 )
@@ -1325,6 +1323,7 @@ EOF
   expect_log "liba.jar"
 }
 
+
 function test_java_common_create_provider_with_ijar_unset_actions() {
   mkdir -p java/com/google/foo
   touch java/com/google/foo/{BUILD,A.java,my_rule.bzl}
@@ -1357,8 +1356,44 @@ my_rule = rule(
 EOF
 
   bazel build java/com/google/foo:banana >& "$TEST_log" && fail "Unexpected success"
-  expect_log "In java_common.create_provider the value of use_ijar is True. Make sure the first argument of the function is the ctx.actions object."
+  expect_log "The value of use_ijar is True. Make sure the ctx.actions argument is valid."
 }
+
+
+function test_java_info_constructor_with_ijar_unset_actions() {
+  mkdir -p java/com/google/foo
+  touch java/com/google/foo/{BUILD,my_rule.bzl}
+  cat > java/com/google/foo/BUILD << EOF
+load(":my_rule.bzl", "my_rule")
+my_rule(
+  name = 'my_skylark_rule',
+  output_jar = 'my_skylark_rule_lib.jar'
+ )
+EOF
+
+  cat > java/com/google/foo/my_rule.bzl << EOF
+result = provider()
+def _impl(ctx):
+  javaInfo = JavaInfo(
+    output_jar = ctx.file.output_jar,
+    use_ijar = True,
+    java_toolchain = ctx.attr._java_toolchain
+  )
+  return [result(property = javaInfo)]
+
+my_rule = rule(
+  implementation = _impl,
+  attrs = {
+    'output_jar' : attr.label(allow_single_file=True),
+    "_java_toolchain": attr.label(default = Label("//tools/jdk:toolchain"))
+  }
+)
+EOF
+
+  bazel build java/com/google/foo:my_skylark_rule >& "$TEST_log" && fail "Unexpected success"
+  expect_log "The value of use_ijar is True. Make sure the ctx.actions argument is valid."
+}
+
 
 function test_java_common_create_provider_with_ijar_unset_java_toolchain() {
   mkdir -p java/com/google/foo
@@ -1392,8 +1427,43 @@ my_rule = rule(
 EOF
 
   bazel build java/com/google/foo:banana >& "$TEST_log" && fail "Unexpected success"
-  expect_log "In java_common.create_provider the value of use_ijar is True. Make sure the java_toolchain argument is a valid java_toolchain Target."
+  expect_log "The value of use_ijar is True. Make sure the java_toolchain argument is a valid."
 }
+
+
+function test_java_info_constructor_with_ijar_unset_java_toolchain() {
+  mkdir -p java/com/google/foo
+  touch java/com/google/foo/{BUILD,my_rule.bzl}
+  cat > java/com/google/foo/BUILD << EOF
+load(":my_rule.bzl", "my_rule")
+my_rule(
+  name = 'my_skylark_rule',
+  output_jar = 'my_skylark_rule_lib.jar'
+ )
+EOF
+
+  cat > java/com/google/foo/my_rule.bzl << EOF
+result = provider()
+def _impl(ctx):
+  javaInfo = JavaInfo(
+    output_jar = ctx.file.output_jar,
+    use_ijar = True,
+    actions = ctx.actions
+  )
+  return [result(property = javaInfo)]
+
+my_rule = rule(
+  implementation = _impl,
+  attrs = {
+    'output_jar' : attr.label(allow_single_file=True)
+  }
+)
+EOF
+
+  bazel build java/com/google/foo:my_skylark_rule >& "$TEST_log" && fail "Unexpected success"
+  expect_log "The value of use_ijar is True. Make sure the java_toolchain argument is a valid."
+}
+
 
 function test_java_test_timeout() {
   setup_javatest_support
@@ -1485,4 +1555,3 @@ EOF
 }
 
 run_suite "Java integration tests"
-

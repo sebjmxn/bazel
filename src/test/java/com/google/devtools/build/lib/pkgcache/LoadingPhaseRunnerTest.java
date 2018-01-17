@@ -20,11 +20,11 @@ import com.google.common.base.Functions;
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
-import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
+import com.google.devtools.build.lib.actions.ActionKeyContext;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.BuildView;
 import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
@@ -589,6 +589,7 @@ public class LoadingPhaseRunnerTest {
     private final List<Path> changes = new ArrayList<>();
     private final LoadingPhaseRunner loadingPhaseRunner;
     private final BlazeDirectories directories;
+    private final ActionKeyContext actionKeyContext = new ActionKeyContext();
 
     private LoadingOptions options;
     private final StoredEventHandler storedErrors;
@@ -623,19 +624,26 @@ public class LoadingPhaseRunnerTest {
               pkgFactory,
               fs,
               directories,
+              actionKeyContext,
               null, /* workspaceStatusActionFactory -- not used */
               ruleClassProvider.getBuildInfoFactories(),
               ImmutableList.<DiffAwareness.Factory>of(),
-              Predicates.<PathFragment>alwaysFalse(),
               analysisMock.getSkyFunctions(directories),
               ImmutableList.<SkyValueDirtinessChecker>of(),
-              PathFragment.EMPTY_FRAGMENT,
+              BazelSkyframeExecutorConstants.HARDCODED_BLACKLISTED_PACKAGE_PREFIXES,
+              BazelSkyframeExecutorConstants.ADDITIONAL_BLACKLISTED_PACKAGE_PREFIXES_FILE,
               BazelSkyframeExecutorConstants.CROSS_REPOSITORY_LABEL_VIOLATION_STRATEGY,
               BazelSkyframeExecutorConstants.BUILD_FILES_BY_PRIORITY,
               BazelSkyframeExecutorConstants.ACTION_ON_IO_EXCEPTION_READING_BUILD_FILE);
       TestConstants.processSkyframeExecutorForTesting(skyframeExecutor);
-      PathPackageLocator pkgLocator = PathPackageLocator.create(
-          null, options.packagePath, storedErrors, workspace, workspace);
+      PathPackageLocator pkgLocator =
+          PathPackageLocator.create(
+              null,
+              options.packagePath,
+              storedErrors,
+              workspace,
+              workspace,
+              BazelSkyframeExecutorConstants.BUILD_FILES_BY_PRIORITY);
       PackageCacheOptions packageCacheOptions = Options.getDefaults(PackageCacheOptions.class);
       packageCacheOptions.defaultVisibility = ConstantRuleVisibility.PRIVATE;
       packageCacheOptions.showLoadingProgress = true;

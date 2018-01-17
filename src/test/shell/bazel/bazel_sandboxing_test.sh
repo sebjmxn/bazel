@@ -22,8 +22,8 @@
 CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${CURRENT_DIR}/../integration_test_setup.sh" \
   || { echo "integration_test_setup.sh not found!" >&2; exit 1; }
-source ${CURRENT_DIR}/bazel_sandboxing_test_utils.sh \
-  || { echo "bazel_sandboxing_test_utils.sh not found!" >&2; exit 1; }
+source ${CURRENT_DIR}/../sandboxing_test_utils.sh \
+  || { echo "sandboxing_test_utils.sh not found!" >&2; exit 1; }
 source ${CURRENT_DIR}/remote_helpers.sh \
   || { echo "remote_helpers.sh not found!" >&2; exit 1; }
 
@@ -115,7 +115,7 @@ genrule(
   tags = [ "local" ],
 )
 
-load('/examples/genrule/skylark', 'skylark_breaks1')
+load('//examples/genrule:skylark.bzl', 'skylark_breaks1')
 
 skylark_breaks1(
   name = "skylark_breaks1",
@@ -542,6 +542,27 @@ EOF
 
   # This is the UserExecException telling us that the build failed.
   expect_log "Executing genrule //:test failed:"
+}
+
+function test_sandbox_debug() {
+  cat > BUILD <<'EOF'
+genrule(
+  name = "broken",
+  outs = ["bla.txt"],
+  cmd = "exit 1",
+)
+EOF
+  bazel build --verbose_failures :broken &> $TEST_log \
+    && fail "build should have failed" || true
+  expect_log "Use --sandbox_debug to see verbose messages from the sandbox"
+  expect_log "Executing genrule //:broken failed"
+
+  bazel build --verbose_failures --sandbox_debug :broken &> $TEST_log \
+    && fail "build should have failed" || true
+  expect_log "Executing genrule //:broken failed"
+  expect_not_log "Use --sandbox_debug to see verbose messages from the sandbox"
+  # This will appear a lot in the sandbox failure details.
+  expect_log "bazel-sandbox"
 }
 
 function test_sandbox_mount_customized_path () {

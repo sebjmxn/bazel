@@ -18,11 +18,10 @@ import static com.google.common.truth.Truth.assertThat;
 import static com.google.devtools.build.lib.actions.util.ActionsTestUtil.NULL_ACTION_OWNER;
 
 import com.google.common.collect.ImmutableMap;
+import com.google.devtools.build.lib.actions.ActionKeyContext;
 import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.actions.Root;
+import com.google.devtools.build.lib.actions.ArtifactRoot;
 import com.google.devtools.build.lib.testutil.FoundationTestCase;
-import com.google.devtools.build.lib.testutil.Suite;
-import com.google.devtools.build.lib.testutil.TestSpec;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.Symlinks;
@@ -33,13 +32,14 @@ import org.junit.runners.JUnit4;
 /**
  * A test for {@link CreateIncSymlinkAction}.
  */
-@TestSpec(size = Suite.SMALL_TESTS)
 @RunWith(JUnit4.class)
 public class CreateIncSymlinkActionTest extends FoundationTestCase {
 
+  private final ActionKeyContext actionKeyContext = new ActionKeyContext();
+
   @Test
   public void testDifferentOrderSameActionKey() throws Exception {
-    Root root = Root.asDerivedRoot(rootDirectory, rootDirectory.getRelative("out"));
+    ArtifactRoot root = ArtifactRoot.asDerivedRoot(rootDirectory, rootDirectory.getRelative("out"));
     Artifact a = new Artifact(PathFragment.create("a"), root);
     Artifact b = new Artifact(PathFragment.create("b"), root);
     Artifact c = new Artifact(PathFragment.create("c"), root);
@@ -53,12 +53,13 @@ public class CreateIncSymlinkActionTest extends FoundationTestCase {
     d = new Artifact(PathFragment.create("d"), root);
     CreateIncSymlinkAction action2 = new CreateIncSymlinkAction(NULL_ACTION_OWNER,
         ImmutableMap.of(c, d, a, b), root.getPath());
-    assertThat(action2.computeKey()).isEqualTo(action1.computeKey());
+    assertThat(action2.computeKey(actionKeyContext))
+        .isEqualTo(action1.computeKey(actionKeyContext));
   }
 
   @Test
   public void testDifferentTargetsDifferentActionKey() throws Exception {
-    Root root = Root.asDerivedRoot(rootDirectory, rootDirectory.getRelative("out"));
+    ArtifactRoot root = ArtifactRoot.asDerivedRoot(rootDirectory, rootDirectory.getRelative("out"));
     Artifact a = new Artifact(PathFragment.create("a"), root);
     Artifact b = new Artifact(PathFragment.create("b"), root);
     CreateIncSymlinkAction action1 = new CreateIncSymlinkAction(NULL_ACTION_OWNER,
@@ -68,12 +69,13 @@ public class CreateIncSymlinkActionTest extends FoundationTestCase {
     b = new Artifact(PathFragment.create("c"), root);
     CreateIncSymlinkAction action2 = new CreateIncSymlinkAction(NULL_ACTION_OWNER,
         ImmutableMap.of(a, b), root.getPath());
-    assertThat(action2.computeKey()).isNotEqualTo(action1.computeKey());
+    assertThat(action2.computeKey(actionKeyContext))
+        .isNotEqualTo(action1.computeKey(actionKeyContext));
   }
 
   @Test
   public void testDifferentSymlinksDifferentActionKey() throws Exception {
-    Root root = Root.asDerivedRoot(rootDirectory, rootDirectory.getRelative("out"));
+    ArtifactRoot root = ArtifactRoot.asDerivedRoot(rootDirectory, rootDirectory.getRelative("out"));
     Artifact a = new Artifact(PathFragment.create("a"), root);
     Artifact b = new Artifact(PathFragment.create("b"), root);
     CreateIncSymlinkAction action1 = new CreateIncSymlinkAction(NULL_ACTION_OWNER,
@@ -83,14 +85,15 @@ public class CreateIncSymlinkActionTest extends FoundationTestCase {
     b = new Artifact(PathFragment.create("b"), root);
     CreateIncSymlinkAction action2 = new CreateIncSymlinkAction(NULL_ACTION_OWNER,
         ImmutableMap.of(a, b), root.getPath());
-    assertThat(action2.computeKey()).isNotEqualTo(action1.computeKey());
+    assertThat(action2.computeKey(actionKeyContext))
+        .isNotEqualTo(action1.computeKey(actionKeyContext));
   }
 
   @Test
   public void testExecute() throws Exception {
     Path outputDir = rootDirectory.getRelative("out");
     outputDir.createDirectory();
-    Root root = Root.asDerivedRoot(rootDirectory, outputDir);
+    ArtifactRoot root = ArtifactRoot.asDerivedRoot(rootDirectory, outputDir);
     Path symlink = rootDirectory.getRelative("out/a");
     Artifact a = new Artifact(symlink, root);
     Artifact b = new Artifact(PathFragment.create("b"), root);
@@ -107,7 +110,7 @@ public class CreateIncSymlinkActionTest extends FoundationTestCase {
   public void testFileRemoved() throws Exception {
     Path outputDir = rootDirectory.getRelative("out");
     outputDir.createDirectory();
-    Root root = Root.asDerivedRoot(rootDirectory, outputDir);
+    ArtifactRoot root = ArtifactRoot.asDerivedRoot(rootDirectory, outputDir);
     Path symlink = rootDirectory.getRelative("out/subdir/a");
     Artifact a = new Artifact(symlink, root);
     Artifact b = new Artifact(PathFragment.create("b"), root);

@@ -101,8 +101,6 @@ public final class MockProtoSupport {
          "           srcs = [ 'pyproto2.py' ])");
     config.create("net/proto2/bridge/public/BUILD",
         "package(default_visibility=['//visibility:public'])",
-        "cc_library(name = 'message_downgrader',",
-        "           srcs = [ 'downgrader.cc' ])",
         "cc_library(name = 'compatibility_mode_support',",
         "           srcs = [ 'compatibility.cc' ])");
     config.create(
@@ -116,9 +114,10 @@ public final class MockProtoSupport {
         "package(default_visibility=['//visibility:public'])",
         "py_library(name = 'proto1',",
         "           srcs = [ 'pyproto.py' ])");
-    config.create("net/rpc/BUILD",
+    config.create(
+        "net/rpc/BUILD",
         "package(default_visibility=['//visibility:public'])",
-        "cc_library(name = 'rpc_noloas')");
+        "cc_library(name = 'stubby12_proto_rpc_libs')");
     config.create("net/rpc4/public/core/BUILD",
         "package(default_visibility=['//visibility:public'])",
         "cc_library(name = 'rpc4_base')");
@@ -127,8 +126,10 @@ public final class MockProtoSupport {
         "cc_library(name = 'grpc++_codegen_lib')");
     config.create("net/rpc/python/BUILD",
         "package(default_visibility=['//visibility:public'])",
-        "py_library(name = 'python_lite',",
-        "           srcs = [ 'pyrpc.py' ])");
+        "py_library(name = 'proto_python_api_1_stub',",
+        "           srcs = [ 'test_only_prefix_proto_python_api_1_stub.py' ])",
+        "py_library(name = 'proto_python_api_2_stub',",
+        "           srcs = [ 'test_only_prefix_proto_python_api_2_stub.py' ])");
     config.create("java/com/google/net/rpc/BUILD",
         "package(default_visibility=['//visibility:public'])",
         "java_library(name = 'rpc',",
@@ -168,6 +169,11 @@ public final class MockProtoSupport {
         "package(default_visibility=['//visibility:public'])",
         "go_library(name = 'context',",
         "           srcs = [ 'context.go' ])");
+    config.create("third_party/py/six/BUILD",
+        "package(default_visibility=['//visibility:public'])",
+        "licenses(['notice'])",
+        "py_library(name = 'six',",
+        "           srcs = [ '__init__.py' ])");
   }
 
   /**

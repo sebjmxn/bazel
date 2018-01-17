@@ -32,27 +32,34 @@ guarded behind flags in the current release:
 
 *   [Set constructor](#set-constructor)
 *   [Keyword-only arguments](#keyword-only-arguments)
-*   [Mutating `+=`](#mutating)
 *   [Dictionary concatenation](#dictionary-concatenation)
 *   [Load must appear at top of file](#load-must-appear-at-top-of-file)
 *   [Load argument is a label](#load-argument-is-a-label)
 *   [Top level `if` statements](#top-level-if-statements)
 *   [Comprehensions variables](#comprehensions-variables)
 *   [Depset is no longer iterable](#depset-is-no-longer-iterable)
+*   [Depset union](#depset-union)
 *   [String is no longer iterable](#string-is-no-longer-iterable)
 *   [Dictionary literal has no duplicates](#dictionary-literal-has-no-duplicates)
 *   [New actions API](#new-actions-api)
 *   [Checked arithmetic](#checked-arithmetic)
+*   [Glob tracking](#glob-tracking)
+*   [Print statements](#print-statements)
+
 
 ### Set constructor
 
-We are removing the `set` constructor. Use `depset` instead. `set` and `depset`
-are equivalent, you just need to do search and replace to update the old code.
+To maintain a clear distinction between the specialized [`depset`](depsets.md)
+data structure and Python's native `set` datatype (which does not currently
+exist in Skylark), the `set` constructor has been superseded by `depset`. It is
+no longer allowed to run code that calls the old `set` constructor.
 
-We are doing this to reduce confusion between the specialized
-[depset](depsets.md) data structure and Python's set datatype.
+However, for a limited time, it will not be an error to reference the `set`
+constructor from code that is not executed (e.g. a function that is never
+called). Enable this flag to confirm that your code does not still refer to the
+old `set` constructor from unexecuted code.
 
-*   Flag: `--incompatible_disallow_set_constructor`
+*   Flag: `--incompatible_disallow_uncalled_set_constructor`
 *   Default: `true`
 
 
@@ -77,29 +84,6 @@ compatibility with Python 2, we are removing this feature (which we have never
 documented).
 
 *   Flag: `--incompatible_disallow_keyword_only_args`
-*   Default: `true`
-
-
-### Mutating `+=`
-
-We are changing `left += right` when `left` is a list. The old behavior is
-equivalent to `left = left + right`, which creates a new list and assigns it to
-`left`. The new behavior does not rebind `left`, but instead just mutates the
-list in-place.
-
-``` python
-def fct():
-  li = [1]
-  alias = li
-  li += [2]
-  # Old behavior: alias == [1]
-  # New behavior: alias == [1, 2]
-```
-
-This change makes Skylark more compatible with Python and avoids performance
-issues. The `+=` operator for tuples is unaffected.
-
-*   Flag: `--incompatible_list_plus_equals_inplace`
 *   Default: `true`
 
 
@@ -135,7 +119,7 @@ load("//path:foo.bzl", "var")  # recommended
 ```
 
 *   Flag: `--incompatible_load_argument_is_label`
-*   Default: `false`
+*   Default: `true`
 
 
 ### Top level `if` statements
@@ -204,6 +188,29 @@ sorted(deps.to_list())  # recommended
 ```
 
 *   Flag: `--incompatible_depset_is_not_iterable`
+*   Default: `false`
+
+
+### Depset union
+
+To merge two sets, the following examples used to be supported, but are now
+deprecated:
+
+``` python
+depset1 + depset2
+depset1 | depset2
+depset1.union(depset2)
+```
+
+The recommended solution is to use the `depset` constructor:
+
+``` python
+depset(transtive=[depset1, depset2])
+```
+
+See the [`depset documentation`](depsets.md) for more information.
+
+*   Flag: `--incompatible_depset_union`
 *   Default: `false`
 
 
@@ -289,5 +296,26 @@ All integers are stored using signed 32 bits.
 *   Flag: `--incompatible_checked_arithmetic`
 *   Default: `true`
 
+
+### Glob tracking
+
+When set, glob tracking is disabled. This is a legacy feature that we expect has
+no user-visible impact.
+
+*   Flag: `--incompatible_disable_glob_tracking`
+*   Default: `false`
+
+
+### Print statements
+
+`print` statements in Skylark code are supposed to be used for debugging only.
+Messages they yield used to be filtered out so that only messages from the same
+package as the top level target being built were shown by default (it was
+possible to override by providing, for example, `--output_filter=`). That made
+debugging hard. When the flag is set to true, all print messages are shown in
+the console without exceptions.
+
+*   Flag: `--incompatible_show_all_print_messages`
+*   Default: `true`
 
 <!-- Add new options here -->

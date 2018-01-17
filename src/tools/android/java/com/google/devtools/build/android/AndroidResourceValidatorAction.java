@@ -109,13 +109,13 @@ public class AndroidResourceValidatorAction {
     public Path rOutput;
 
     @Option(
-        name = "packagePath",
-        defaultValue = "null",
-        converter = PathConverter.class,
-        category = "output",
-        documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-        effectTags = {OptionEffectTag.UNKNOWN},
-        help = "Path to the write the archive."
+      name = "packagePath",
+      defaultValue = "null",
+      converter = PathConverter.class,
+      category = "output",
+      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
+      effectTags = {OptionEffectTag.UNKNOWN},
+      help = "Path to the write the archive."
     )
     // TODO(b/30307842): Remove this once it is no longer needed for resources migration.
     public Path packagePath;
@@ -136,6 +136,7 @@ public class AndroidResourceValidatorAction {
 
     Preconditions.checkNotNull(options.rOutput);
     Preconditions.checkNotNull(options.srcJarOutput);
+
     try (ScopedTemporaryDirectory scopedTmp =
         new ScopedTemporaryDirectory("resource_validator_tmp")) {
       Path tmp = scopedTmp.getPath();

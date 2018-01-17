@@ -35,16 +35,18 @@ import org.junit.runners.JUnit4;
 @RunWith(JUnit4.class)
 public class ExecutableSymlinkActionTest {
   private Scratch scratch = new Scratch();
-  private Root inputRoot;
-  private Root outputRoot;
+  private ArtifactRoot inputRoot;
+  private ArtifactRoot outputRoot;
   TestFileOutErr outErr;
   private Executor executor;
+  private final ActionKeyContext actionKeyContext = new ActionKeyContext();
 
   @Before
   public final void createExecutor() throws Exception  {
     final Path inputDir = scratch.dir("/in");
-    inputRoot = Root.asDerivedRoot(inputDir);
-    outputRoot = Root.asDerivedRoot(scratch.dir("/out"));
+    Path execRoot = scratch.getFileSystem().getPath("/");
+    inputRoot = ArtifactRoot.asDerivedRoot(execRoot, inputDir);
+    outputRoot = ArtifactRoot.asDerivedRoot(execRoot, scratch.dir("/out"));
     outErr = new TestFileOutErr();
     executor = new DummyExecutor(scratch.getFileSystem(), inputDir);
   }
@@ -55,7 +57,11 @@ public class ExecutableSymlinkActionTest {
         executor,
         new SingleBuildFileCache(execRoot.getPathString(), execRoot.getFileSystem()),
         ActionInputPrefetcher.NONE,
-        null, outErr, ImmutableMap.<String, String>of(), null);
+        actionKeyContext,
+        null,
+        outErr,
+        ImmutableMap.<String, String>of(),
+        null);
   }
 
   @Test

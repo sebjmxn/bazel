@@ -27,6 +27,7 @@ filegroup(
         "//third_party/checker_framework_javacutil:srcs",
         "//third_party/jformatstring:srcs",
         "//third_party/protobuf:srcs",
+        "//third_party/py/abseil:srcs",
         "//third_party/py/concurrent:srcs",
         "//third_party/py/gflags:srcs",
         "//third_party/py/mock:srcs",
@@ -157,7 +158,7 @@ java_import(
     jars = [
         "api_client/google-api-client-1.22.0.jar",
         "api_client/google-api-client-jackson2-1.22.0.jar",
-        "api_client/google-http-client-1.22.0.jar",
+        "api_client/google-http-client-1.22.0-SNAPSHOT.jar",
         "api_client/google-http-client-jackson2-1.22.0.jar",
     ],
     runtime_deps = [
@@ -167,30 +168,35 @@ java_import(
 
 java_import(
     name = "asm",
-    jars = ["asm/asm-5.1.jar"],
+    jars = ["asm/asm-6.0.jar"],
+    srcjar = "asm/asm-6.0-sources.jar",
 )
 
 java_import(
     name = "asm-analysis",
-    jars = ["asm/asm-analysis-5.1.jar"],
+    jars = ["asm/asm-analysis-6.0.jar"],
+    srcjar = "asm/asm-analysis-6.0-sources.jar",
     runtime_deps = [":asm-tree"],
 )
 
 java_import(
     name = "asm-commons",
-    jars = ["asm/asm-commons-5.1.jar"],
+    jars = ["asm/asm-commons-6.0.jar"],
+    srcjar = "asm/asm-commons-6.0-sources.jar",
     runtime_deps = [":asm-tree"],
 )
 
 java_import(
     name = "asm-tree",
-    jars = ["asm/asm-tree-5.1.jar"],
+    jars = ["asm/asm-tree-6.0.jar"],
+    srcjar = "asm/asm-tree-6.0-sources.jar",
     runtime_deps = [":asm"],
 )
 
 java_import(
     name = "asm-util",
-    jars = ["asm/asm-util-5.1.jar"],
+    jars = ["asm/asm-util-6.0.jar"],
+    srcjar = "asm/asm-util-6.0-sources.jar",
     runtime_deps = [":asm-tree"],
 )
 
@@ -214,7 +220,7 @@ java_plugin(
         ":apache_velocity",
         ":asm",
         ":auto_common",
-        ":auto_service",
+        ":auto_service_lib",
         ":auto_value_value",
         ":guava",
         ":jsr305",
@@ -227,9 +233,14 @@ java_import(
     jars = ["auto/auto-common-0.3.jar"],
 )
 
-java_import(
+java_library(
     name = "auto_service",
-    jars = ["auto/auto-service-1.0-rc2.jar"],
+    exported_plugins = [
+        ":auto_service_plugin",
+    ],
+    exports = [
+        ":auto_service_lib",
+    ],
 )
 
 java_plugin(
@@ -237,9 +248,14 @@ java_plugin(
     processor_class = "com.google.auto.service.processor.AutoServiceProcessor",
     deps = [
         ":auto_common",
-        ":auto_service",
+        ":auto_service_lib",
         ":guava",
     ],
+)
+
+java_import(
+    name = "auto_service_lib",
+    jars = ["auto/auto-service-1.0-rc2.jar"],
 )
 
 java_plugin(
@@ -250,7 +266,7 @@ java_plugin(
         ":apache_velocity",
         ":asm",
         ":auto_common",
-        ":auto_service",
+        ":auto_service_lib",
         ":auto_value_value",
         ":guava",
         ":tomcat_annotations_api",
@@ -291,6 +307,11 @@ java_import(
 )
 
 java_import(
+    name = "compile_testing",
+    jars = ["compile_testing/compile-testing-0.13.jar"],
+)
+
+java_import(
     name = "gson",
     jars = ["gson/gson-2.2.4.jar"],
 )
@@ -312,10 +333,10 @@ java_import(
 java_import(
     name = "error_prone",
     jars = [
-        "error_prone/error_prone_check_api-2.1.1.jar",
-        "error_prone/error_prone_core-2.1.1.jar",
-        "error_prone/error_prone_annotations-2.1.1.jar",
-        "error_prone/error_prone_annotation-2.1.1.jar",
+        "error_prone/error_prone_check_api-2.2.0.jar",
+        "error_prone/error_prone_core-2.2.0.jar",
+        "error_prone/error_prone_annotations-2.2.0.jar",
+        "error_prone/error_prone_annotation-2.2.0.jar",
     ],
     deps = [
         ":auto_common",
@@ -355,10 +376,10 @@ filegroup(
     name = "bootstrap_guava_and_error_prone-jars",
     srcs = [
         "auto/auto-common-0.3.jar",
-        "error_prone/error_prone_annotation-2.1.1.jar",
-        "error_prone/error_prone_annotations-2.1.1.jar",
-        "error_prone/error_prone_check_api-2.1.1.jar",
-        "error_prone/error_prone_core-2.1.1.jar",
+        "error_prone/error_prone_annotation-2.2.0.jar",
+        "error_prone/error_prone_annotations-2.2.0.jar",
+        "error_prone/error_prone_check_api-2.2.0.jar",
+        "error_prone/error_prone_core-2.2.0.jar",
         "guava/guava-23.1-jre.jar",
         "hungarian_algorithm/software-and-algorithms-1.0.jar",
         "jcip_annotations/jcip-annotations-1.0-1.jar",
@@ -372,7 +393,7 @@ filegroup(
 java_import(
     name = "guava",
     jars = [
-        "error_prone/error_prone_annotations-2.1.1.jar",
+        "error_prone/error_prone_annotations-2.2.0.jar",
         "jcip_annotations/jcip-annotations-1.0-1.jar",
         "jsr305/jsr-305.jar",
         "guava/guava-23.1-jre.jar",
@@ -407,11 +428,6 @@ java_import(
 java_import(
     name = "jimfs",
     jars = ["jimfs/jimfs-1.1.jar"],
-)
-
-java_import(
-    name = "joda_time",
-    jars = ["joda_time/joda-time-2.3.jar"],
 )
 
 java_import(
@@ -516,7 +532,7 @@ java_import(
 
 java_import(
     name = "turbine",
-    jars = ["turbine/turbine-0.1-20170828.jar"],
+    jars = ["turbine/turbine-0.1-20171220.jar"],
 )
 
 java_import(

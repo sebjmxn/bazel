@@ -15,6 +15,8 @@ package com.google.devtools.build.lib.analysis.configuredtargets;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Interner;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.FileProvider;
 import com.google.devtools.build.lib.analysis.FilesToRunProvider;
@@ -24,15 +26,18 @@ import com.google.devtools.build.lib.analysis.RunfilesProvider;
 import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
 import com.google.devtools.build.lib.analysis.TransitiveInfoProviderMap;
 import com.google.devtools.build.lib.analysis.TransitiveInfoProviderMapBuilder;
+import com.google.devtools.build.lib.analysis.Util;
 import com.google.devtools.build.lib.analysis.config.ConfigMatchingProvider;
 import com.google.devtools.build.lib.analysis.config.RunUnder;
 import com.google.devtools.build.lib.analysis.skylark.SkylarkApiProvider;
 import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.concurrent.BlazeInterners;
 import com.google.devtools.build.lib.packages.ConfiguredAttributeMapper;
 import com.google.devtools.build.lib.packages.Info;
 import com.google.devtools.build.lib.packages.OutputFile;
 import com.google.devtools.build.lib.packages.Provider;
 import com.google.devtools.build.lib.packages.Rule;
+import com.google.devtools.build.lib.skyframe.ConfiguredTargetKey;
 import com.google.devtools.build.lib.skylarkinterface.SkylarkPrinter;
 import com.google.devtools.build.lib.syntax.Printer;
 import java.util.function.Consumer;
@@ -57,6 +62,16 @@ public final class RuleConfiguredTarget extends AbstractConfiguredTarget {
     SPLIT,
     DONT_CHECK
   }
+  /** A set of this target's implicitDeps. */
+  private final ImmutableSet<ConfiguredTargetKey> implicitDeps;
+
+  /*
+   * An interner for the implicitDeps set. {@link Util.findImplicitDeps} is called upon every
+   * construction of a RuleConfiguredTarget and we expect many of these targets to contain the same
+   * set of implicit deps so this reduces the memory load per build.
+   */
+  private static final Interner<ImmutableSet<ConfiguredTargetKey>> IMPLICIT_DEPS_INTERNER =
+      BlazeInterners.newWeakInterner();
 
   private final TransitiveInfoProviderMap providers;
   private final ImmutableMap<Label, ConfigMatchingProvider> configConditions;
@@ -79,9 +94,9 @@ public final class RuleConfiguredTarget extends AbstractConfiguredTarget {
       }
     }
 
-
     this.providers = providerBuilder.build();
     this.configConditions = ruleContext.getConfigConditions();
+    this.implicitDeps = IMPLICIT_DEPS_INTERNER.intern(Util.findImplicitDeps(ruleContext));
 
     // If this rule is the run_under target, then check that we have an executable; note that
     // run_under is only set in the target configuration, and the target must also be analyzed for
@@ -109,6 +124,10 @@ public final class RuleConfiguredTarget extends AbstractConfiguredTarget {
     return configConditions;
   }
 
+  public ImmutableSet<ConfiguredTargetKey> getImplicitDeps() {
+    return implicitDeps;
+  }
+
   @Nullable
   @Override
   public <P extends TransitiveInfoProvider> P getProvider(Class<P> providerClass) {
@@ -123,7 +142,7 @@ public final class RuleConfiguredTarget extends AbstractConfiguredTarget {
   }
 
   @Override
-  public String errorMessage(String name) {
+  public String getErrorMessageForUnknownField(String name) {
     return Printer.format("%r (rule '%s') doesn't have provider '%s'",
         this, getTarget().getRuleClass(), name);
   }

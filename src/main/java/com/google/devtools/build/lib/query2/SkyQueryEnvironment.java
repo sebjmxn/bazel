@@ -88,7 +88,7 @@ import com.google.devtools.build.lib.query2.engine.Uniquifier;
 import com.google.devtools.build.lib.query2.engine.VariableContext;
 import com.google.devtools.build.lib.skyframe.BlacklistedPackagePrefixesValue;
 import com.google.devtools.build.lib.skyframe.ContainingPackageLookupFunction;
-import com.google.devtools.build.lib.skyframe.FileValue;
+import com.google.devtools.build.lib.skyframe.FileStateValue;
 import com.google.devtools.build.lib.skyframe.GraphBackedRecursivePackageProvider;
 import com.google.devtools.build.lib.skyframe.PackageLookupValue;
 import com.google.devtools.build.lib.skyframe.PackageValue;
@@ -99,6 +99,7 @@ import com.google.devtools.build.lib.skyframe.TargetPatternValue;
 import com.google.devtools.build.lib.skyframe.TargetPatternValue.TargetPatternKey;
 import com.google.devtools.build.lib.skyframe.TransitiveTraversalValue;
 import com.google.devtools.build.lib.util.Pair;
+import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.RootedPath;
 import com.google.devtools.build.skyframe.EvaluationResult;
@@ -247,24 +248,21 @@ public class SkyQueryEnvironment extends AbstractBlazeQueryEnvironment<Target>
   private void beforeEvaluateQuery(QueryExpression expr)
       throws QueryException, InterruptedException {
     Set<SkyKey> roots = getGraphRootsFromExpression(expr);
-    if (graph == null || !graphFactory.isUpToDate(roots)) {
-      // If this environment is uninitialized or the graph factory needs to evaluate, do so. We
-      // assume here that this environment cannot be initialized-but-stale if the factory is up
-      // to date.
-      EvaluationResult<SkyValue> result;
-      try (AutoProfiler p = AutoProfiler.logged("evaluation and walkable graph", logger)) {
-        result = graphFactory.prepareAndGet(roots, loadingPhaseThreads, universeEvalEventHandler);
-      }
 
+    EvaluationResult<SkyValue> result;
+    try (AutoProfiler p = AutoProfiler.logged("evaluation and walkable graph", logger)) {
+      result = graphFactory.prepareAndGet(roots, loadingPhaseThreads, universeEvalEventHandler);
+    }
+
+    if (graph == null || graph != result.getWalkableGraph()) {
       checkEvaluationResult(roots, result);
-
       packageSemaphore = makeFreshPackageMultisetSemaphore();
       graph = result.getWalkableGraph();
       blacklistPatternsSupplier = InterruptibleSupplier.Memoize.of(new BlacklistSupplier(graph));
-
       graphBackedRecursivePackageProvider =
           new GraphBackedRecursivePackageProvider(graph, universeTargetPatternKeys, pkgPath);
     }
+
     if (executor == null) {
       executor = MoreExecutors.listeningDecorator(
           new ThreadPoolExecutor(
@@ -760,15 +758,26 @@ public class SkyQueryEnvironment extends AbstractBlazeQueryEnvironment<Target>
         }
 
         for (Label subinclude : extensions) {
-          addIfUniqueLabel(getSubincludeTarget(subinclude, pkg), seenLabels, dependentFiles);
 
+          Target subincludeTarget = getSubincludeTarget(subinclude, pkg);
+          addIfUniqueLabel(subincludeTarget, seenLabels, dependentFiles);
+
+          // Also add the BUILD file of the subinclude.
           if (buildFiles) {
-            // Also add the BUILD file of the subinclude.
-            addIfUniqueLabel(
-                getSubincludeTarget(
-                    Label.createUnvalidated(subinclude.getPackageIdentifier(), "BUILD"), pkg),
-                seenLabels,
-                dependentFiles);
+            Path buildFileForSubinclude = null;
+            try {
+              buildFileForSubinclude =
+                  pkgPath.getPackageBuildFile(subincludeTarget.getLabel().getPackageIdentifier());
+            } catch (NoSuchPackageException e) {
+              throw new QueryException(
+                  subincludeTarget.getLabel().getPackageIdentifier() + " does not exist in graph");
+            }
+            Label buildFileLabel =
+                Label.createUnvalidated(
+                    subincludeTarget.getLabel().getPackageIdentifier(),
+                    buildFileForSubinclude.getBaseName());
+
+            addIfUniqueLabel(new FakeLoadTarget(buildFileLabel, pkg), seenLabels, dependentFiles);
           }
         }
       }
@@ -782,7 +791,7 @@ public class SkyQueryEnvironment extends AbstractBlazeQueryEnvironment<Target>
     }
   }
 
-  private static Target getSubincludeTarget(Label label, Package pkg) {
+  private Target getSubincludeTarget(Label label, Package pkg) {
     return new FakeLoadTarget(label, pkg);
   }
 
@@ -793,30 +802,36 @@ public class SkyQueryEnvironment extends AbstractBlazeQueryEnvironment<Target>
   }
 
   @ThreadSafe
-  @Override
-  public Target getTarget(Label label)
-      throws TargetNotFoundException, QueryException, InterruptedException {
-    SkyKey packageKey = PackageValue.key(label.getPackageIdentifier());
-    try {
+  private Package getPackage(PackageIdentifier packageIdentifier)
+      throws InterruptedException, QueryException, NoSuchPackageException {
+    SkyKey packageKey = PackageValue.key(packageIdentifier);
       PackageValue packageValue = (PackageValue) graph.getValue(packageKey);
       if (packageValue != null) {
         Package pkg = packageValue.getPackage();
         if (pkg.containsErrors()) {
-          throw new BuildFileContainsErrorsException(label.getPackageIdentifier());
+        throw new BuildFileContainsErrorsException(packageIdentifier);
         }
-        return packageValue.getPackage().getTarget(label.getName());
+      return pkg;
       } else {
-        NoSuchThingException exception = (NoSuchThingException) graph.getException(packageKey);
+      NoSuchPackageException exception = (NoSuchPackageException) graph.getException(packageKey);
         if (exception != null) {
           throw exception;
         }
         if (graph.isCycle(packageKey)) {
-          throw new NoSuchPackageException(
-              label.getPackageIdentifier(), "Package depends on a cycle");
+        throw new NoSuchPackageException(packageIdentifier, "Package depends on a cycle");
         } else {
           throw new QueryException(packageKey + " does not exist in graph");
         }
       }
+  }
+
+  @ThreadSafe
+  @Override
+  public Target getTarget(Label label)
+      throws TargetNotFoundException, QueryException, InterruptedException {
+    try {
+      Package pkg = getPackage(label.getPackageIdentifier());
+      return pkg.getTarget(label.getName());
     } catch (NoSuchThingException e) {
       throw new TargetNotFoundException(e);
     }
@@ -965,10 +980,10 @@ public class SkyQueryEnvironment extends AbstractBlazeQueryEnvironment<Target>
 
   /**
    * Returns package lookup keys for looking up the package root for which there may be a relevant
-   * (from the perspective of {@link #getRBuildFiles}) {@link FileValue} node in the graph for
+   * (from the perspective of {@link #getRBuildFiles}) {@link FileStateValue} node in the graph for
    * {@code originalFileFragment}, which is assumed to be a file path.
    *
-   * <p>This is a helper function for {@link #getSkyKeysForFileFragments}.
+   * <p>This is a helper function for {@link #getFileStateKeysForFileFragments}.
    */
   private static Iterable<SkyKey> getPkgLookupKeysForFile(PathFragment originalFileFragment,
       PathFragment currentPathFragment) {
@@ -989,18 +1004,18 @@ public class SkyQueryEnvironment extends AbstractBlazeQueryEnvironment<Target>
   }
 
   /**
-   * Returns FileValue keys for which there may be relevant (from the perspective of {@link
-   * #getRBuildFiles}) FileValues in the graph corresponding to the given {@code pathFragments},
-   * which are assumed to be file paths.
+   * Returns FileStateValue keys for which there may be relevant (from the perspective of {@link
+   * #getRBuildFiles}) FileStateValues in the graph corresponding to the given
+   * {@code pathFragments}, which are assumed to be file paths.
    *
    * <p>To do this, we emulate the {@link ContainingPackageLookupFunction} logic: for each given
    * file path, we look for the nearest ancestor directory (starting with its parent directory), if
    * any, that has a package. The {@link PackageLookupValue} for this package tells us the package
-   * root that we should use for the {@link RootedPath} for the {@link FileValue} key.
+   * root that we should use for the {@link RootedPath} for the {@link FileStateValue} key.
    *
    * <p>Note that there may not be nodes in the graph corresponding to the returned SkyKeys.
    */
-  Collection<SkyKey> getSkyKeysForFileFragments(Iterable<PathFragment> pathFragments)
+  Collection<SkyKey> getFileStateKeysForFileFragments(Iterable<PathFragment> pathFragments)
       throws InterruptedException {
     Set<SkyKey> result = new HashSet<>();
     Multimap<PathFragment, PathFragment> currentToOriginal = ArrayListMultimap.create();
@@ -1028,8 +1043,8 @@ public class SkyQueryEnvironment extends AbstractBlazeQueryEnvironment<Target>
               packageLookupKeysToOriginal.get(packageLookupKey);
           Preconditions.checkState(!originalFiles.isEmpty(), entry);
           for (PathFragment fileName : originalFiles) {
-            result.add(
-                FileValue.key(RootedPath.toRootedPath(packageLookupValue.getRoot(), fileName)));
+            result.add(FileStateValue.key(
+                RootedPath.toRootedPath(packageLookupValue.getRoot(), fileName)));
           }
           for (PathFragment current : packageLookupKeysToCurrent.get(packageLookupKey)) {
             currentToOriginal.removeAll(current);
@@ -1096,7 +1111,7 @@ public class SkyQueryEnvironment extends AbstractBlazeQueryEnvironment<Target>
   QueryTaskFuture<Void> getRBuildFiles(
       Collection<PathFragment> fileIdentifiers, Callback<Target> callback) {
     try {
-      Collection<SkyKey> files = getSkyKeysForFileFragments(fileIdentifiers);
+      Collection<SkyKey> files = getFileStateKeysForFileFragments(fileIdentifiers);
       Uniquifier<SkyKey> keyUniquifier =
           new UniquifierImpl<>(SkyKeyKeyExtractor.INSTANCE, /*concurrencyLevel=*/ 1);
       Collection<SkyKey> current = keyUniquifier.unique(graph.getSuccessfulValues(files).keySet());

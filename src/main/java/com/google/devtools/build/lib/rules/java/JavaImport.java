@@ -20,7 +20,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.FileProvider;
-import com.google.devtools.build.lib.analysis.OutputGroupProvider;
+import com.google.devtools.build.lib.analysis.OutputGroupInfo;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTargetFactory;
 import com.google.devtools.build.lib.analysis.RuleContext;
@@ -161,11 +161,15 @@ public class JavaImport implements RuleConfiguredTargetFactory {
         JavaSourceJarsProvider.create(transitiveJavaSourceJars, srcJars);
     JavaCompilationArgsProvider compilationArgsProvider =
         JavaCompilationArgsProvider.create(javaCompilationArgs, recursiveJavaCompilationArgs);
-    common.addTransitiveInfoProviders(ruleBuilder, filesToBuild, null);
-    JavaInfo javaInfo = JavaInfo.Builder.create()
+
+    JavaInfo.Builder javaInfoBuilder = JavaInfo.Builder.create();
+    common.addTransitiveInfoProviders(ruleBuilder, javaInfoBuilder, filesToBuild, null);
+
+    JavaInfo javaInfo = javaInfoBuilder
         .addProvider(JavaCompilationArgsProvider.class, compilationArgsProvider)
         .addProvider(JavaRuleOutputJarsProvider.class, ruleOutputJarsProvider)
         .addProvider(JavaSourceJarsProvider.class, sourceJarsProvider)
+        .setNeverlink(neverLink)
         .build();
     return ruleBuilder
         .setFilesToBuild(filesToBuild)
@@ -175,7 +179,6 @@ public class JavaImport implements RuleConfiguredTargetFactory {
         .add(
             JavaRuntimeJarProvider.class,
             new JavaRuntimeJarProvider(javaArtifacts.getRuntimeJars()))
-        .add(JavaNeverlinkInfoProvider.class, new JavaNeverlinkInfoProvider(neverLink))
         .add(RunfilesProvider.class, RunfilesProvider.simple(runfiles))
         .addNativeDeclaredProvider(new CcLinkParamsInfo(ccLinkParamsStore))
         .add(
@@ -185,7 +188,7 @@ public class JavaImport implements RuleConfiguredTargetFactory {
         .add(JavaSourceInfoProvider.class, javaSourceInfoProvider)
         .add(ProguardSpecProvider.class, new ProguardSpecProvider(proguardSpecs))
         .addOutputGroup(JavaSemantics.SOURCE_JARS_OUTPUT_GROUP, transitiveJavaSourceJars)
-        .addOutputGroup(OutputGroupProvider.HIDDEN_TOP_LEVEL, proguardSpecs)
+        .addOutputGroup(OutputGroupInfo.HIDDEN_TOP_LEVEL, proguardSpecs)
         .build();
   }
 

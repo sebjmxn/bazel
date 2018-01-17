@@ -34,14 +34,19 @@ import javax.annotation.Nullable;
  */
 final class RemoteActionContextProvider extends ActionContextProvider {
   private final CommandEnvironment env;
-  private final RemoteActionCache cache;
+  private final AbstractRemoteActionCache cache;
   private final GrpcRemoteExecutor executor;
+  private final DigestUtil digestUtil;
 
-  RemoteActionContextProvider(CommandEnvironment env, @Nullable RemoteActionCache cache,
-      @Nullable GrpcRemoteExecutor executor) {
+  RemoteActionContextProvider(
+      CommandEnvironment env,
+      @Nullable AbstractRemoteActionCache cache,
+      @Nullable GrpcRemoteExecutor executor,
+      DigestUtil digestUtil) {
     this.env = env;
     this.executor = executor;
     this.cache = cache;
+    this.digestUtil = digestUtil;
   }
 
   @Override
@@ -61,7 +66,8 @@ final class RemoteActionContextProvider extends ActionContextProvider {
               buildRequestId,
               commandId,
               executionOptions.verboseFailures,
-              env.getReporter());
+              env.getReporter(),
+              digestUtil);
       return ImmutableList.of(spawnCache);
     } else {
       RemoteSpawnRunner spawnRunner =
@@ -74,17 +80,19 @@ final class RemoteActionContextProvider extends ActionContextProvider {
               buildRequestId,
               commandId,
               cache,
-              executor);
-      return ImmutableList.of(new RemoteSpawnStrategy(spawnRunner));
+              executor,
+              digestUtil);
+      return ImmutableList.of(new RemoteSpawnStrategy(env.getExecRoot(), spawnRunner));
     }
   }
 
   private static SpawnRunner createFallbackRunner(CommandEnvironment env) {
     LocalExecutionOptions localExecutionOptions =
         env.getOptions().getOptions(LocalExecutionOptions.class);
-    LocalEnvProvider localEnvProvider = OS.getCurrent() == OS.DARWIN
-        ? new XCodeLocalEnvProvider()
-        : LocalEnvProvider.UNMODIFIED;
+    LocalEnvProvider localEnvProvider =
+        OS.getCurrent() == OS.DARWIN
+            ? new XCodeLocalEnvProvider(env.getClientEnv())
+            : LocalEnvProvider.UNMODIFIED;
     return
         new LocalSpawnRunner(
             env.getExecRoot(),

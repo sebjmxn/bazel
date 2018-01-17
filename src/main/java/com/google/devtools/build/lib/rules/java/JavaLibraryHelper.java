@@ -32,6 +32,7 @@ import com.google.devtools.build.lib.rules.java.JavaRuleOutputJarsProvider.Outpu
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import javax.annotation.Nullable;
 
 /**
  * A class to create Java compile actions in a way that is consistent with java_library. Rules that
@@ -142,8 +143,9 @@ public final class JavaLibraryHelper {
   /**
    * When in strict mode, compiling the source-jars passed to this JavaLibraryHelper will break if
    * they depend on classes not in any of the {@link
-   * JavaCompilationArgsProvider#javaCompilationArgs} passed in {@link #addDep}, even if they do
-   * appear in {@link JavaCompilationArgsProvider#recursiveJavaCompilationArgs}. That is, depending
+   * JavaCompilationArgsProvider#getJavaCompilationArgs()} passed in {@link #addDep}, even if they
+   * do appear in
+   * {@link JavaCompilationArgsProvider#getRecursiveJavaCompilationArgs()}. That is, depending
    * on a class requires a direct dependency on it.
    *
    * <p>Contrast this with the strictness-parameter to {@link #buildCompilationArgsProvider}, which
@@ -156,16 +158,29 @@ public final class JavaLibraryHelper {
   }
 
   /**
-   * Creates the compile actions. Also fills in the {@link JavaRuleOutputJarsProvider.Builder} with
-   * the corresponding compilation outputs.
+   * Creates the compile actions (including the ones for ijar and source jar). Also fills in the
+   * {@link JavaRuleOutputJarsProvider.Builder} with the corresponding compilation outputs.
+   *
+   * @param semantics implementation specific java rules semantics
+   * @param javaToolchainProvider used for retrieving misc java tools
+   * @param hostJavabase the target of the host javabase used to retrieve the java executable and
+   *        its necessary inputs
+   * @param jacocoInstrumental jacoco jars needed when running coverage
+   * @param outputJarsBuilder populated with the outputs of the created actions
+   * @param outputSourceJar if not-null, the output of an source jar action that will be created
    */
   public JavaCompilationArtifacts build(
       JavaSemantics semantics,
       JavaToolchainProvider javaToolchainProvider,
-      NestedSet<Artifact> hostJavabase,
+      JavaRuntimeInfo hostJavabase,
       Iterable<Artifact> jacocoInstrumental,
-      JavaRuleOutputJarsProvider.Builder outputJarsBuilder) {
+      JavaRuleOutputJarsProvider.Builder outputJarsBuilder,
+      boolean createOutputSourceJar,
+      @Nullable Artifact outputSourceJar) {
     Preconditions.checkState(output != null, "must have an output file; use setOutput()");
+    Preconditions.checkState(
+        !createOutputSourceJar || outputSourceJar != null,
+        "outputSourceJar cannot be null when createOutputSourceJar is true");
     JavaTargetAttributes.Builder attributes = new JavaTargetAttributes.Builder(semantics);
     attributes.addSourceJars(sourceJars);
     attributes.addSourceFiles(sourceFiles);
@@ -194,16 +209,22 @@ public final class JavaLibraryHelper {
     Artifact outputDepsProto = helper.createOutputDepsProtoArtifact(output, artifactsBuilder);
     helper.createCompileAction(
         output,
-        null /* manifestProtoOutput */,
-        null /* gensrcOutputJar */,
+        /* manifestProtoOutput= */ null,
+        /* gensrcOutputJar= */ null,
         outputDepsProto,
-        null /* outputMetadata */);
-    Artifact iJar = helper.createCompileTimeJarAction(output, artifactsBuilder);
+        /* instrumentationMetadataJar= */ null,
+        /* nativeHeaderOutput= */ null);
 
     artifactsBuilder.addRuntimeJar(output);
+    Artifact iJar = helper.createCompileTimeJarAction(output, artifactsBuilder);
 
+    if (createOutputSourceJar) {
+      helper.createSourceJarAction(outputSourceJar, null, javaToolchainProvider, hostJavabase);
+    }
+    ImmutableList<Artifact> outputSourceJars =
+        outputSourceJar == null ? ImmutableList.of() : ImmutableList.of(outputSourceJar);
     outputJarsBuilder
-        .addOutputJar(new OutputJar(output, iJar, sourceJars))
+        .addOutputJar(new OutputJar(output, iJar, outputSourceJars))
         .setJdeps(outputDepsProto);
 
     return artifactsBuilder.build();

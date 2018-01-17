@@ -31,7 +31,7 @@ DEBIAN_FIELDS = [
     ('Version', True, False),
     ('Section', False, False, 'contrib/devel'),
     ('Priority', False, False, 'optional'),
-    ('Architecture', True, False, 'all'),
+    ('Architecture', False, False, 'all'),
     ('Depends', False, True, []),
     ('Recommends', False, True, []),
     ('Suggests', False, True, []),
@@ -137,7 +137,7 @@ def CreateDebControl(extrafiles=None, **kwargs):
       tarinfo.size = len(controlfile)
       f.addfile(tarinfo, fileobj=StringIO(controlfile))
       if extrafiles:
-        for name, (data, mode) in extrafiles.iteritems():
+        for name, (data, mode) in extrafiles.items():
           tarinfo = tarfile.TarInfo(name)
           tarinfo.size = len(data)
           tarinfo.mode = mode

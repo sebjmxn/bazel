@@ -1,9 +1,9 @@
 ---
 layout: documentation
-title: Performance
+title: Optimizing Performance
 ---
 
-# Performance
+# Optimizing Performance
 
 <!-- [TOC] -->
 
@@ -178,6 +178,17 @@ ctx.actions.run(
   ...
 )
 ```
+
+## Performance profiling
+
+To profile your code and analyze the performance, use the `--profile` flag:
+
+```
+$ bazel build --nobuild --profile=/tmp/prof //path/to:target
+$ bazel analyze-profile /tmp/prof --html --html_details
+```
+
+Then, open the generated HTML file (`/tmp/prof.html` in the example).
 
 ## Memory Profiling
 

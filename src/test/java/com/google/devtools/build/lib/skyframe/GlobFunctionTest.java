@@ -36,7 +36,6 @@ import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
 import com.google.devtools.build.lib.skyframe.ExternalFilesHelper.ExternalFileAction;
 import com.google.devtools.build.lib.skyframe.GlobValue.InvalidGlobPatternException;
 import com.google.devtools.build.lib.skyframe.PackageLookupFunction.CrossRepositoryLabelViolationStrategy;
-import com.google.devtools.build.lib.skyframe.PackageLookupValue.BuildFileName;
 import com.google.devtools.build.lib.syntax.SkylarkSemantics;
 import com.google.devtools.build.lib.testutil.ManualClock;
 import com.google.devtools.build.lib.testutil.TestConstants;
@@ -106,22 +105,23 @@ public abstract class GlobFunctionTest {
   @Before
   public final void setUp() throws Exception  {
     fs = new CustomInMemoryFs(new ManualClock());
-    root = fs.getRootDirectory().getRelative("root/workspace");
-    writableRoot = fs.getRootDirectory().getRelative("writableRoot/workspace");
-    outputBase = fs.getRootDirectory().getRelative("output_base");
+    root = fs.getPath("/root/workspace");
+    writableRoot = fs.getPath("/writableRoot/workspace");
+    outputBase = fs.getPath("/output_base");
     pkgPath = root.getRelative(PKG_ID.getPackageFragment());
 
     pkgLocator =
         new AtomicReference<>(
-            new PathPackageLocator(outputBase, ImmutableList.of(writableRoot, root)));
+            new PathPackageLocator(
+                outputBase,
+                ImmutableList.of(writableRoot, root),
+                BazelSkyframeExecutorConstants.BUILD_FILES_BY_PRIORITY));
 
     differencer = new SequencedRecordingDifferencer();
     evaluator = new InMemoryMemoizingEvaluator(createFunctionMap(), differencer);
     driver = new SequentialBuildDriver(evaluator);
     PrecomputedValue.BUILD_ID.set(differencer, UUID.randomUUID());
     PrecomputedValue.PATH_PACKAGE_LOCATOR.set(differencer, pkgLocator.get());
-    PrecomputedValue.BLACKLISTED_PACKAGE_PREFIXES_FILE.set(
-        differencer, PathFragment.EMPTY_FRAGMENT);
     PrecomputedValue.SKYLARK_SEMANTICS.set(differencer, SkylarkSemantics.DEFAULT_SEMANTICS);
 
     createTestFiles();
@@ -149,9 +149,11 @@ public abstract class GlobFunctionTest {
         new PackageLookupFunction(
             deletedPackages,
             CrossRepositoryLabelViolationStrategy.ERROR,
-            ImmutableList.of(BuildFileName.BUILD_DOT_BAZEL, BuildFileName.BUILD)));
+            BazelSkyframeExecutorConstants.BUILD_FILES_BY_PRIORITY));
     skyFunctions.put(SkyFunctions.BLACKLISTED_PACKAGE_PREFIXES,
-        new BlacklistedPackagePrefixesFunction());
+        new BlacklistedPackagePrefixesFunction(
+            /*hardcodedBlacklistedPackagePrefixes=*/ ImmutableSet.of(),
+            /*additionalBlacklistedPackagePrefixesFile=*/ PathFragment.EMPTY_FRAGMENT));
     skyFunctions.put(
         SkyFunctions.FILE_STATE,
         new FileStateFunction(

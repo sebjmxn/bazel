@@ -34,15 +34,18 @@ public class JavaRuntimeInfo extends NativeInfo {
       new NativeProvider<JavaRuntimeInfo>(JavaRuntimeInfo.class, SKYLARK_NAME) {};
 
   private final NestedSet<Artifact> javaBaseInputs;
+  private final NestedSet<Artifact> javaBaseInputsMiddleman;
   private final PathFragment javaHome;
   private final PathFragment javaBinaryExecPath;
   private final PathFragment javaBinaryRunfilesPath;
 
   public JavaRuntimeInfo(
-      NestedSet<Artifact> javaBaseInputs, PathFragment javaHome,
-      PathFragment javaBinaryExecPath, PathFragment javaBinaryRunfilesPath) {
+      NestedSet<Artifact> javaBaseInputs, NestedSet<Artifact> javaBaseInputsMiddleman,
+      PathFragment javaHome, PathFragment javaBinaryExecPath,
+      PathFragment javaBinaryRunfilesPath) {
     super(PROVIDER, ImmutableMap.<String, Object>of());
     this.javaBaseInputs = javaBaseInputs;
+    this.javaBaseInputsMiddleman = javaBaseInputsMiddleman;
     this.javaHome = javaHome;
     this.javaBinaryExecPath = javaBinaryExecPath;
     this.javaBinaryRunfilesPath = javaBinaryRunfilesPath;
@@ -53,7 +56,17 @@ public class JavaRuntimeInfo extends NativeInfo {
     return javaBaseInputs;
   }
 
+  /** A middleman representing the javabase. */
+  public NestedSet<Artifact> javaBaseInputsMiddleman() {
+    return javaBaseInputsMiddleman;
+  }
+
   /** The root directory of the Java installation. */
+  @SkylarkCallable(
+      name = "java_home",
+      doc = "Returns the execpath of the root of the Java installation.",
+      structField = true
+  )
   public PathFragment javaHome() {
     return javaHome;
   }
@@ -68,6 +81,14 @@ public class JavaRuntimeInfo extends NativeInfo {
     return javaBinaryExecPath;
   }
 
+  @SkylarkCallable(
+      name = "java_executable_runfiles_path",
+      doc = "Returns the path of the Java executable in runfiles trees. This should only be used "
+          + "when one needs to access the JVM during the execution of a binary or a test built "
+          + "by Bazel. In particular, when one needs to invoke the JVM during an action, "
+          + "java_executable_exec_path should be used instead.",
+      structField = true
+  )
   /** The runfiles path of the Java binary. */
   public PathFragment javaBinaryRunfilesPath() {
     return javaBinaryRunfilesPath;

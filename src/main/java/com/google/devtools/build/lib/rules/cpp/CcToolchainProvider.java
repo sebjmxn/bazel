@@ -13,9 +13,11 @@
 // limitations under the License.
 package com.google.devtools.build.lib.rules.cpp;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableListMultimap;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableMap.Builder;
 import com.google.devtools.build.lib.actions.Artifact;
@@ -35,6 +37,8 @@ import com.google.devtools.build.lib.skylarkinterface.SkylarkModule;
 import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.view.config.crosstool.CrosstoolConfig.CToolchain;
+import com.google.devtools.build.lib.view.config.crosstool.CrosstoolConfig.CToolchain.OptionalFlag;
+import com.google.devtools.build.lib.view.config.crosstool.CrosstoolConfig.LipoMode;
 import java.util.Map;
 import javax.annotation.Nullable;
 
@@ -48,7 +52,6 @@ public final class CcToolchainProvider extends ToolchainInfo {
   public static final CcToolchainProvider EMPTY_TOOLCHAIN_IS_ERROR =
       new CcToolchainProvider(
           ImmutableMap.of(),
-          null,
           null,
           null,
           null,
@@ -74,13 +77,11 @@ public final class CcToolchainProvider extends ToolchainInfo {
           ImmutableList.<Artifact>of(),
           NestedSetBuilder.<Pair<String, String>>emptySet(Order.COMPILE_ORDER),
           null,
-          null,
           ImmutableMap.<String, String>of(),
           ImmutableList.<PathFragment>of(),
           null);
 
   @Nullable private final CppConfiguration cppConfiguration;
-  private final CToolchain toolchain;
   private final CppToolchainInfo toolchainInfo;
   private final PathFragment crosstoolTopPathFragment;
   private final NestedSet<Artifact> crosstool;
@@ -105,7 +106,6 @@ public final class CcToolchainProvider extends ToolchainInfo {
   private final ImmutableList<Artifact> builtinIncludeFiles;
   private final NestedSet<Pair<String, String>> coverageEnvironment;
   @Nullable private final Artifact linkDynamicLibraryTool;
-  @Nullable private final Artifact defParser;
   private final ImmutableMap<String, String> environment;
   private final ImmutableList<PathFragment> builtInIncludeDirectories;
   @Nullable private final PathFragment sysroot;
@@ -113,7 +113,6 @@ public final class CcToolchainProvider extends ToolchainInfo {
   public CcToolchainProvider(
       ImmutableMap<String, Object> skylarkToolchain,
       @Nullable CppConfiguration cppConfiguration,
-      CToolchain toolchain,
       CppToolchainInfo toolchainInfo,
       PathFragment crosstoolTopPathFragment,
       NestedSet<Artifact> crosstool,
@@ -138,13 +137,11 @@ public final class CcToolchainProvider extends ToolchainInfo {
       ImmutableList<Artifact> builtinIncludeFiles,
       NestedSet<Pair<String, String>> coverageEnvironment,
       Artifact linkDynamicLibraryTool,
-      Artifact defParser,
       ImmutableMap<String, String> environment,
       ImmutableList<PathFragment> builtInIncludeDirectories,
       @Nullable PathFragment sysroot) {
     super(skylarkToolchain, Location.BUILTIN);
     this.cppConfiguration = cppConfiguration;
-    this.toolchain = toolchain;
     this.toolchainInfo = toolchainInfo;
     this.crosstoolTopPathFragment = crosstoolTopPathFragment;
     this.crosstool = Preconditions.checkNotNull(crosstool);
@@ -169,7 +166,6 @@ public final class CcToolchainProvider extends ToolchainInfo {
     this.builtinIncludeFiles = builtinIncludeFiles;
     this.coverageEnvironment = coverageEnvironment;
     this.linkDynamicLibraryTool = linkDynamicLibraryTool;
-    this.defParser = defParser;
     this.environment = environment;
     this.builtInIncludeDirectories = builtInIncludeDirectories;
     this.sysroot = sysroot;
@@ -255,8 +251,9 @@ public final class CcToolchainProvider extends ToolchainInfo {
   }
 
   /** Returns the {@link CToolchain} for this toolchain. */
+  @VisibleForTesting
   public CToolchain getToolchain() {
-    return toolchain;
+    return toolchainInfo.getToolchain();
   }
 
   /**
@@ -445,6 +442,20 @@ public final class CcToolchainProvider extends ToolchainInfo {
     return toolchainInfo.supportsEmbeddedRuntimes();
   }
 
+  /** Returns whether the toolchain supports the --start-lib/--end-lib options. */
+  public boolean supportsStartEndLib() {
+    return toolchainInfo.supportsStartEndLib();
+  }
+
+  /**
+   * Returns whether this toolchain supports interface shared objects.
+   *
+   * <p>Should be true if this toolchain generates ELF objects.
+   */
+  public boolean supportsInterfaceSharedObjects() {
+    return toolchainInfo.supportsInterfaceSharedObjects();
+  }
+
   @Nullable
   public CppConfiguration getCppConfiguration() {
     return cppConfiguration;
@@ -480,14 +491,6 @@ public final class CcToolchainProvider extends ToolchainInfo {
    */
   public Artifact getLinkDynamicLibraryTool() {
     return linkDynamicLibraryTool;
-  }
-
-  /**
-   * Returns the tool which should be used to parser object files for generating DEF file on
-   * Windows. The label of this tool is //third_party/def_parser:def_parser.
-   */
-  public Artifact getDefParserTool() {
-    return defParser;
   }
 
   /**
@@ -586,6 +589,14 @@ public final class CcToolchainProvider extends ToolchainInfo {
     return toolchainInfo.getAdditionalMakeVariables();
   }
 
+  /**
+   * Returns whether the toolchain supports "Fission" C++ builds, i.e. builds where compilation
+   * partitions object code and debug symbols into separate output files.
+   */
+  public boolean supportsFission() {
+    return toolchainInfo.supportsFission();
+  }
+
   @SkylarkCallable(
     name = "unfiltered_compiler_options_do_not_use",
     doc =
@@ -644,6 +655,110 @@ public final class CcToolchainProvider extends ToolchainInfo {
     return toolchainInfo.getLdOptionsForEmbedding();
   }
 
+  /**
+   * Returns link options for the specified flag list, combined with universal options for all
+   * shared libraries (regardless of link staticness).
+   */
+  ImmutableList<String> getSharedLibraryLinkOptions(FlagList flags, Iterable<String> features) {
+    return toolchainInfo.getSharedLibraryLinkOptions(flags, features);
+  }
+
+  /** Returns compiler flags arising from the {@link CToolchain}. */
+  ImmutableList<String> getToolchainCompilerFlags() {
+    return toolchainInfo.getCompilerFlags();
+  }
+
+  /** Returns additional compiler flags for C++ arising from the {@link CToolchain} */
+  ImmutableList<String> getToolchainCxxFlags() {
+    return toolchainInfo.getCxxFlags();
+  }
+
+  /**
+   * Returns compiler flags arising from the {@link CToolchain} for C compilation by compilation
+   * mode.
+   */
+  ImmutableListMultimap<CompilationMode, String> getCFlagsByCompilationMode() {
+    return toolchainInfo.getCFlagsByCompilationMode();
+  }
+
+  /**
+   * Returns compiler flags arising from the {@link CToolchain} for C++ compilation by compilation
+   * mode.
+   */
+  ImmutableListMultimap<CompilationMode, String> getCxxFlagsByCompilationMode() {
+    return toolchainInfo.getCxxFlagsByCompilationMode();
+  }
+
+  /** Returns compiler flags arising from the {@link CToolchain} for C compilation by lipo mode. */
+  ImmutableListMultimap<LipoMode, String> getLipoCFlags() {
+    return toolchainInfo.getLipoCFlags();
+  }
+
+  /**
+   * Returns compiler flags arising from the {@link CToolchain} for C++ compilation by lipo mode.
+   */
+  ImmutableListMultimap<LipoMode, String> getLipoCxxFlags() {
+    return toolchainInfo.getLipoCxxFlags();
+  }
+
+  /** Returns optional compiler flags arising from the {@link CToolchain}. */
+  ImmutableList<OptionalFlag> getOptionalCompilerFlags() {
+    return toolchainInfo.getOptionalCompilerFlags();
+  }
+
+  /** Returns optional compiler flags for C++ arising from the {@link CToolchain}. */
+  ImmutableList<OptionalFlag> getOptionalCxxFlags() {
+    return toolchainInfo.getOptionalCxxFlags();
+  }
+
+  /** Returns linker flags for fully statically linked outputs. */
+  FlagList getFullyStaticLinkFlags(CompilationMode compilationMode, LipoMode lipoMode) {
+    return new FlagList(
+        configureLinkerOptions(
+            compilationMode, lipoMode, LinkingMode.FULLY_STATIC, toolchainInfo.getLdExecutable()),
+        FlagList.convertOptionalOptions(toolchainInfo.getOptionalLinkerFlags()),
+        ImmutableList.<String>of());
+  }
+
+  /** Returns linker flags for mostly static linked outputs. */
+  FlagList getMostlyStaticLinkFlags(CompilationMode compilationMode, LipoMode lipoMode) {
+    return new FlagList(
+        configureLinkerOptions(
+            compilationMode, lipoMode, LinkingMode.MOSTLY_STATIC, toolchainInfo.getLdExecutable()),
+        FlagList.convertOptionalOptions(toolchainInfo.getOptionalLinkerFlags()),
+        ImmutableList.<String>of());
+  }
+
+  /** Returns linker flags for mostly static shared linked outputs. */
+  FlagList getMostlyStaticSharedLinkFlags(CompilationMode compilationMode, LipoMode lipoMode) {
+    return new FlagList(
+        configureLinkerOptions(
+            compilationMode,
+            lipoMode,
+            LinkingMode.MOSTLY_STATIC_LIBRARIES,
+            toolchainInfo.getLdExecutable()),
+        FlagList.convertOptionalOptions(toolchainInfo.getOptionalLinkerFlags()),
+        ImmutableList.<String>of());
+  }
+
+  /** Returns linker flags for artifacts that are not fully or mostly statically linked. */
+  FlagList getDynamicLinkFlags(CompilationMode compilationMode, LipoMode lipoMode) {
+    return new FlagList(
+        configureLinkerOptions(
+            compilationMode, lipoMode, LinkingMode.DYNAMIC, toolchainInfo.getLdExecutable()),
+        FlagList.convertOptionalOptions(toolchainInfo.getOptionalLinkerFlags()),
+        ImmutableList.<String>of());
+  }
+
+  ImmutableList<String> configureLinkerOptions(
+      CompilationMode compilationMode,
+      LipoMode lipoMode,
+      LinkingMode linkingMode,
+      PathFragment ldExecutable) {
+    return toolchainInfo.configureLinkerOptions(
+        compilationMode, lipoMode, linkingMode, ldExecutable);
+  }
+
   /** Returns the GNU System Name */
   @SkylarkCallable(
     name = "target_gnu_system_name",
@@ -657,6 +772,10 @@ public final class CcToolchainProvider extends ToolchainInfo {
   /** Returns the architecture component of the GNU System Name */
   public String getGnuSystemArch() {
     return toolchainInfo.getGnuSystemArch();
+  }
+
+  public final boolean isLLVMCompiler() {
+    return toolchainInfo.isLLVMCompiler();
   }
 
   // Not all of CcToolchainProvider is exposed to Skylark, which makes implementing deep equality

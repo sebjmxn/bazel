@@ -125,16 +125,18 @@ targetpath = posixpath
 class Adb(object):
   """A class to handle interaction with adb."""
 
-  def __init__(self, adb_path, temp_dir, adb_jobs, user_home_dir):
+  def __init__(self, adb_path, temp_dir, adb_jobs, user_home_dir,
+               extra_adb_args):
     self._adb_path = adb_path
     self._temp_dir = temp_dir
     self._user_home_dir = user_home_dir
     self._file_counter = 1
     self._executor = futures.ThreadPoolExecutor(max_workers=adb_jobs)
+    self._extra_adb_args = extra_adb_args or []
 
   def _Exec(self, adb_args):
     """Executes the given adb command + args."""
-    args = [self._adb_path] + FLAGS.extra_adb_arg + adb_args
+    args = [self._adb_path] + self._extra_adb_args + adb_args
     # TODO(ahumesky): Because multiple instances of adb are executed in
     # parallel, these debug logging lines will get interleaved.
     logging.debug("Executing: %s", " ".join(args))
@@ -219,7 +221,7 @@ class Adb(object):
     """Push a given string to a given path on the device in parallel."""
     local = self._CreateLocalFile()
     with open(local, "wb") as f:
-      f.write(contents)
+      f.write(contents.encode("utf-8"))
     return self.Push(local, remote)
 
   def Pull(self, remote):
@@ -235,7 +237,7 @@ class Adb(object):
     try:
       self._Exec(["pull", remote, local])
       with open(local, "rb") as f:
-        return f.read()
+        return f.read().decode("utf-8")
     except (AdbError, IOError):
       return None
 
@@ -337,7 +339,7 @@ def ParseManifest(contents):
 def GetAppPackage(stub_datafile):
   """Returns the app package specified in a stub data file."""
   with open(stub_datafile, "rb") as f:
-    return f.readlines()[1].strip()
+    return f.readlines()[1].decode("utf-8").strip()
 
 
 def UploadDexes(adb, execroot, app_dir, temp_dir, dexmanifest, full_install):
@@ -603,7 +605,7 @@ def UploadNativeLibs(adb, native_lib_args, app_dir, full_install):
     f.result()
 
   install_manifest = [
-      name + " " + checksum for name, checksum in install_checksums.iteritems()]
+      name + " " + checksum for name, checksum in install_checksums.items()]
   adb.PushString("\n".join(install_manifest),
                  targetpath.join(app_dir, "native",
                                  "native_manifest")).result()
@@ -691,16 +693,25 @@ def SplitIncrementalInstall(adb, app_package, execroot, split_main_apk,
     adb.InstallMultiple(targetpath.join(execroot, apk), app_package)
 
   install_manifest = [
-      name + " " + checksum for name, checksum in install_checksums.iteritems()]
+      name + " " + checksum for name, checksum in install_checksums.items()]
   adb.PushString("\n".join(install_manifest),
                  targetpath.join(app_dir, "split_manifest")).result()
 
 
-def IncrementalInstall(adb_path, execroot, stub_datafile, output_marker,
-                       adb_jobs, start_type, dexmanifest=None, apk=None,
-                       native_libs=None, resource_apk=None,
-                       split_main_apk=None, split_apks=None,
-                       user_home_dir=None):
+def IncrementalInstall(adb_path,
+                       execroot,
+                       stub_datafile,
+                       output_marker,
+                       adb_jobs,
+                       start_type,
+                       dexmanifest=None,
+                       apk=None,
+                       native_libs=None,
+                       resource_apk=None,
+                       split_main_apk=None,
+                       split_apks=None,
+                       user_home_dir=None,
+                       extra_adb_args=None):
   """Performs an incremental install.
 
   Args:
@@ -718,10 +729,11 @@ def IncrementalInstall(adb_path, execroot, stub_datafile, output_marker,
     split_main_apk: the split main .apk if split installation is desired.
     split_apks: the list of split .apks to be installed.
     user_home_dir: Path to the user's home directory.
+    extra_adb_args: Extra arguments that will always be passed to adb.
   """
   temp_dir = tempfile.mkdtemp()
   try:
-    adb = Adb(adb_path, temp_dir, adb_jobs, user_home_dir)
+    adb = Adb(adb_path, temp_dir, adb_jobs, user_home_dir, extra_adb_args)
     app_package = GetAppPackage(hostpath.join(execroot, stub_datafile))
     app_dir = targetpath.join(DEVICE_DIRECTORY, app_package)
     if split_main_apk:
@@ -732,7 +744,7 @@ def IncrementalInstall(adb_path, execroot, stub_datafile, output_marker,
         VerifyInstallTimestamp(adb, app_package)
 
       with open(hostpath.join(execroot, dexmanifest), "rb") as f:
-        dexmanifest = f.read()
+        dexmanifest = f.read().decode("utf-8")
       UploadDexes(adb, execroot, app_dir, temp_dir, dexmanifest, bool(apk))
       # TODO(ahumesky): UploadDexes waits for all the dexes to be uploaded, and
       # then UploadResources is called. We could instead enqueue everything
@@ -764,16 +776,16 @@ def IncrementalInstall(adb_path, execroot, stub_datafile, output_marker,
     sys.exit("Error: Device unauthorized. Please check the confirmation "
              "dialog on your device.")
   except MultipleDevicesError as e:
-    sys.exit("Error: " + e.message + "\nTry specifying a device serial with "
+    sys.exit("Error: " + str(e) + "\nTry specifying a device serial with "
              "\"blaze mobile-install --adb_arg=-s --adb_arg=$ANDROID_SERIAL\"")
   except OldSdkException as e:
     sys.exit("Error: The device does not support the API level specified in "
              "the application's manifest. Check minSdkVersion in "
              "AndroidManifest.xml")
   except TimestampException as e:
-    sys.exit("Error:\n%s" % e.message)
+    sys.exit("Error:\n%s" % str(e))
   except AdbError as e:
-    sys.exit("Error:\n%s" % e.message)
+    sys.exit("Error:\n%s" % str(e))
   finally:
     shutil.rmtree(temp_dir, True)
 
@@ -804,7 +816,8 @@ def main():
       dexmanifest=FLAGS.dexmanifest,
       apk=FLAGS.apk,
       resource_apk=FLAGS.resource_apk,
-      user_home_dir=FLAGS.user_home_dir)
+      user_home_dir=FLAGS.user_home_dir,
+      extra_adb_args=FLAGS.extra_adb_arg)
 
 
 if __name__ == "__main__":

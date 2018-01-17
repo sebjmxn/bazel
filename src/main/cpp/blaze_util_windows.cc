@@ -57,6 +57,7 @@ static_assert(sizeof(wchar_t) == sizeof(WCHAR),
 // Add 4 characters for potential UNC prefix and a couple more for safety.
 static const size_t kWindowsPathBufferSize = 0x8010;
 
+using bazel::windows::AutoAttributeList;
 using bazel::windows::AutoHandle;
 using bazel::windows::CreateJunction;
 
@@ -501,9 +502,9 @@ class ProcessHandleBlazeServerStartup : public BlazeServerStartup {
 };
 
 
-void ExecuteDaemon(const string& exe, const std::vector<string>& args_vector,
-                   const string& daemon_output, const string& server_dir,
-                   BlazeServerStartup** server_startup) {
+int ExecuteDaemon(const string& exe, const std::vector<string>& args_vector,
+                  const string& daemon_output, const string& server_dir,
+                  BlazeServerStartup** server_startup) {
   wstring wdaemon_output;
   if (!blaze_util::AsAbsoluteWindowsPath(daemon_output, &wdaemon_output)) {
     pdie(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
@@ -551,13 +552,27 @@ void ExecuteDaemon(const string& exe, const std::vector<string>& args_vector,
   }
   AutoHandle stderr_file(stderr_handle);
 
-  PROCESS_INFORMATION processInfo = {0};
-  STARTUPINFOA startupInfo = {0};
+  // Create an attribute list with length of 1
+  AutoAttributeList lpAttributeList(1);
 
-  startupInfo.hStdInput = devnull;
-  startupInfo.hStdError = stdout_file;
-  startupInfo.hStdOutput = stderr_handle;
-  startupInfo.dwFlags |= STARTF_USESTDHANDLES;
+  HANDLE handlesToInherit[2] = {stdout_file, stderr_handle};
+  if (!UpdateProcThreadAttribute(
+          lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+          handlesToInherit, 2 * sizeof(HANDLE), NULL, NULL)) {
+    pdie(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
+         "ExecuteDaemon(%s): UpdateProcThreadAttribute", exe.c_str());
+  }
+
+  PROCESS_INFORMATION processInfo = {0};
+  STARTUPINFOEXA startupInfoEx = {0};
+
+  startupInfoEx.StartupInfo.cb = sizeof(startupInfoEx);
+  startupInfoEx.StartupInfo.hStdInput = devnull;
+  startupInfoEx.StartupInfo.hStdOutput = stdout_file;
+  startupInfoEx.StartupInfo.hStdError = stderr_handle;
+  startupInfoEx.StartupInfo.dwFlags |= STARTF_USESTDHANDLES;
+  startupInfoEx.lpAttributeList = lpAttributeList;
+
   CmdLine cmdline;
   CreateCommandLine(&cmdline, exe, args_vector);
 
@@ -567,10 +582,11 @@ void ExecuteDaemon(const string& exe, const std::vector<string>& args_vector,
       /* lpProcessAttributes */ NULL,
       /* lpThreadAttributes */ NULL,
       /* bInheritHandles */ TRUE,
-      /* dwCreationFlags */ DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+      /* dwCreationFlags */ DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP |
+          EXTENDED_STARTUPINFO_PRESENT,
       /* lpEnvironment */ NULL,
       /* lpCurrentDirectory */ NULL,
-      /* lpStartupInfo */ &startupInfo,
+      /* lpStartupInfo */ &startupInfoEx.StartupInfo,
       /* lpProcessInformation */ &processInfo);
 
   if (!ok) {
@@ -593,6 +609,8 @@ void ExecuteDaemon(const string& exe, const std::vector<string>& args_vector,
   // Don't close processInfo.hProcess here, it's now owned by the
   // ProcessHandleBlazeServerStartup instance.
   CloseHandle(processInfo.hThread);
+
+  return processInfo.dwProcessId;
 }
 
 // Returns whether nested jobs are not available on the current system.

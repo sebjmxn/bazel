@@ -16,8 +16,8 @@
 set -eu
 
 readonly WORKING_DIR=$(mktemp -d)
-HOST=localhost
-PORT=12345
+: ${HOST:=localhost}
+: ${PORT:=12345}
 TARGET=
 SERVING_PREFIX=
 
@@ -41,7 +41,7 @@ EOF
 
 build_tree() {
   bazel build //site:jekyll-tree.tar
-  rm -rf $WORKING_DIR/*
+  rm -rf ${WORKING_DIR:-sentinel}/*
   tar -xf "$(bazel info bazel-genfiles)/site/jekyll-tree.tar" -C $WORKING_DIR
 }
 

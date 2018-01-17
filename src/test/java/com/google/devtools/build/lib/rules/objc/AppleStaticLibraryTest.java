@@ -121,7 +121,8 @@ public class AppleStaticLibraryTest extends ObjcRuleTestCase {
         "    resources = [':avoid.png']",
         ")");
 
-    ObjcProvider provider = providerForTarget("//package:test");
+    ObjcProvider provider =  getConfiguredTarget("//package:test")
+        .get(AppleStaticLibraryProvider.SKYLARK_CONSTRUCTOR).getDepsObjcProvider();
     // Do not remove SDK_FRAMEWORK values in avoid_deps.
     assertThat(provider.get(ObjcProvider.SDK_FRAMEWORK))
         .containsAllOf(new SdkFramework("AvoidSDK"), new SdkFramework("BaseSDK"));
@@ -155,11 +156,12 @@ public class AppleStaticLibraryTest extends ObjcRuleTestCase {
         configurationBin("x86_64", ConfigurationDistinguisher.APPLEBIN_IOS) + "x/x-fl.a";
 
     assertThat(Artifact.toExecPaths(action.getInputs()))
-        .containsExactly(i386Lib, x8664Lib, MOCK_XCRUNWRAPPER_PATH);
+        .containsExactly(i386Lib, x8664Lib, MOCK_XCRUNWRAPPER_PATH,
+            MOCK_XCRUNWRAPPER_EXECUTABLE_PATH);
 
     assertThat(action.getArguments())
         .containsExactly(
-            MOCK_XCRUNWRAPPER_PATH,
+            MOCK_XCRUNWRAPPER_EXECUTABLE_PATH,
             LIPO,
             "-create",
             i386Lib,
@@ -209,7 +211,6 @@ public class AppleStaticLibraryTest extends ObjcRuleTestCase {
 
     useConfiguration(
         "--ios_multi_cpus=i386,x86_64",
-        "--experimental_disable_jvm",
         "--crosstool_top=//tools/osx/crosstool:crosstool");
 
     CommandAction action = (CommandAction) lipoLibAction("//package:test");
@@ -246,10 +247,11 @@ public class AppleStaticLibraryTest extends ObjcRuleTestCase {
         + "x/x-fl.a";
 
     assertThat(Artifact.toExecPaths(action.getInputs()))
-        .containsExactly(i386Bin, armv7kBin, MOCK_XCRUNWRAPPER_PATH);
+        .containsExactly(i386Bin, armv7kBin, MOCK_XCRUNWRAPPER_PATH,
+            MOCK_XCRUNWRAPPER_EXECUTABLE_PATH);
 
     assertContainsSublist(action.getArguments(), ImmutableList.of(
-        MOCK_XCRUNWRAPPER_PATH, LIPO, "-create"));
+        MOCK_XCRUNWRAPPER_EXECUTABLE_PATH, LIPO, "-create"));
     assertThat(action.getArguments()).containsAllOf(armv7kBin, i386Bin);
     assertContainsSublist(action.getArguments(), ImmutableList.of(
         "-o", execPathEndingWith(action.getOutputs(), "x_lipo.a")));
@@ -533,7 +535,6 @@ public class AppleStaticLibraryTest extends ObjcRuleTestCase {
         "objc_library(name = 'objcLib', srcs = [ 'b.m' ], deps = [':avoidLib'])",
         "objc_library(name = 'avoidLib', srcs = [ 'c.m' ])");
 
-    useConfiguration("--experimental_disable_jvm");
     CommandAction action = linkLibAction("//package:test");
     assertThat(Artifact.toRootRelativePaths(action.getInputs())).contains(
         "package/libobjcLib.a");
@@ -556,7 +557,6 @@ public class AppleStaticLibraryTest extends ObjcRuleTestCase {
         "objc_library(name = 'objcLib', srcs = [ 'b.m' ])",
         "objc_library(name = 'avoidLib', srcs = [ 'c.m' ])");
 
-    useConfiguration("--experimental_disable_jvm");
     CommandAction action = linkLibAction("//package:test");
     assertThat(Artifact.toRootRelativePaths(action.getInputs())).contains(
         "package/libobjcLib.a");

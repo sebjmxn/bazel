@@ -19,11 +19,12 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import com.google.devtools.build.lib.actions.ActionAnalysisMetadata;
+import com.google.devtools.build.lib.actions.ActionKeyContext;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ArtifactFactory;
 import com.google.devtools.build.lib.actions.ArtifactOwner;
+import com.google.devtools.build.lib.actions.ArtifactRoot;
 import com.google.devtools.build.lib.actions.MiddlemanFactory;
-import com.google.devtools.build.lib.actions.Root;
 import com.google.devtools.build.lib.analysis.buildinfo.BuildInfoCollection;
 import com.google.devtools.build.lib.analysis.buildinfo.BuildInfoFactory;
 import com.google.devtools.build.lib.analysis.buildinfo.BuildInfoFactory.BuildInfoKey;
@@ -77,6 +78,8 @@ public class CachingAnalysisEnvironment implements AnalysisEnvironment {
    */
   private final boolean allowRegisteringActions;
 
+  private final ActionKeyContext actionKeyContext;
+
   private boolean enabled = true;
   private MiddlemanFactory middlemanFactory;
   private ExtendedEventHandler errorEventListener;
@@ -91,6 +94,7 @@ public class CachingAnalysisEnvironment implements AnalysisEnvironment {
 
   public CachingAnalysisEnvironment(
       ArtifactFactory artifactFactory,
+      ActionKeyContext actionKeyContext,
       ArtifactOwner owner,
       boolean isSystemEnv,
       boolean extendedSanityChecks,
@@ -98,6 +102,7 @@ public class CachingAnalysisEnvironment implements AnalysisEnvironment {
       SkyFunction.Environment env,
       boolean allowRegisteringActions) {
     this.artifactFactory = artifactFactory;
+    this.actionKeyContext = actionKeyContext;
     this.owner = Preconditions.checkNotNull(owner);
     this.isSystemEnv = isSystemEnv;
     this.extendedSanityChecks = extendedSanityChecks;
@@ -191,6 +196,11 @@ public class CachingAnalysisEnvironment implements AnalysisEnvironment {
   }
 
   @Override
+  public ActionKeyContext getActionKeyContext() {
+    return actionKeyContext;
+  }
+
+  @Override
   public boolean hasErrors() {
     // The system analysis environment never has errors.
     if (isSystemEnv) {
@@ -223,7 +233,7 @@ public class CachingAnalysisEnvironment implements AnalysisEnvironment {
   }
 
   @Override
-  public Artifact getDerivedArtifact(PathFragment rootRelativePath, Root root) {
+  public Artifact getDerivedArtifact(PathFragment rootRelativePath, ArtifactRoot root) {
     Preconditions.checkState(enabled);
     return trackArtifactAndOrigin(
         artifactFactory.getDerivedArtifact(rootRelativePath, root, getOwner()),
@@ -231,7 +241,7 @@ public class CachingAnalysisEnvironment implements AnalysisEnvironment {
   }
 
   @Override
-  public Artifact getTreeArtifact(PathFragment rootRelativePath, Root root) {
+  public Artifact getTreeArtifact(PathFragment rootRelativePath, ArtifactRoot root) {
     Preconditions.checkState(enabled);
     return trackArtifactAndOrigin(
         artifactFactory.getTreeArtifact(rootRelativePath, root, getOwner()),
@@ -239,7 +249,7 @@ public class CachingAnalysisEnvironment implements AnalysisEnvironment {
   }
 
   @Override
-  public Artifact getFilesetArtifact(PathFragment rootRelativePath, Root root) {
+  public Artifact getFilesetArtifact(PathFragment rootRelativePath, ArtifactRoot root) {
     Preconditions.checkState(enabled);
     return trackArtifactAndOrigin(
         artifactFactory.getFilesetArtifact(rootRelativePath, root, getOwner()),
@@ -247,7 +257,7 @@ public class CachingAnalysisEnvironment implements AnalysisEnvironment {
   }
 
   @Override
-  public Artifact getConstantMetadataArtifact(PathFragment rootRelativePath, Root root) {
+  public Artifact getConstantMetadataArtifact(PathFragment rootRelativePath, ArtifactRoot root) {
     return artifactFactory.getConstantMetadataArtifact(rootRelativePath, root, getOwner());
   }
 
@@ -287,14 +297,14 @@ public class CachingAnalysisEnvironment implements AnalysisEnvironment {
 
   @Override
   public Artifact getStableWorkspaceStatusArtifact() throws InterruptedException {
-    return ((WorkspaceStatusValue) skyframeEnv.getValue(WorkspaceStatusValue.SKY_KEY))
-            .getStableArtifact();
+    return ((WorkspaceStatusValue) skyframeEnv.getValue(WorkspaceStatusValue.BUILD_INFO_KEY))
+        .getStableArtifact();
   }
 
   @Override
   public Artifact getVolatileWorkspaceStatusArtifact() throws InterruptedException {
-    return ((WorkspaceStatusValue) skyframeEnv.getValue(WorkspaceStatusValue.SKY_KEY))
-            .getVolatileArtifact();
+    return ((WorkspaceStatusValue) skyframeEnv.getValue(WorkspaceStatusValue.BUILD_INFO_KEY))
+        .getVolatileArtifact();
   }
 
   // See SkyframeBuildView#getWorkspaceStatusValues for the code that this method is attempting to
@@ -317,8 +327,7 @@ public class CachingAnalysisEnvironment implements AnalysisEnvironment {
       throws InterruptedException {
     boolean stamp = AnalysisUtils.isStampingEnabled(ruleContext, config);
     BuildInfoCollectionValue collectionValue =
-        (BuildInfoCollectionValue) skyframeEnv.getValue(BuildInfoCollectionValue.key(
-            new BuildInfoCollectionValue.BuildInfoKeyAndConfig(key, config)));
+        (BuildInfoCollectionValue) skyframeEnv.getValue(BuildInfoCollectionValue.key(key, config));
     if (collectionValue == null) {
       throw collectDebugInfoAndCrash(key, config);
     }

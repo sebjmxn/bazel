@@ -662,7 +662,13 @@ public class BazelJ2ObjcLibraryTest extends J2ObjcLibraryTest {
 
     ActionExecutionContext dummyActionExecutionContext =
         new ActionExecutionContext(
-            null, null, ActionInputPrefetcher.NONE, null, null, ImmutableMap.<String, String>of(),
+            null,
+            null,
+            ActionInputPrefetcher.NONE,
+            actionKeyContext,
+            null,
+            null,
+            ImmutableMap.<String, String>of(),
             DUMMY_ARTIFACT_EXPANDER);
     ByteArrayOutputStream moduleMapStream = new ByteArrayOutputStream();
     ByteArrayOutputStream umbrellaHeaderStream = new ByteArrayOutputStream();
@@ -705,7 +711,13 @@ public class BazelJ2ObjcLibraryTest extends J2ObjcLibraryTest {
 
     ActionExecutionContext dummyActionExecutionContext =
         new ActionExecutionContext(
-            null, null, ActionInputPrefetcher.NONE, null, null, ImmutableMap.<String, String>of(),
+            null,
+            null,
+            ActionInputPrefetcher.NONE,
+            actionKeyContext,
+            null,
+            null,
+            ImmutableMap.<String, String>of(),
             DUMMY_ARTIFACT_EXPANDER);
 
     ByteArrayOutputStream moduleMapStream = new ByteArrayOutputStream();
@@ -851,7 +863,7 @@ public class BazelJ2ObjcLibraryTest extends J2ObjcLibraryTest {
             .add("--dummy_archive")
             .add(execPath + "tools/objc/libdummy_lib.a")
             .add("--xcrunwrapper")
-            .add("tools/objc/xcrunwrapper")
+            .add(MOCK_XCRUNWRAPPER_EXECUTABLE_PATH)
             .add("--dependency_mapping_files")
             .add(dependencyMappingFile.getExecPathString())
             .add("--header_mapping_files")

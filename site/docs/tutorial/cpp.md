@@ -3,14 +3,14 @@ layout: documentation
 title: Build Tutorial - C++
 ---
 
-Introduction to Bazel: Build a C++ Project
+Introduction to Bazel: Building a C++ Project
 ==========
 
 In this tutorial, you'll learn the basics of building C++ applications with
 Bazel. You will set up your workspace and build a simple C++ project that
 illustrates key Bazel concepts, such as targets and `BUILD` files. After
 completing this tutorial, take a look at
-[Common C++ Build Use Cases](cpp-use-cases.md) for information on more advanced
+[Common C++ Build Use Cases](../cpp-use-cases.md) for information on more advanced
 concepts such as writing and running C++ tests.
 
 Estimated completion time: 30 minutes.
@@ -382,8 +382,8 @@ file, you can even skip the `//` workspace root identifier and just use
 ## Further reading
 
 Congratulations! You now know the basics of building a C++ project with Bazel.
-Next, read up on the most common [C++ build use cases](cpp-use-cases.md). Then,
-check out the following:
+Next, read up on the most common [C++ build use cases](../cpp-use-cases.md).
+Then, check out the following:
 
 *  [External Dependencies](../external.html) to learn more about working with
    local and remote repositories.

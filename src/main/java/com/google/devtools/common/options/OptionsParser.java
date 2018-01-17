@@ -549,7 +549,7 @@ public class OptionsParser implements OptionsProvider {
    *     or null if the value has not been set.
    * @throws IllegalArgumentException if there is no option by the given name.
    */
-  OptionValueDescription getOptionValueDescription(String name) {
+  public OptionValueDescription getOptionValueDescription(String name) {
     return impl.getOptionValueDescription(name);
   }
 
@@ -620,6 +620,32 @@ public class OptionsParser implements OptionsProvider {
   }
 
   /**
+   * Parses the args at the priority of the provided option. This is useful for after-the-fact
+   * expansion.
+   *
+   * @param optionToExpand the option that is being "expanded" after the fact. The provided args
+   *     will have the same priority as this option.
+   * @param source a description of where the expansion arguments came from.
+   * @param args the arguments to parse as the expansion. Order matters, as the value of a flag may
+   *     be in the following argument.
+   */
+  public void parseArgsFixedAsExpansionOfOption(
+      ParsedOptionDescription optionToExpand, String source, List<String> args)
+      throws OptionsParsingException {
+    Preconditions.checkNotNull(
+        optionToExpand, "Option for expansion not specified for arglist " + args);
+    Preconditions.checkArgument(
+        optionToExpand.getPriority().getPriorityCategory()
+            != OptionPriority.PriorityCategory.DEFAULT,
+        "Priority cannot be default, which was specified for arglist " + args);
+    residue.addAll(impl.parseArgsFixedAsExpansionOfOption(optionToExpand, o -> source, args));
+    if (!allowResidue && !residue.isEmpty()) {
+      String errorMsg = "Unrecognized arguments: " + Joiner.on(' ').join(residue);
+      throw new OptionsParsingException(errorMsg);
+    }
+  }
+
+  /**
    * @param origin the origin of this option instance, it includes the priority of the value. If
    *     other values have already been or will be parsed at a higher priority, they might override
    *     the provided value. If this option already has a value at this priority, this value will
@@ -652,9 +678,7 @@ public class OptionsParser implements OptionsProvider {
     return ImmutableList.copyOf(residue);
   }
 
-  /**
-   * Returns a list of warnings about problems encountered by previous parse calls.
-   */
+  /** Returns a list of warnings about problems encountered by previous parse calls. */
   public List<String> getWarnings() {
     return impl.getWarnings();
   }
@@ -792,8 +816,7 @@ public class OptionsParser implements OptionsProvider {
    * Option} annotation.
    */
   private static void validateFieldsSets(
-      Class<? extends OptionsBase> optionsClass,
-      LinkedHashSet<Field> fieldsFromMap) {
+      Class<? extends OptionsBase> optionsClass, LinkedHashSet<Field> fieldsFromMap) {
     ImmutableList<OptionDefinition> optionDefsFromClasses =
         OptionsData.getAllOptionDefinitionsForClass(optionsClass);
     Set<Field> fieldsFromClass =

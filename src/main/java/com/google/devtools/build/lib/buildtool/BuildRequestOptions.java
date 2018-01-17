@@ -202,22 +202,6 @@ public class BuildRequestOptions extends OptionsBase {
   public boolean dumpToStdout;
 
   @Option(
-    name = "experimental_post_build_query",
-    defaultValue = "null",
-    documentationCategory = OptionDocumentationCategory.LOGGING,
-    effectTags = {OptionEffectTag.UNKNOWN}
-  )
-  public String queryExpression;
-
-  @Option(
-    name = "experimental_query_options",
-    defaultValue = "null",
-    documentationCategory = OptionDocumentationCategory.LOGGING,
-    effectTags = {OptionEffectTag.UNKNOWN}
-  )
-  public String queryOptions;
-
-  @Option(
     name = "analyze",
     defaultValue = "true",
     documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
@@ -252,7 +236,7 @@ public class BuildRequestOptions extends OptionsBase {
     defaultValue = "",
     help =
         "Specifies which output groups of the top-level targets to build. If omitted, a default "
-            + "set of output groups are built. When specified the default set is overridden."
+            + "set of output groups are built. When specified the default set is overridden. "
             + "However you may use --output_groups=+<output_group> or "
             + "--output_groups=-<output_group> to instead modify the set of output groups."
   )
@@ -405,17 +389,18 @@ public class BuildRequestOptions extends OptionsBase {
   public boolean useActionCache;
 
   @Option(
-    name = "keep_incrementality_data",
+    name = "track_incremental_state",
+    oldName = "keep_incrementality_data",
     defaultValue = "true",
     documentationCategory = OptionDocumentationCategory.BUILD_TIME_OPTIMIZATION,
     effectTags = {OptionEffectTag.LOSES_INCREMENTAL_STATE},
     help =
-        "If false, discard Blaze-internal data that allows for invalidation and re-evaluation "
+        "If false, Blaze will not persist data that allows for invalidation and re-evaluation "
             + "on incremental builds in order to save memory on this build. Subsequent builds "
-            + "will not have any incrementality with respect to this one. Usually you will want"
-            + "to specify the --batch startup option along with this one."
+            + "will not have any incrementality with respect to this one. Usually you will want "
+            + "to specify --batch when setting this to false."
   )
-  public boolean keepIncrementalityData;
+  public boolean trackIncrementalState;
 
   /** Converter for jobs: [0, MAX_JOBS] or "auto". */
   public static class JobsConverter extends RangeConverter {

@@ -56,8 +56,8 @@ public class AndroidInstrumentationTest implements RuleConfiguredTargetFactory {
       ruleContext.throwWithAttributeError(
           "instrumentation",
           String.format(
-              "The android_binary target at %s is missing an 'instruments' attribute. Please set "
-                  + "it as the label of the android_binary under test.",
+              "The android_binary target %s is missing an 'instruments' attribute. Please set "
+                  + "it to the label of the android_binary under test.",
               ruleContext.attributes().get("instrumentation", BuildType.LABEL)));
     }
   }
@@ -85,6 +85,7 @@ public class AndroidInstrumentationTest implements RuleConfiguredTargetFactory {
             .addTargets(runfilesDeps, RunfilesProvider.DEFAULT_RUNFILES)
             .addTransitiveArtifacts(AndroidCommon.getSupportApks(ruleContext))
             .addTransitiveArtifacts(getAdb(ruleContext).getFilesToRun())
+            .addTransitiveArtifacts(getAapt(ruleContext).getFilesToRun())
             .addArtifacts(getDataDeps(ruleContext))
             .build();
 
@@ -251,6 +252,11 @@ public class AndroidInstrumentationTest implements RuleConfiguredTargetFactory {
     return AndroidSdkProvider.fromRuleContext(ruleContext).getAdb();
   }
 
+  /** AAPT binary from the Android SDK. */
+  private static FilesToRunProvider getAapt(RuleContext ruleContext) {
+    return AndroidSdkProvider.fromRuleContext(ruleContext).getAapt();
+  }
+
   /** Map of {@code test_args} for the test runner to make available to test test code. */
   private static ImmutableMap<String, String> getTestArgs(RuleContext ruleContext) {
     return ImmutableMap.copyOf(ruleContext.attributes().get("test_args", Type.STRING_DICT));
@@ -294,9 +300,7 @@ public class AndroidInstrumentationTest implements RuleConfiguredTargetFactory {
   private static Iterable<AndroidDeviceScriptFixtureInfoProvider> getDeviceScriptFixtures(
       RuleContext ruleContext) {
     return ruleContext.getPrerequisites(
-        "fixtures",
-        Mode.TARGET,
-        AndroidDeviceScriptFixtureInfoProvider.SKYLARK_CONSTRUCTOR);
+        "fixtures", Mode.TARGET, AndroidDeviceScriptFixtureInfoProvider.SKYLARK_CONSTRUCTOR);
   }
 
   private static String getDeviceBrokerType(RuleContext ruleContext) {
@@ -315,8 +319,8 @@ public class AndroidInstrumentationTest implements RuleConfiguredTargetFactory {
   private static String getTestSuitePropertyName(RuleContext ruleContext)
       throws RuleErrorException {
     try {
-      return ResourceFileLoader
-          .loadResource(AndroidInstrumentationTest.class, TEST_SUITE_PROPERTY_NAME_FILE)
+      return ResourceFileLoader.loadResource(
+              AndroidInstrumentationTest.class, TEST_SUITE_PROPERTY_NAME_FILE)
           .trim();
     } catch (IOException e) {
       ruleContext.throwWithRuleError("Cannot load test suite property name: " + e.getMessage());
@@ -333,12 +337,9 @@ public class AndroidInstrumentationTest implements RuleConfiguredTargetFactory {
    */
   private static ExecutionInfo getExecutionInfoProvider(RuleContext ruleContext) {
     ExecutionInfo executionInfo =
-            ruleContext.getPrerequisite(
-                "target_device", Mode.HOST, ExecutionInfo.PROVIDER);
+        ruleContext.getPrerequisite("target_device", Mode.HOST, ExecutionInfo.PROVIDER);
     ImmutableMap<String, String> executionRequirements =
-        (executionInfo != null)
-            ? executionInfo.getExecutionInfo()
-            : ImmutableMap.of();
+        (executionInfo != null) ? executionInfo.getExecutionInfo() : ImmutableMap.of();
     return new ExecutionInfo(executionRequirements);
   }
 }

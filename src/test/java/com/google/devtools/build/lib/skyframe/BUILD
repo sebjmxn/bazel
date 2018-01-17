@@ -50,8 +50,8 @@ java_library(
 java_test(
     name = "SkyframeTests",
     srcs = select({
-        "//src:darwin": glob(["*.java"]),
-        "//src:darwin_x86_64": glob(["*.java"]),
+        "//src/conditions:darwin": glob(["*.java"]),
+        "//src/conditions:darwin_x86_64": glob(["*.java"]),
         "//conditions:default": glob(
             ["*.java"],
             exclude = ["MacOSXFsEventsDiffAwarenessTest.java"],
@@ -78,6 +78,8 @@ java_test(
         "//src/main/java/com/google/devtools/build/lib/collect/nestedset",
         "//src/main/java/com/google/devtools/build/lib/concurrent",
         "//src/main/java/com/google/devtools/build/lib/rules/cpp",
+        "//src/main/java/com/google/devtools/build/lib/skyframe/serialization",
+        "//src/main/java/com/google/devtools/build/lib/skyframe/serialization/testutils",
         "//src/main/java/com/google/devtools/build/lib/vfs",
         "//src/main/java/com/google/devtools/build/lib/vfs/inmemoryfs",
         "//src/main/java/com/google/devtools/build/skyframe",
@@ -96,6 +98,7 @@ java_test(
         "//third_party:junit4",
         "//third_party:mockito",
         "//third_party:truth",
+        "//third_party/protobuf:protobuf_java",
     ],
 )
 

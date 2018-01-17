@@ -23,14 +23,13 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.Runnables;
 import com.google.devtools.build.lib.actions.Action;
-import com.google.devtools.build.lib.actions.ActionLookupValue;
 import com.google.devtools.build.lib.actions.ActionLookupValue.ActionLookupKey;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Artifact.SpecialArtifact;
 import com.google.devtools.build.lib.actions.Artifact.SpecialArtifactType;
 import com.google.devtools.build.lib.actions.Artifact.TreeFileArtifact;
 import com.google.devtools.build.lib.actions.ArtifactOwner;
-import com.google.devtools.build.lib.actions.Root;
+import com.google.devtools.build.lib.actions.ArtifactRoot;
 import com.google.devtools.build.lib.actions.util.TestAction;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.ServerDirectories;
@@ -40,7 +39,6 @@ import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
 import com.google.devtools.build.lib.skyframe.DirtinessCheckerUtils.BasicFilesystemDirtinessChecker;
 import com.google.devtools.build.lib.skyframe.ExternalFilesHelper.ExternalFileAction;
 import com.google.devtools.build.lib.skyframe.PackageLookupFunction.CrossRepositoryLabelViolationStrategy;
-import com.google.devtools.build.lib.skyframe.PackageLookupValue.BuildFileName;
 import com.google.devtools.build.lib.testutil.TestConstants;
 import com.google.devtools.build.lib.testutil.TestRuleClassProvider;
 import com.google.devtools.build.lib.util.io.TimestampGranularityMonitor;
@@ -102,8 +100,12 @@ public class FilesystemValueCheckerTest {
     FileSystemUtils.createDirectoryAndParents(pkgRoot);
     FileSystemUtils.createEmptyFile(pkgRoot.getRelative("WORKSPACE"));
 
-    AtomicReference<PathPackageLocator> pkgLocator = new AtomicReference<>(new PathPackageLocator(
-        fs.getPath("/output_base"), ImmutableList.of(pkgRoot)));
+    AtomicReference<PathPackageLocator> pkgLocator =
+        new AtomicReference<>(
+            new PathPackageLocator(
+                fs.getPath("/output_base"),
+                ImmutableList.of(pkgRoot),
+                BazelSkyframeExecutorConstants.BUILD_FILES_BY_PRIORITY));
     BlazeDirectories directories =
         new BlazeDirectories(
             new ServerDirectories(pkgRoot, pkgRoot), pkgRoot, TestConstants.PRODUCT_NAME);
@@ -124,7 +126,7 @@ public class FilesystemValueCheckerTest {
         new PackageLookupFunction(
             new AtomicReference<>(ImmutableSet.<PackageIdentifier>of()),
             CrossRepositoryLabelViolationStrategy.ERROR,
-            ImmutableList.of(BuildFileName.BUILD_DOT_BAZEL, BuildFileName.BUILD)));
+            BazelSkyframeExecutorConstants.BUILD_FILES_BY_PRIORITY));
     skyFunctions.put(SkyFunctions.WORKSPACE_AST,
         new WorkspaceASTFunction(TestRuleClassProvider.getRuleClassProvider()));
     skyFunctions.put(SkyFunctions.WORKSPACE_FILE,
@@ -357,13 +359,12 @@ public class FilesystemValueCheckerTest {
     FileSystemUtils.writeContentAsLatin1(out2.getPath(), "fizzlepop");
 
     SkyKey actionLookupKey =
-        ActionLookupValue.key(
-            new ActionLookupKey() {
-              @Override
-              protected SkyFunctionName getType() {
-                return SkyFunctionName.FOR_TESTING;
-              }
-            });
+        new ActionLookupKey() {
+          @Override
+          public SkyFunctionName functionName() {
+            return SkyFunctionName.FOR_TESTING;
+          }
+        };
     SkyKey actionKey1 = ActionExecutionValue.key(actionLookupKey, 0);
     SkyKey actionKey2 = ActionExecutionValue.key(actionLookupKey, 1);
     differencer.inject(
@@ -437,13 +438,12 @@ public class FilesystemValueCheckerTest {
     FileSystemUtils.createDirectoryAndParents(last.getPath());
 
     SkyKey actionLookupKey =
-        ActionLookupValue.key(
-            new ActionLookupKey() {
-              @Override
-              protected SkyFunctionName getType() {
-                return SkyFunctionName.FOR_TESTING;
-              }
-            });
+        new ActionLookupKey() {
+          @Override
+          public SkyFunctionName functionName() {
+            return SkyFunctionName.FOR_TESTING;
+          }
+        };
     SkyKey actionKey1 = ActionExecutionValue.key(actionLookupKey, 0);
     SkyKey actionKey2 = ActionExecutionValue.key(actionLookupKey, 1);
     SkyKey actionKeyEmpty = ActionExecutionValue.key(actionLookupKey, 2);
@@ -608,14 +608,14 @@ public class FilesystemValueCheckerTest {
     Path outputPath = fs.getPath("/bin");
     outputPath.createDirectory();
     return new Artifact(
-        outputPath.getRelative(relPath), Root.asDerivedRoot(fs.getPath("/"), outputPath));
+        outputPath.getRelative(relPath), ArtifactRoot.asDerivedRoot(fs.getPath("/"), outputPath));
   }
 
   private Artifact createTreeArtifact(String relPath) throws IOException {
     Path outputDir = fs.getPath("/bin");
     Path outputPath = outputDir.getRelative(relPath);
     outputDir.createDirectory();
-    Root derivedRoot = Root.asDerivedRoot(fs.getPath("/"), outputDir);
+    ArtifactRoot derivedRoot = ArtifactRoot.asDerivedRoot(fs.getPath("/"), outputDir);
     return new SpecialArtifact(outputPath, derivedRoot,
         derivedRoot.getExecPath().getRelative(outputPath.relativeTo(derivedRoot.getPath())),
         ArtifactOwner.NULL_OWNER, SpecialArtifactType.TREE);
@@ -638,7 +638,7 @@ public class FilesystemValueCheckerTest {
             for (PathFragment pathFrag : paths) {
               stats.add(
                   FileStatusWithDigestAdapter.adapt(
-                      fs.getRootDirectory().getRelative(pathFrag).statIfFound(Symlinks.NOFOLLOW)));
+                      fs.getPath("/").getRelative(pathFrag).statIfFound(Symlinks.NOFOLLOW)));
             }
             return stats;
           }
@@ -656,7 +656,7 @@ public class FilesystemValueCheckerTest {
               throws IOException {
             List<FileStatusWithDigest> stats = new ArrayList<>();
             for (PathFragment pathFrag : paths) {
-              final Path path = fs.getRootDirectory().getRelative(pathFrag);
+              final Path path = fs.getPath("/").getRelative(pathFrag);
               stats.add(statWithDigest(path, path.statIfFound(Symlinks.NOFOLLOW)));
             }
             return stats;
@@ -696,7 +696,7 @@ public class FilesystemValueCheckerTest {
             for (PathFragment pathFrag : paths) {
               stats.add(
                   FileStatusWithDigestAdapter.adapt(
-                      fs.getRootDirectory().getRelative(pathFrag).statIfFound(Symlinks.NOFOLLOW)));
+                      fs.getPath("/").getRelative(pathFrag).statIfFound(Symlinks.NOFOLLOW)));
             }
             return stats;
           }

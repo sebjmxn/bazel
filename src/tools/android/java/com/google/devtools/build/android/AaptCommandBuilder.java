@@ -127,9 +127,10 @@ public class AaptCommandBuilder {
     if (values.size() > 200) {
       add(
           flag,
-          "@" + Files.write(
-              Files.createDirectories(workingDirectory).resolve("params" + flag),
-              ImmutableList.of(values.stream().collect(Collectors.joining(" ")))));
+          "@"
+              + Files.write(
+                  Files.createDirectories(workingDirectory).resolve("params" + flag),
+                  ImmutableList.of(values.stream().collect(Collectors.joining(" ")))));
     } else {
       addRepeated(flag, values);
     }
@@ -302,11 +303,15 @@ public class AaptCommandBuilder {
 
     final Process process = new ProcessBuilder().command(command).redirectErrorStream(true).start();
     processLog.append("Command: ");
-    Joiner.on("\n\t").appendTo(processLog, command);
-    processLog.append("\n");
+    Joiner.on("\\\n\t").appendTo(processLog, command);
+    processLog.append("\nOutput:\n");
     final InputStreamReader stdout =
         new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8);
     while (process.isAlive()) {
+      processLog.append(CharStreams.toString(stdout));
+    }
+    // Make sure the full stdout is read.
+    while (stdout.ready()) {
       processLog.append(CharStreams.toString(stdout));
     }
     if (process.exitValue() != 0) {

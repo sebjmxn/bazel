@@ -14,6 +14,7 @@
 
 package com.google.devtools.build.lib.rules.genrule;
 
+import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
@@ -46,7 +47,6 @@ import com.google.devtools.build.lib.rules.java.JavaHelper;
 import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.LazyString;
 import com.google.devtools.build.lib.vfs.PathFragment;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -57,13 +57,22 @@ import java.util.regex.Pattern;
  */
 public abstract class GenRuleBase implements RuleConfiguredTargetFactory {
 
-  private static final Pattern CROSSTOOL_MAKE_VARIABLE =
-      Pattern.compile("\\$\\((CC|CC_FLAGS|AR|NM|OBJCOPY|STRIP|GCOVTOOL)\\)");
-  private static final Pattern JDK_MAKE_VARIABLE =
-      Pattern.compile("\\$\\((JAVABASE|JAVA)\\)");
+  private static final ImmutableList<String> CROSSTOOL_MAKE_VARIABLES = ImmutableList.of("CC",
+      "CC_FLAGS", "AR", "NM", "OBJCOPY", "STRIP", "GCOVTOOL");
+
+  private static final ImmutableList<String> JDK_MAKE_VARIABLES = ImmutableList.of("JAVABASE",
+      "JAVA");
+
+  private static Pattern matchesMakeVariables(Iterable<String> variables) {
+    return Pattern.compile("\\$\\((" + Joiner.on("|").join(variables) + ")\\)");
+  }
+
+  private static final Pattern CROSSTOOL_MAKE_VARIABLE_PATTERN =
+      matchesMakeVariables(CROSSTOOL_MAKE_VARIABLES);
+  private static final Pattern JDK_MAKE_VARIABLE = matchesMakeVariables(JDK_MAKE_VARIABLES);
 
   protected static boolean requiresCrosstool(String command) {
-    return CROSSTOOL_MAKE_VARIABLE.matcher(command).find();
+    return CROSSTOOL_MAKE_VARIABLE_PATTERN.matcher(command).find();
   }
 
   protected boolean requiresJdk(String command) {
@@ -79,18 +88,6 @@ public abstract class GenRuleBase implements RuleConfiguredTargetFactory {
    */
   protected Map<String, String> getExtraExecutionInfo(RuleContext ruleContext, String command) {
     return ImmutableMap.of();
-  }
-
-  /**
-   * Returns an {@link Iterable} of {@link NestedSet}s, which will be added to the genrule's inputs
-   * using the {@link NestedSetBuilder#addTransitive} method.
-   *
-   * <p>GenRule implementations can override this method to better control what inputs are needed
-   * for specific command inputs.
-   */
-  protected Iterable<NestedSet<Artifact>> getExtraInputArtifacts(
-      RuleContext ruleContext, String command) {
-    return ImmutableList.of();
   }
 
   /**
@@ -153,17 +150,22 @@ public abstract class GenRuleBase implements RuleConfiguredTargetFactory {
       return null;
     }
 
-    String baseCommand = commandHelper.resolveCommandAndHeuristicallyExpandLabels(
-        ruleContext.attributes().get("cmd", Type.STRING),
-        "cmd",
-        ruleContext.attributes().get("heuristic_label_expansion", Type.BOOLEAN));
+    String baseCommand = ruleContext.attributes().get("cmd", Type.STRING);
+    // Expand template variables and functions.
+    String command = ruleContext
+        .getExpander(new CommandResolverContext(ruleContext, resolvedSrcs, filesToBuild))
+        .withExecLocations(commandHelper.getLabelMap())
+        .expand("cmd", baseCommand);
 
-    // Adds the genrule environment setup script before the actual shell command
-    String command = String.format("source %s; %s",
+    // Heuristically expand things that look like labels.
+    if (ruleContext.attributes().get("heuristic_label_expansion", Type.BOOLEAN)) {
+      command = commandHelper.expandLabelsHeuristically(command);
+    }
+
+    // Add the genrule environment setup script before the actual shell command.
+    command = String.format("source %s; %s",
         ruleContext.getPrerequisiteArtifact("$genrule_setup", Mode.HOST).getExecPath(),
-        baseCommand);
-
-    command = resolveCommand(command, ruleContext, resolvedSrcs, filesToBuild);
+        command);
 
     String messageAttr = ruleContext.attributes().get("message", Type.STRING);
     String message = messageAttr.isEmpty() ? "Executing genrule" : messageAttr;
@@ -205,10 +207,6 @@ public abstract class GenRuleBase implements RuleConfiguredTargetFactory {
       // If javac is used, silently throw in the jdk filegroup as a dependency.
       // Note we expand Java-related variables with the *host* configuration.
       inputs.addTransitive(JavaHelper.getHostJavabaseInputs(ruleContext));
-    }
-
-    for (NestedSet<Artifact> extraInputs : getExtraInputArtifacts(ruleContext, baseCommand)) {
-      inputs.addTransitive(extraInputs);
     }
 
     if (isStampingEnabled(ruleContext)) {
@@ -262,19 +260,6 @@ public abstract class GenRuleBase implements RuleConfiguredTargetFactory {
       return Iterables.getOnlyElement(filesToBuild);
     }
     return null;
-  }
-
-  /**
-   * Resolves any variables, including make and genrule-specific variables, in the command and
-   * returns the expanded command.
-   *
-   * <p>GenRule implementations may override this method to perform additional expansions.
-   */
-  protected String resolveCommand(String command, final RuleContext ruleContext,
-      final NestedSet<Artifact> resolvedSrcs, final NestedSet<Artifact> filesToBuild) {
-    return ruleContext
-        .getExpander(new CommandResolverContext(ruleContext, resolvedSrcs, filesToBuild))
-        .expand("cmd", command);
   }
 
   /**
@@ -366,20 +351,13 @@ public abstract class GenRuleBase implements RuleConfiguredTargetFactory {
         }
       }
 
-      String valueFromToolchains = resolveVariableFromToolchains(variableName);
-      if (valueFromToolchains != null) {
-        return valueFromToolchains;
-      }
-
-      if (JDK_MAKE_VARIABLE.matcher("$(" + variableName + ")").find()) {
-        List<String> attributes = new ArrayList<>();
-        attributes.addAll(ConfigurationMakeVariableContext.DEFAULT_MAKE_VARIABLE_ATTRIBUTES);
-        attributes.add(":host_jdk");
-        return new ConfigurationMakeVariableContext(
-                ruleContext.getMakeVariables(attributes),
-                ruleContext.getTarget().getPackage(),
-                ruleContext.getHostConfiguration())
-            .lookupVariable(variableName);
+      // Make variables provided by the :cc_toolchain attributes should not be overridden by
+      // those provided by the toolchains attribute.
+      if (!CROSSTOOL_MAKE_VARIABLES.contains(variableName)) {
+        String valueFromToolchains = resolveVariableFromToolchains(variableName);
+        if (valueFromToolchains != null) {
+          return valueFromToolchains;
+        }
       }
 
       return super.lookupVariable(variableName);

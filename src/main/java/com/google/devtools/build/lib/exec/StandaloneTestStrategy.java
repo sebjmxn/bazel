@@ -16,7 +16,6 @@ package com.google.devtools.build.lib.exec;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.EnvironmentalExecException;
@@ -51,8 +50,8 @@ import com.google.devtools.build.lib.view.test.TestStatus.TestResultData;
 import com.google.devtools.build.lib.view.test.TestStatus.TestResultData.Builder;
 import java.io.Closeable;
 import java.io.IOException;
+import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /** Runs TestRunnerAction actions. */
 @ExecutionStrategy(
@@ -87,7 +86,7 @@ public class StandaloneTestStrategy extends TestStrategy {
   }
 
   @Override
-  public Set<SpawnResult> exec(
+  public List<SpawnResult> exec(
       TestRunnerAction action, ActionExecutionContext actionExecutionContext)
       throws ExecException, InterruptedException {
     Path execRoot = actionExecutionContext.getExecRoot();
@@ -199,7 +198,7 @@ public class StandaloneTestStrategy extends TestStrategy {
       finalizeTest(actionExecutionContext, action, dataBuilder.build());
 
       // TODO(b/62588075): Should we accumulate SpawnResults across test attempts instead of only
-      // returning the last set?
+      // returning the last list?
       return standaloneTestResult.spawnResults();
     } catch (IOException e) {
       actionExecutionContext.getEventHandler().handle(Event.error("Caught I/O exception: " + e));
@@ -351,7 +350,7 @@ public class StandaloneTestStrategy extends TestStrategy {
     long startTime = actionExecutionContext.getClock().currentTimeMillis();
     SpawnActionContext spawnActionContext =
         actionExecutionContext.getSpawnActionContext(action.getMnemonic());
-    Set<SpawnResult> spawnResults = ImmutableSet.of();
+    List<SpawnResult> spawnResults = ImmutableList.of();
     try {
       try {
         if (executionOptions.testOutput.equals(TestOutputFormat.STREAMED)) {
@@ -368,13 +367,20 @@ public class StandaloneTestStrategy extends TestStrategy {
             .setPassedLog(testLogPath.getPathString());
       } catch (SpawnExecException e) {
         // If this method returns normally, then the higher level will rerun the test (up to
-        // --flaky_test_attempts times). We don't catch any other ExecException here, so those never
-        // get retried.
+        // --flaky_test_attempts times).
+        if (e.isCatastrophic()) {
+          // Rethrow as the error was catastrophic and thus the build has to be halted.
+          throw e;
+        }
+        if (!e.getSpawnResult().setupSuccess()) {
+          // Rethrow as the test could not be run and thus there's no point in retrying.
+          throw e;
+        }
         builder
             .setTestPassed(false)
             .setStatus(e.hasTimedOut() ? BlazeTestStatus.TIMEOUT : BlazeTestStatus.FAILED)
             .addFailedLogs(testLogPath.getPathString());
-        spawnResults = ImmutableSet.of(e.getSpawnResult());
+        spawnResults = ImmutableList.of(e.getSpawnResult());
       } finally {
         long duration = actionExecutionContext.getClock().currentTimeMillis() - startTime;
         builder.setStartTimeMillisEpoch(startTime);

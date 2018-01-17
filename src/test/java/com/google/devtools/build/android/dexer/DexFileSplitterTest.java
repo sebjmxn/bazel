@@ -25,6 +25,7 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import java.io.IOException;
+import java.nio.file.DirectoryStream;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -99,6 +100,7 @@ public class DexFileSplitterTest {
     ImmutableList<Path> outputArchives =
         runDexSplitter(
             200,
+            /*inclusionFilterJar=*/ null,
             "main_dex_list",
             MAIN_DEX_LIST_FILE,
             /*minimalMainDex=*/ false,
@@ -117,6 +119,7 @@ public class DexFileSplitterTest {
     ImmutableList<Path> outputArchives =
         runDexSplitter(
             256 * 256,
+            /*inclusionFilterJar=*/ null,
             "minimal_main_dex",
             MAIN_DEX_LIST_FILE,
             /*minimalMainDex=*/ true,
@@ -127,6 +130,24 @@ public class DexFileSplitterTest {
     assertThat(dexEntries(outputArchives.get(0)))
         .containsExactlyElementsIn(expectedMainDexEntries());
     assertExpectedEntries(outputArchives, expectedEntries);
+  }
+
+  @Test
+  public void testInclusionFilterJar() throws Exception {
+    Path dexArchive = buildDexArchive();
+    Path dexArchive2 = buildDexArchive(INPUT_JAR2, "jar2.dex.zip");
+    ImmutableList<Path> outputArchives =
+        runDexSplitter(
+            256 * 256,
+            INPUT_JAR2,
+            "filtered",
+            /*mainDexList=*/ null,
+            /*minimalMainDex=*/ false,
+            dexArchive,
+            dexArchive2);
+
+    // Only expect entries from the Jar we filtered by
+    assertExpectedEntries(outputArchives, dexEntries(dexArchive2));
   }
 
   private static Iterable<String> expectedMainDexEntries() throws IOException {
@@ -146,6 +167,7 @@ public class DexFileSplitterTest {
     try {
       runDexSplitter(
           200,
+          /*inclusionFilterJar=*/ null,
           "should_fail",
           /*mainDexList=*/ null,
           /*minimalMainDex=*/ true,
@@ -183,6 +205,7 @@ public class DexFileSplitterTest {
       Path... dexArchives) throws IOException {
     return runDexSplitter(
         maxNumberOfIdxPerDex,
+        /*inclusionFilterJar=*/ null,
         outputRoot,
         /*mainDexList=*/ null,
         /*minimalMainDex=*/ false,
@@ -191,6 +214,7 @@ public class DexFileSplitterTest {
 
   private ImmutableList<Path> runDexSplitter(
       int maxNumberOfIdxPerDex,
+      @Nullable Path inclusionFilterJar,
       String outputRoot,
       @Nullable Path mainDexList,
       boolean minimalMainDex,
@@ -203,10 +227,11 @@ public class DexFileSplitterTest {
     options.maxNumberOfIdxPerDex = maxNumberOfIdxPerDex;
     options.mainDexListFile = mainDexList;
     options.minimalMainDex = minimalMainDex;
+    options.inclusionFilterJar = inclusionFilterJar;
     DexFileSplitter.splitIntoShards(options);
     assertThat(options.outputDirectory.toFile().exists()).isTrue();
-    ImmutableSet<Path> files =
-        ImmutableSet.copyOf(Files.newDirectoryStream(options.outputDirectory, "*.zip"));
+    ImmutableSet<Path> files = readFiles(options.outputDirectory, "*.zip");
+
     ImmutableList.Builder<Path> result = ImmutableList.builder();
     for (int i = 1; i <= files.size(); ++i) {
       Path path = options.outputDirectory.resolve(i + ".shard.zip");
@@ -214,6 +239,12 @@ public class DexFileSplitterTest {
       result.add(path);
     }
     return result.build(); // return expected files in sorted order
+  }
+
+  private static ImmutableSet<Path> readFiles(Path directory, String glob) throws IOException {
+    try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory, glob)) {
+      return ImmutableSet.copyOf(stream);
+    }
   }
 
   private Path buildDexArchive() throws Exception {

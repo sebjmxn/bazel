@@ -23,20 +23,21 @@ import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.ActionAnalysisMetadata;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionExecutionException;
+import com.google.devtools.build.lib.actions.ActionKeyContext;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.ActionResult;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ArtifactFactory;
 import com.google.devtools.build.lib.actions.ArtifactOwner;
+import com.google.devtools.build.lib.actions.ArtifactRoot;
 import com.google.devtools.build.lib.actions.ExecutionStrategy;
 import com.google.devtools.build.lib.actions.MiddlemanFactory;
 import com.google.devtools.build.lib.actions.MutableActionGraph;
 import com.google.devtools.build.lib.actions.MutableActionGraph.ActionConflictException;
-import com.google.devtools.build.lib.actions.Root;
 import com.google.devtools.build.lib.actions.util.ActionsTestUtil;
 import com.google.devtools.build.lib.analysis.AnalysisEnvironment;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
-import com.google.devtools.build.lib.analysis.OutputGroupProvider;
+import com.google.devtools.build.lib.analysis.OutputGroupInfo;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.TopLevelArtifactContext;
 import com.google.devtools.build.lib.analysis.WorkspaceStatusAction;
@@ -74,7 +75,7 @@ public final class AnalysisTestUtil {
   public static final TopLevelArtifactContext TOP_LEVEL_ARTIFACT_CONTEXT =
       new TopLevelArtifactContext(
           /*runTestsExclusively=*/false,
-          /*outputGroups=*/ImmutableSortedSet.copyOf(OutputGroupProvider.DEFAULT_GROUPS));
+          /*outputGroups=*/ImmutableSortedSet.copyOf(OutputGroupInfo.DEFAULT_GROUPS));
 
   /**
    * An {@link AnalysisEnvironment} implementation that collects the actions registered.
@@ -119,22 +120,22 @@ public final class AnalysisTestUtil {
     }
 
     @Override
-    public Artifact getDerivedArtifact(PathFragment rootRelativePath, Root root) {
+    public Artifact getDerivedArtifact(PathFragment rootRelativePath, ArtifactRoot root) {
       return original.getDerivedArtifact(rootRelativePath, root);
     }
 
     @Override
-    public Artifact getConstantMetadataArtifact(PathFragment rootRelativePath, Root root) {
+    public Artifact getConstantMetadataArtifact(PathFragment rootRelativePath, ArtifactRoot root) {
       return original.getConstantMetadataArtifact(rootRelativePath, root);
     }
 
     @Override
-    public Artifact getTreeArtifact(PathFragment rootRelativePath, Root root) {
+    public Artifact getTreeArtifact(PathFragment rootRelativePath, ArtifactRoot root) {
       return null;
     }
 
     @Override
-    public Artifact getFilesetArtifact(PathFragment rootRelativePath, Root root) {
+    public Artifact getFilesetArtifact(PathFragment rootRelativePath, ArtifactRoot root) {
       return original.getFilesetArtifact(rootRelativePath, root);
     }
 
@@ -189,6 +190,11 @@ public final class AnalysisTestUtil {
     public ImmutableSet<Artifact> getOrphanArtifacts() {
       return original.getOrphanArtifacts();
     }
+
+    @Override
+    public ActionKeyContext getActionKeyContext() {
+      return original.getActionKeyContext();
+    }
   }
 
   /** A dummy WorkspaceStatusAction. */
@@ -227,7 +233,7 @@ public final class AnalysisTestUtil {
     }
 
     @Override
-    public String computeKey() {
+    public String computeKey(ActionKeyContext actionKeyContext) {
       return "";
     }
 
@@ -320,12 +326,12 @@ public final class AnalysisTestUtil {
     }
 
     @Override
-    public Artifact getConstantMetadataArtifact(PathFragment rootRelativePath, Root root) {
+    public Artifact getConstantMetadataArtifact(PathFragment rootRelativePath, ArtifactRoot root) {
       return null;
     }
 
     @Override
-    public Artifact getTreeArtifact(PathFragment rootRelativePath, Root root) {
+    public Artifact getTreeArtifact(PathFragment rootRelativePath, ArtifactRoot root) {
       return null;
     }
 
@@ -360,12 +366,12 @@ public final class AnalysisTestUtil {
     }
 
     @Override
-    public Artifact getFilesetArtifact(PathFragment rootRelativePath, Root root) {
+    public Artifact getFilesetArtifact(PathFragment rootRelativePath, ArtifactRoot root) {
       return null;
     }
 
     @Override
-    public Artifact getDerivedArtifact(PathFragment rootRelativePath, Root root) {
+    public Artifact getDerivedArtifact(PathFragment rootRelativePath, ArtifactRoot root) {
       return null;
     }
 
@@ -393,6 +399,11 @@ public final class AnalysisTestUtil {
     @Override
     public ImmutableSet<Artifact> getOrphanArtifacts() {
       return ImmutableSet.<Artifact>of();
+    }
+
+    @Override
+    public ActionKeyContext getActionKeyContext() {
+      return null;
     }
   };
 
@@ -451,7 +462,7 @@ public final class AnalysisTestUtil {
 
     Set<String> files = new LinkedHashSet<>();
     for (Artifact artifact : artifacts) {
-      Root root = artifact.getRoot();
+      ArtifactRoot root = artifact.getRoot();
       if (root.isSourceRoot()) {
         files.add("src " + artifact.getRootRelativePath());
       } else {

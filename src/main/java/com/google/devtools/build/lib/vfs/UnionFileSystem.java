@@ -179,7 +179,7 @@ public class UnionFileSystem extends FileSystem {
   }
 
   @Override
-  protected boolean createDirectory(Path path) throws IOException {
+  public boolean createDirectory(Path path) throws IOException {
     checkModifiable(path);
     // When creating the exact directory that is mapped,
     // create it on both the parent's delegate and the path's delegate.
@@ -206,6 +206,13 @@ public class UnionFileSystem extends FileSystem {
   }
 
   @Override
+  public void createDirectoryAndParents(Path path) throws IOException {
+    checkModifiable(path);
+    FileSystem delegate = getDelegate(path);
+    delegate.createDirectoryAndParents(adjustPath(path, delegate));
+  }
+
+  @Override
   protected long getFileSize(Path path, boolean followSymlinks) throws IOException {
     path = followSymlinks ? internalResolveSymlink(path) : path;
     FileSystem delegate = getDelegate(path);
@@ -213,7 +220,7 @@ public class UnionFileSystem extends FileSystem {
   }
 
   @Override
-  protected boolean delete(Path path) throws IOException {
+  public boolean delete(Path path) throws IOException {
     checkModifiable(path);
     FileSystem delegate = getDelegate(path);
     return delegate.delete(adjustPath(path, delegate));
@@ -227,7 +234,7 @@ public class UnionFileSystem extends FileSystem {
   }
 
   @Override
-  protected void setLastModifiedTime(Path path, long newTime) throws IOException {
+  public void setLastModifiedTime(Path path, long newTime) throws IOException {
     path = internalResolveSymlink(path);
     checkModifiable(path);
     FileSystem delegate = getDelegate(path);
@@ -379,7 +386,7 @@ public class UnionFileSystem extends FileSystem {
   }
 
   @Override
-  protected void setWritable(Path path, boolean writable) throws IOException {
+  public void setWritable(Path path, boolean writable) throws IOException {
     checkModifiable(path);
     path = internalResolveSymlink(path);
     FileSystem delegate = getDelegate(path);
@@ -409,7 +416,7 @@ public class UnionFileSystem extends FileSystem {
   }
 
   @Override
-  protected byte[] getxattr(Path path, String name) throws IOException {
+  public byte[] getxattr(Path path, String name) throws IOException {
     path = internalResolveSymlink(path);
     FileSystem delegate = getDelegate(path);
     return delegate.getxattr(adjustPath(path, delegate), name);
@@ -431,7 +438,7 @@ public class UnionFileSystem extends FileSystem {
   }
 
   @Override
-  protected void renameTo(Path sourcePath, Path targetPath) throws IOException {
+  public void renameTo(Path sourcePath, Path targetPath) throws IOException {
     sourcePath = internalResolveSymlink(sourcePath);
     FileSystem sourceDelegate = getDelegate(sourcePath);
     if (!sourceDelegate.supportsModifications(sourcePath)) {

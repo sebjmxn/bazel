@@ -38,6 +38,7 @@ import com.google.devtools.build.lib.actions.ActionGraph;
 import com.google.devtools.build.lib.actions.ActionInput;
 import com.google.devtools.build.lib.actions.ActionInputFileCache;
 import com.google.devtools.build.lib.actions.ActionInputPrefetcher;
+import com.google.devtools.build.lib.actions.ActionKeyContext;
 import com.google.devtools.build.lib.actions.ActionLogBufferPathGenerator;
 import com.google.devtools.build.lib.actions.ActionLookupData;
 import com.google.devtools.build.lib.actions.ActionLookupValue;
@@ -69,12 +70,14 @@ import com.google.devtools.build.lib.concurrent.Sharder;
 import com.google.devtools.build.lib.concurrent.ThrowableRecordingRunnableWrapper;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
+import com.google.devtools.build.lib.events.ExtendedEventHandler;
 import com.google.devtools.build.lib.events.Reporter;
 import com.google.devtools.build.lib.profiler.Profiler;
 import com.google.devtools.build.lib.profiler.ProfilerTask;
 import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.build.lib.util.io.FileOutErr;
 import com.google.devtools.build.lib.util.io.OutErr;
+import com.google.devtools.build.lib.vfs.FileSystem;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.Symlinks;
@@ -113,8 +116,8 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
   // more detail.
   private static final Striped<Lock> outputDirectoryDeletionLock = Striped.lock(64);
 
+  private final ActionKeyContext actionKeyContext;
   private Reporter reporter;
-  private final AtomicReference<EventBus> eventBus;
   private Map<String, String> clientEnv = ImmutableMap.of();
   private Executor executorEngine;
   private ActionLogBufferPathGenerator actionLogBufferPathGenerator;
@@ -154,9 +157,9 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
   private OutputService outputService;
 
   SkyframeActionExecutor(
-      AtomicReference<EventBus> eventBus,
+      ActionKeyContext actionKeyContext,
       AtomicReference<ActionExecutionStatusReporter> statusReporterRef) {
-    this.eventBus = eventBus;
+    this.actionKeyContext = actionKeyContext;
     this.statusReporterRef = statusReporterRef;
   }
 
@@ -235,7 +238,8 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
     ConcurrentMap<ActionAnalysisMetadata, ConflictException> temporaryBadActionMap =
         new ConcurrentHashMap<>();
     Pair<ActionGraph, SortedMap<PathFragment, Artifact>> result;
-    result = constructActionGraphAndPathMap(actionLookupValues, temporaryBadActionMap);
+    result =
+        constructActionGraphAndPathMap(actionKeyContext, actionLookupValues, temporaryBadActionMap);
     ActionGraph actionGraph = result.first;
     SortedMap<PathFragment, Artifact> artifactPathMap = result.second;
 
@@ -251,16 +255,17 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
   }
 
   /**
-   * Simultaneously construct an action graph for all the actions in Skyframe and a map from
-   * {@link PathFragment}s to their respective {@link Artifact}s. We do this in a threadpool to save
-   * around 1.5 seconds on a mid-sized build versus a single-threaded operation.
+   * Simultaneously construct an action graph for all the actions in Skyframe and a map from {@link
+   * PathFragment}s to their respective {@link Artifact}s. We do this in a threadpool to save around
+   * 1.5 seconds on a mid-sized build versus a single-threaded operation.
    */
   private static Pair<ActionGraph, SortedMap<PathFragment, Artifact>>
       constructActionGraphAndPathMap(
+          ActionKeyContext actionKeyContext,
           Iterable<ActionLookupValue> values,
           ConcurrentMap<ActionAnalysisMetadata, ConflictException> badActionMap)
-      throws InterruptedException {
-    MutableActionGraph actionGraph = new MapBasedActionGraph();
+          throws InterruptedException {
+    MutableActionGraph actionGraph = new MapBasedActionGraph(actionKeyContext);
     ConcurrentNavigableMap<PathFragment, Artifact> artifactPathMap = new ConcurrentSkipListMap<>();
     // Action graph construction is CPU-bound.
     int numJobs = Runtime.getRuntime().availableProcessors();
@@ -309,8 +314,8 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
                 actionGraph.registerAction(action);
               } catch (ActionConflictException e) {
                 Exception oldException = badActionMap.put(action, new ConflictException(e));
-                Preconditions.checkState(oldException == null,
-                  "%s | %s | %s", action, e, oldException);
+                Preconditions.checkState(
+                    oldException == null, "%s | %s | %s", action, e, oldException);
                 // We skip the rest of the loop, and do not add the path->artifact mapping for this
                 // artifact below -- we don't need to check it since this action is already in
                 // error.
@@ -378,6 +383,7 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
    * <p>For use from {@link ArtifactFunction} only.
    */
   ActionExecutionValue executeAction(
+      ExtendedEventHandler eventHandler,
       Action action,
       ActionMetadataHandler metadataHandler,
       long actionStartTime,
@@ -393,6 +399,7 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
     FutureTask<ActionExecutionValue> actionTask =
         new FutureTask<>(
             new ActionRunner(
+                eventHandler,
                 action,
                 metadataHandler,
                 actionStartTime,
@@ -468,6 +475,7 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
         executorEngine,
         new DelegatingPairFileCache(graphFileCache, perBuildFileCache),
         actionInputPrefetcher,
+        actionKeyContext,
         metadataHandler,
         fileOutErr,
         clientEnv,
@@ -481,6 +489,7 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
    * should be provided to the ActionCacheChecker after execution.
    */
   Token checkActionCache(
+      ExtendedEventHandler eventHandler,
       Action action,
       MetadataHandler metadataHandler,
       long actionStartTime,
@@ -495,40 +504,46 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
       boolean eventPosted = false;
       // Notify BlazeRuntimeStatistics about the action middleman 'execution'.
       if (action.getActionType().isMiddleman()) {
-        postEvent(new ActionMiddlemanEvent(action, actionStartTime));
+        eventHandler.post(new ActionMiddlemanEvent(action, actionStartTime));
         eventPosted = true;
       }
 
       if (action instanceof NotifyOnActionCacheHit) {
         NotifyOnActionCacheHit notify = (NotifyOnActionCacheHit) action;
-        ActionCachedContext context = new ActionCachedContext() {
-          @Override
-          public EventHandler getEventHandler() {
-            return executorEngine.getEventHandler();
-          }
+        ActionCachedContext context =
+            new ActionCachedContext() {
+              @Override
+              public EventHandler getEventHandler() {
+                return executorEngine.getEventHandler();
+              }
 
-          @Override
-          public EventBus getEventBus() {
-            return executorEngine.getEventBus();
-          }
+              @Override
+              public EventBus getEventBus() {
+                return executorEngine.getEventBus();
+              }
 
-          @Override
-          public Path getExecRoot() {
-            return executorEngine.getExecRoot();
-          }
+              @Override
+              public FileSystem getFileSystem() {
+                return executorEngine.getFileSystem();
+              }
 
-          @Override
-          public <T extends ActionContext> T getContext(Class<? extends T> type) {
-            return executorEngine.getContext(type);
-          }
-        };
+              @Override
+              public Path getExecRoot() {
+                return executorEngine.getExecRoot();
+              }
+
+              @Override
+              public <T extends ActionContext> T getContext(Class<? extends T> type) {
+                return executorEngine.getContext(type);
+              }
+            };
         notify.actionCacheHit(context);
       }
 
       // We still need to check the outputs so that output file data is available to the value.
       checkOutputs(action, metadataHandler);
       if (!eventPosted) {
-        postEvent(new CachedActionEvent(action, actionStartTime));
+        eventHandler.post(new CachedActionEvent(action, actionStartTime));
       }
     }
     return token;
@@ -569,14 +584,18 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
    * <p>This method is just a wrapper around {@link Action#discoverInputs} that properly processes
    * any ActionExecutionException thrown before rethrowing it to the caller.
    */
-  Iterable<Artifact> discoverInputs(Action action, PerActionFileCache graphFileCache,
-      MetadataHandler metadataHandler, Environment env)
+  Iterable<Artifact> discoverInputs(
+      Action action,
+      PerActionFileCache graphFileCache,
+      MetadataHandler metadataHandler,
+      Environment env)
       throws ActionExecutionException, InterruptedException {
     ActionExecutionContext actionExecutionContext =
         ActionExecutionContext.forInputDiscovery(
             executorEngine,
             new DelegatingPairFileCache(graphFileCache, perBuildFileCache),
             actionInputPrefetcher,
+            actionKeyContext,
             metadataHandler,
             actionLogBufferPathGenerator.generate(),
             clientEnv,
@@ -585,7 +604,11 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
       return action.discoverInputs(actionExecutionContext);
     } catch (ActionExecutionException e) {
       throw processAndThrow(
-          e, action, actionExecutionContext.getFileOutErr(), ErrorTiming.BEFORE_EXECUTION);
+          env.getListener(),
+          e,
+          action,
+          actionExecutionContext.getFileOutErr(),
+          ErrorTiming.BEFORE_EXECUTION);
     }
   }
 
@@ -618,6 +641,7 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
   }
 
   private class ActionRunner implements Callable<ActionExecutionValue> {
+    private final ExtendedEventHandler eventHandler;
     private final Action action;
     private final ActionMetadataHandler metadataHandler;
     private long actionStartTime;
@@ -625,11 +649,13 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
     private final ActionLookupData actionLookupData;
 
     ActionRunner(
+        ExtendedEventHandler eventHandler,
         Action action,
         ActionMetadataHandler metadataHandler,
         long actionStartTime,
         ActionExecutionContext actionExecutionContext,
         ActionLookupData actionLookupData) {
+      this.eventHandler = eventHandler;
       this.action = action;
       this.metadataHandler = metadataHandler;
       this.actionStartTime = actionStartTime;
@@ -661,7 +687,7 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
         Preconditions.checkState(actionExecutionContext.getMetadataHandler() == metadataHandler,
             "%s %s", actionExecutionContext.getMetadataHandler(), metadataHandler);
         prepareScheduleExecuteAndCompleteAction(
-            action, actionExecutionContext, actionStartTime, actionLookupData);
+            eventHandler, action, actionExecutionContext, actionStartTime, actionLookupData);
         return new ActionExecutionValue(
             metadataHandler.getOutputArtifactData(),
             metadataHandler.getOutputTreeArtifactData(),
@@ -773,6 +799,7 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
    * @throws InterruptedException if the thread was interrupted.
    */
   private void prepareScheduleExecuteAndCompleteAction(
+      ExtendedEventHandler eventHandler,
       Action action,
       ActionExecutionContext context,
       long actionStartTime,
@@ -787,23 +814,32 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
       reportError("failed to delete output files before executing action", e, action, null);
     }
 
-    postEvent(new ActionStartedEvent(action, actionStartTime));
+    eventHandler.post(new ActionStartedEvent(action, actionStartTime));
     ActionExecutionStatusReporter statusReporter = statusReporterRef.get();
     try {
       // Mark the current action as being prepared.
       statusReporter.updateStatus(ActionStatusMessage.preparingStrategy(action));
-      boolean outputDumped = executeActionTask(action, context);
-      completeAction(action, context.getMetadataHandler(), context.getFileOutErr(), outputDumped);
+      boolean outputDumped = executeActionTask(eventHandler, action, context);
+      completeAction(
+          eventHandler,
+          action,
+          context.getMetadataHandler(),
+          context.getFileOutErr(),
+          outputDumped);
     } finally {
       statusReporter.remove(action);
-      postEvent(new ActionCompletionEvent(actionStartTime, action, actionLookupData));
+      eventHandler.post(new ActionCompletionEvent(actionStartTime, action, actionLookupData));
     }
   }
 
   private ActionExecutionException processAndThrow(
-      ActionExecutionException e, Action action, FileOutErr outErrBuffer, ErrorTiming errorTiming)
-      throws ActionExecutionException {
-    reportActionExecution(action, e, outErrBuffer, errorTiming);
+      ExtendedEventHandler eventHandler,
+      ActionExecutionException e,
+      Action action,
+      FileOutErr outErrBuffer,
+      ErrorTiming errorTiming)
+          throws ActionExecutionException {
+    reportActionExecution(eventHandler, action, e, outErrBuffer, errorTiming);
     boolean reported = reportErrorIfNotAbortingMode(e, outErrBuffer);
 
     ActionExecutionException toThrow = e;
@@ -841,8 +877,11 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
    * @throws InterruptedException if the thread was interrupted.
    * @return true if the action output was dumped, false otherwise.
    */
-  private boolean executeActionTask(Action action, ActionExecutionContext actionExecutionContext)
-      throws ActionExecutionException, InterruptedException {
+  private boolean executeActionTask(
+      ExtendedEventHandler eventHandler,
+      Action action,
+      ActionExecutionContext actionExecutionContext)
+          throws ActionExecutionException, InterruptedException {
     profiler.startTask(ProfilerTask.ACTION_EXECUTE, action);
     // ActionExecutionExceptions that occur as the thread is interrupted are
     // assumed to be a result of that, so we throw InterruptedException
@@ -851,7 +890,7 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
     try {
       ActionResult actionResult = action.execute(actionExecutionContext);
       if (actionResult != ActionResult.EMPTY) {
-        postEvent(new ActionResultReceivedEvent(action, actionResult));
+        eventHandler.post(new ActionResultReceivedEvent(action, actionResult));
       }
 
       // Action terminated fine, now report the output.
@@ -865,14 +904,18 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
       }
       // Defer reporting action success until outputs are checked
     } catch (ActionExecutionException e) {
-      throw processAndThrow(e, action, outErrBuffer, ErrorTiming.AFTER_EXECUTION);
+      throw processAndThrow(eventHandler, e, action, outErrBuffer, ErrorTiming.AFTER_EXECUTION);
     } finally {
       profiler.completeTask(ProfilerTask.ACTION_EXECUTE);
     }
     return false;
   }
 
-  private void completeAction(Action action, MetadataHandler metadataHandler, FileOutErr fileOutErr,
+  private void completeAction(
+      ExtendedEventHandler eventHandler,
+      Action action,
+      MetadataHandler metadataHandler,
+      FileOutErr fileOutErr,
       boolean outputAlreadyDumped) throws ActionExecutionException {
     try {
       Preconditions.checkState(action.inputsDiscovered(),
@@ -896,14 +939,16 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
         }
       }
 
-      reportActionExecution(action, null, fileOutErr, ErrorTiming.NO_ERROR);
+      reportActionExecution(eventHandler, action, null, fileOutErr, ErrorTiming.NO_ERROR);
     } catch (ActionExecutionException actionException) {
       // Success in execution but failure in completion.
-      reportActionExecution(action, actionException, fileOutErr, ErrorTiming.AFTER_EXECUTION);
+      reportActionExecution(
+          eventHandler, action, actionException, fileOutErr, ErrorTiming.AFTER_EXECUTION);
       throw actionException;
     } catch (IllegalStateException exception) {
       // More serious internal error, but failure still reported.
       reportActionExecution(
+          eventHandler,
           action,
           new ActionExecutionException(exception, action, true),
           fileOutErr,
@@ -976,13 +1021,6 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
       }
     }
     return success;
-  }
-
-  private void postEvent(Object event) {
-    EventBus bus = eventBus.get();
-    if (bus != null) {
-      bus.post(event);
-    }
   }
 
   /**
@@ -1085,6 +1123,7 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
   }
 
   private void reportActionExecution(
+      ExtendedEventHandler eventHandler,
       Action action,
       ActionExecutionException exception,
       FileOutErr outErr,
@@ -1098,7 +1137,7 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
     if (outErr.hasRecordedStderr()) {
       stderr = outErr.getErrorPath();
     }
-    postEvent(new ActionExecutedEvent(action, exception, stdout, stderr, errorTiming));
+    eventHandler.post(new ActionExecutedEvent(action, exception, stdout, stderr, errorTiming));
   }
 
   /**

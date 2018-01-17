@@ -14,6 +14,7 @@
 
 package com.google.devtools.build.lib.sandbox;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSet.Builder;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
@@ -21,6 +22,9 @@ import com.google.devtools.build.lib.actions.ActionInput;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Artifact.ArtifactExpander;
 import com.google.devtools.build.lib.actions.Spawn;
+import com.google.devtools.build.lib.actions.Spawns;
+import com.google.devtools.build.lib.actions.cache.VirtualActionInput;
+import com.google.devtools.build.lib.actions.cache.VirtualActionInput.EmptyActionInput;
 import com.google.devtools.build.lib.analysis.test.TestConfiguration;
 import com.google.devtools.build.lib.exec.SpawnInputExpander;
 import com.google.devtools.build.lib.exec.SpawnRunner.SpawnExecutionPolicy;
@@ -96,8 +100,12 @@ public final class SandboxHelpers {
 
     Map<PathFragment, Path> inputFiles = new TreeMap<>();
     for (Map.Entry<PathFragment, ActionInput> e : inputMap.entrySet()) {
+      if (e.getValue() instanceof VirtualActionInput) {
+        // TODO(ulfjack): Handle all virtual inputs, e.g., by writing them to a file.
+        Preconditions.checkState(e.getValue() instanceof EmptyActionInput);
+      }
       Path inputPath =
-          e.getValue() == SpawnInputExpander.EMPTY_FILE
+          e.getValue() instanceof EmptyActionInput
               ? null
               : execRoot.getRelative(e.getValue().getExecPath());
       inputFiles.put(e.getKey(), inputPath);
@@ -115,7 +123,7 @@ public final class SandboxHelpers {
 
   /**
    * Returns true if the build options are set in a way that requires network access for all
-   * actions. This is separate from {@link #shouldAllowNetwork(Spawn)} to avoid having to keep a
+   * actions. This is separate from {@link Spawns#requiresNetwork} to avoid having to keep a
    * reference to the full set of build options (and also for performance, since this only needs to
    * be checked once-per-build).
    */
@@ -127,16 +135,5 @@ public final class SandboxHelpers {
         .getOptions(TestConfiguration.TestOptions.class)
         .testArguments
         .contains("--wrapper_script_flag=--debug");
-  }
-
-  /** Returns true if this specific spawn requires network access. */
-  static boolean shouldAllowNetwork(Spawn spawn) {
-    // If the Spawn requests to block network access, do so.
-    if (spawn.getExecutionInfo().containsKey("block-network")) {
-      return false;
-    }
-
-    // Network access is allowed by default.
-    return true;
   }
 }

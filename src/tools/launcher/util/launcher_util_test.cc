@@ -73,14 +73,19 @@ TEST_F(LaunchUtilTest, GetBinaryPathWithExtensionTest) {
 }
 
 TEST_F(LaunchUtilTest, GetEscapedArgumentTest) {
-  ASSERT_EQ("foo", GetEscapedArgument("foo"));
-  ASSERT_EQ("\"foo bar\"", GetEscapedArgument("foo bar"));
-  ASSERT_EQ("\"\\\"foo bar\\\"\"", GetEscapedArgument("\"foo bar\""));
-  ASSERT_EQ("foo\\\\bar", GetEscapedArgument("foo\\bar"));
-  ASSERT_EQ("foo\\\"bar", GetEscapedArgument("foo\"bar"));
-  ASSERT_EQ("C:\\\\foo\\\\bar\\\\", GetEscapedArgument("C:\\foo\\bar\\"));
+  ASSERT_EQ("foo", GetEscapedArgument("foo", true));
+  ASSERT_EQ("\"foo bar\"", GetEscapedArgument("foo bar", true));
+  ASSERT_EQ("\"\\\"foo bar\\\"\"", GetEscapedArgument("\"foo bar\"", true));
+  ASSERT_EQ("foo\\\\bar", GetEscapedArgument("foo\\bar", true));
+  ASSERT_EQ("foo\\\"bar", GetEscapedArgument("foo\"bar", true));
+  ASSERT_EQ("C:\\\\foo\\\\bar\\\\", GetEscapedArgument("C:\\foo\\bar\\", true));
   ASSERT_EQ("\"C:\\\\foo foo\\\\bar\\\\\"",
-            GetEscapedArgument("C:\\foo foo\\bar\\"));
+            GetEscapedArgument("C:\\foo foo\\bar\\", true));
+
+  ASSERT_EQ("foo\\bar", GetEscapedArgument("foo\\bar", false));
+  ASSERT_EQ("C:\\foo\\bar\\", GetEscapedArgument("C:\\foo\\bar\\", false));
+  ASSERT_EQ("\"C:\\foo foo\\bar\\\"",
+            GetEscapedArgument("C:\\foo foo\\bar\\", false));
 }
 
 TEST_F(LaunchUtilTest, DoesFilePathExistTest) {
@@ -106,6 +111,68 @@ TEST_F(LaunchUtilTest, SetAndGetEnvTest) {
   ASSERT_EQ(value, "bar");
   SetEnv("FOO", "");
   ASSERT_FALSE(GetEnv("FOO", &value));
+}
+
+TEST_F(LaunchUtilTest, NormalizePathTest) {
+  string value;
+  ASSERT_TRUE(NormalizePath("C:\\foo\\bar\\", &value));
+  ASSERT_EQ("c:\\foo\\bar", value);
+  ASSERT_TRUE(NormalizePath("c:/foo/bar/", &value));
+  ASSERT_EQ("c:\\foo\\bar", value);
+  ASSERT_TRUE(NormalizePath("FoO\\\\bAr\\", &value));
+  ASSERT_EQ("foo\\bar", value);
+  ASSERT_TRUE(NormalizePath("X\\Y/Z\\", &value));
+  ASSERT_EQ("x\\y\\z", value);
+  ASSERT_TRUE(NormalizePath("c://foo//bar", &value));
+  ASSERT_EQ("c:\\foo\\bar", value);
+  ASSERT_FALSE(NormalizePath("c:foo\\bar", &value));
+}
+
+TEST_F(LaunchUtilTest, RelativeToTest) {
+  string value;
+  ASSERT_TRUE(RelativeTo("c:\\foo\\bar1", "c:\\foo\\bar2", &value));
+  ASSERT_EQ("..\\bar1", value);
+  ASSERT_TRUE(RelativeTo("c:\\foo\\bar", "c:\\", &value));
+  ASSERT_EQ("foo\\bar", value);
+  ASSERT_TRUE(RelativeTo("c:\\foo\\bar", "c:\\foo\\bar", &value));
+  ASSERT_EQ("", value);
+  ASSERT_TRUE(RelativeTo("c:\\foo\\bar", "c:\\foo", &value));
+  ASSERT_EQ("bar", value);
+  ASSERT_TRUE(RelativeTo("c:\\foo\\bar", "c:\\foo\\ba", &value));
+  ASSERT_EQ("..\\bar", value);
+  ASSERT_TRUE(RelativeTo("c:\\", "c:\\foo", &value));
+  ASSERT_EQ("..\\", value);
+  ASSERT_TRUE(RelativeTo("c:\\", "c:\\a\\b\\c", &value));
+  ASSERT_EQ("..\\..\\..\\", value);
+  ASSERT_TRUE(RelativeTo("c:\\aa\\bb\\cc", "c:\\a\\b", &value));
+  ASSERT_EQ("..\\..\\aa\\bb\\cc", value);
+
+  ASSERT_TRUE(RelativeTo("foo\\bar", "foo\\bar", &value));
+  ASSERT_EQ("", value);
+  ASSERT_TRUE(RelativeTo("foo\\bar1", "foo\\bar2", &value));
+  ASSERT_EQ("..\\bar1", value);
+  ASSERT_TRUE(RelativeTo("foo\\bar1", "foo\\bar", &value));
+  ASSERT_EQ("..\\bar1", value);
+  ASSERT_TRUE(RelativeTo("foo\\bar1", "foo", &value));
+  ASSERT_EQ("bar1", value);
+  ASSERT_TRUE(RelativeTo("foo\\bar1", "fo", &value));
+  ASSERT_EQ("..\\foo\\bar1", value);
+  ASSERT_TRUE(RelativeTo("foo\\ba", "foo\\bar", &value));
+  ASSERT_EQ("..\\ba", value);
+  ASSERT_TRUE(RelativeTo("foo", "foo\\bar", &value));
+  ASSERT_EQ("..\\", value);
+  ASSERT_TRUE(RelativeTo("fo", "foo\\bar", &value));
+  ASSERT_EQ("..\\..\\fo", value);
+  ASSERT_TRUE(RelativeTo("", "foo\\bar", &value));
+  ASSERT_EQ("..\\..\\", value);
+  ASSERT_TRUE(RelativeTo("foo\\bar", "", &value));
+  ASSERT_EQ("foo\\bar", value);
+  ASSERT_TRUE(RelativeTo("a\\b\\c", "x\\y", &value));
+  ASSERT_EQ("..\\..\\a\\b\\c", value);
+
+  ASSERT_FALSE(RelativeTo("c:\\foo\\bar1", "foo\\bar2", &value));
+  ASSERT_FALSE(RelativeTo("c:foo\\bar1", "c:\\foo\\bar2", &value));
+  ASSERT_FALSE(RelativeTo("c:\\foo\\bar1", "d:\\foo\\bar2", &value));
 }
 
 }  // namespace launcher

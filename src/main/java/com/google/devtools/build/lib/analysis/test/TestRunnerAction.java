@@ -25,6 +25,7 @@ import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionExecutionException;
 import com.google.devtools.build.lib.actions.ActionInput;
 import com.google.devtools.build.lib.actions.ActionInputHelper;
+import com.google.devtools.build.lib.actions.ActionKeyContext;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.ActionResult;
 import com.google.devtools.build.lib.actions.Artifact;
@@ -229,7 +230,8 @@ public class TestRunnerAction extends AbstractAction implements NotifyOnActionCa
   }
 
   @Override
-  protected String computeKey() throws CommandLineExpansionException {
+  protected String computeKey(ActionKeyContext actionKeyContext)
+      throws CommandLineExpansionException {
     Fingerprint f = new Fingerprint();
     f.addString(GUID);
     f.addStrings(executionSettings.getArgs().arguments());
@@ -463,8 +465,19 @@ public class TestRunnerAction extends AbstractAction implements NotifyOnActionCa
       env.put("COVERAGE_MANIFEST", getCoverageManifest().getExecPathString());
       env.put("COVERAGE_DIR", getCoverageDirectory().getPathString());
       env.put("COVERAGE_OUTPUT_FILE", getCoverageData().getExecPathString());
-      // TODO(elenairina): Remove this after the next blaze release (after 2017.07.30).
-      env.put("NEW_JAVA_COVERAGE_IMPL", "True");
+      // TODO(elenairina): Remove this after it reaches a blaze release.
+      if (configuration.isExperimentalJavaCoverage()) {
+        // This value ("released") tells lcov_merger whether it should use the old or the new
+        // java  coverage implementation. The meaning of "released" is that lcov_merger will receive
+        // this value only after blaze containing this change will be released.
+        env.put("NEW_JAVA_COVERAGE_IMPL", "released");
+      } else {
+        // This value ("True") should have told lcov_merger whether it should use the old or the new
+        // java  coverage implementation. Due to several failed attempts at submitting the new 
+        // implementation, this value will be treated still as the old implementation. This 
+        // environment variable must be set to a value recognized by lcov_merger.
+        env.put("NEW_JAVA_COVERAGE_IMPL", "True");
+      }
     }
   }
 

@@ -16,11 +16,9 @@ package com.google.devtools.build.lib.rules.repository;
 
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
+import com.google.devtools.build.lib.packages.BuildFileName;
 import com.google.devtools.build.lib.packages.Rule;
-import com.google.devtools.build.lib.skyframe.FileSymlinkException;
 import com.google.devtools.build.lib.skyframe.FileValue;
-import com.google.devtools.build.lib.skyframe.InconsistentFilesystemException;
-import com.google.devtools.build.lib.skyframe.PackageLookupValue;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.RootedPath;
@@ -98,21 +96,13 @@ public class LocalRepositoryFunction extends RepositoryFunction {
     RootedPath workspaceRootedFile =
         RootedPath.toRootedPath(
             directory.getRoot(),
-            directory
-                .getRelativePath()
-                .getRelative(PackageLookupValue.BuildFileName.WORKSPACE.getFilenameFragment()));
+            directory.getRelativePath().getRelative(BuildFileName.WORKSPACE.getFilenameFragment()));
 
     SkyKey workspaceFileKey = FileValue.key(workspaceRootedFile);
     FileValue value;
     try {
-      value =
-          (FileValue)
-              env.getValueOrThrow(
-                  workspaceFileKey,
-                  IOException.class,
-                  FileSymlinkException.class,
-                  InconsistentFilesystemException.class);
-    } catch (IOException | FileSymlinkException | InconsistentFilesystemException e) {
+      value = (FileValue) env.getValueOrThrow(workspaceFileKey, IOException.class);
+    } catch (IOException e) {
       throw new RepositoryFunctionException(
           new IOException("Could not access " + workspaceRootedFile + ": " + e.getMessage()),
           Transience.PERSISTENT);

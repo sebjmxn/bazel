@@ -15,16 +15,16 @@ package com.google.devtools.build.lib.rules.android;
 
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.analysis.OutputGroupProvider;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
 import com.google.devtools.build.lib.analysis.actions.SymlinkAction;
+import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.packages.RuleClass.ConfiguredTargetFactory.RuleErrorException;
 import com.google.devtools.build.lib.rules.java.JavaCompilationArtifacts;
 import com.google.devtools.build.lib.rules.java.JavaSemantics;
 import com.google.devtools.build.lib.rules.java.JavaTargetAttributes;
-import javax.annotation.Nullable;
+import com.google.devtools.build.lib.rules.java.ProguardHelper.ProguardOutput;
 
 /**
  * Pluggable semantics for Android rules.
@@ -34,26 +34,8 @@ import javax.annotation.Nullable;
  */
 public interface AndroidSemantics {
   /**
-   * Name of the output group used for idl jars (the jars containing the class files for sources
-   * generated from annotation processors).
-   */
-  String IDL_JARS_OUTPUT_GROUP =
-      OutputGroupProvider.HIDDEN_OUTPUT_GROUP_PREFIX + "idl_jars";
-
-  /**
-   * Add additional resources to IDE info for {@code android_binary} and {@code android_library}
-   *
-   * @param ruleContext rule context for target rule
-   * @param resourceApk resource apk directly provided by the rule
-   * @param ideInfoProviderBuilder
-   */
-  void addNonLocalResources(
-      RuleContext ruleContext,
-      @Nullable ResourceApk resourceApk,
-      AndroidIdeInfoProvider.Builder ideInfoProviderBuilder);
-
-  /**
    * Returns the manifest to be used when compiling a given rule.
+   *
    * @throws InterruptedException
    */
   default ApplicationManifest getManifestForRule(RuleContext ruleContext)
@@ -77,9 +59,7 @@ public interface AndroidSemantics {
     }
   }
 
-  /**
-   * Returns the name of the file in which the file names of native dependencies are listed.
-   */
+  /** Returns the name of the file in which the file names of native dependencies are listed. */
   String getNativeDepsFileName();
 
   /**
@@ -108,14 +88,33 @@ public interface AndroidSemantics {
 
   /**
    * Add coverage instrumentation to the Java compilation of an Android binary.
+   *
    * @throws InterruptedException
    */
-  void addCoverageSupport(RuleContext ruleContext, AndroidCommon common,
-      JavaSemantics javaSemantics, boolean forAndroidTest, JavaTargetAttributes.Builder attributes,
-      JavaCompilationArtifacts.Builder artifactsBuilder) throws InterruptedException;
+  void addCoverageSupport(
+      RuleContext ruleContext,
+      AndroidCommon common,
+      JavaSemantics javaSemantics,
+      boolean forAndroidTest,
+      JavaTargetAttributes.Builder attributes,
+      JavaCompilationArtifacts.Builder artifactsBuilder)
+      throws InterruptedException;
 
-  /**
-   * Returns the list of attributes that may contribute Java runtime dependencies.
-   */
+  /** Returns the list of attributes that may contribute Java runtime dependencies. */
   ImmutableList<String> getAttributesWithJavaRuntimeDeps(RuleContext ruleContext);
+
+  /** A hook for checks of internal-only or external-only attributes of {@code android_binary}. */
+  default void validateAndroidBinaryRuleContext(RuleContext ruleContext) throws RuleErrorException {
+  }
+
+  /** The artifact for the map that proguard will output. */
+  Artifact getProguardOutputMap(RuleContext ruleContext) throws InterruptedException;
+
+  /** Maybe post process the dex files and proguard output map. */
+  AndroidBinary.DexPostprocessingOutput postprocessClassesDexZip(
+      RuleContext ruleContext,
+      NestedSetBuilder<Artifact> filesBuilder,
+      Artifact classesDexZip,
+      ProguardOutput proguardOutput)
+      throws InterruptedException;
 }

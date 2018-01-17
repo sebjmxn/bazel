@@ -23,6 +23,7 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
+import com.google.devtools.build.lib.actions.ActionKeyContext;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
@@ -32,6 +33,7 @@ import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.Runfiles;
 import com.google.devtools.build.lib.analysis.RunfilesProvider;
 import com.google.devtools.build.lib.analysis.actions.AbstractFileWriteAction;
+import com.google.devtools.build.lib.analysis.actions.AbstractFileWriteAction.DeterministicWriter;
 import com.google.devtools.build.lib.analysis.actions.ByteStringDeterministicWriter;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.PackageIdentifier;
@@ -47,6 +49,7 @@ import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
 import com.google.devtools.build.lib.packages.NoSuchTargetException;
 import com.google.devtools.build.lib.packages.Package;
+import com.google.devtools.build.lib.packages.RuleClass.ConfiguredTargetFactory.RuleErrorException;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.pkgcache.FilteringPolicies;
 import com.google.devtools.build.lib.pkgcache.FilteringPolicy;
@@ -66,6 +69,7 @@ import com.google.devtools.build.lib.query2.output.OutputFormatter;
 import com.google.devtools.build.lib.query2.output.QueryOptions;
 import com.google.devtools.build.lib.query2.output.QueryOptions.OrderOutput;
 import com.google.devtools.build.lib.query2.output.QueryOutputUtils;
+import com.google.devtools.build.lib.runtime.KeepGoingOption;
 import com.google.devtools.build.lib.skyframe.PackageValue;
 import com.google.devtools.build.lib.skyframe.PrecomputedValue.Precomputed;
 import com.google.devtools.build.lib.skyframe.SkyFunctions;
@@ -76,6 +80,7 @@ import com.google.devtools.build.lib.skyframe.TransitiveTargetValue;
 import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.Fingerprint;
 import com.google.devtools.build.lib.util.Pair;
+import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.skyframe.LegacySkyKey;
 import com.google.devtools.build.skyframe.SkyFunction;
@@ -112,7 +117,8 @@ public class GenQuery implements RuleConfiguredTargetFactory {
     // The query string
     final String query = ruleContext.attributes().get("expression", Type.STRING);
 
-    OptionsParser optionsParser = OptionsParser.newOptionsParser(QueryOptions.class);
+    OptionsParser optionsParser =
+        OptionsParser.newOptionsParser(QueryOptions.class, KeepGoingOption.class);
     optionsParser.setAllowResidue(false);
     try {
       optionsParser.parse(ruleContext.attributes().get("opts", Type.STRING_LIST));
@@ -123,7 +129,7 @@ public class GenQuery implements RuleConfiguredTargetFactory {
 
     // Parsed query options
     QueryOptions queryOptions = optionsParser.getOptions(QueryOptions.class);
-    if (queryOptions.keepGoing) {
+    if (optionsParser.getOptions(KeepGoingOption.class).keepGoing) {
       ruleContext.attributeError("opts", "option --keep_going is not allowed");
       return null;
     }
@@ -375,7 +381,7 @@ public class GenQuery implements RuleConfiguredTargetFactory {
     }
 
     @Override
-    protected String computeKey() {
+    protected String computeKey(ActionKeyContext actionKeyContext) {
       Fingerprint f = new Fingerprint();
       f.addBytes(result.toByteArray());
       return f.hexDigestAndReset();
@@ -558,6 +564,15 @@ public class GenQuery implements RuleConfiguredTargetFactory {
     @Override
     public boolean isPackage(ExtendedEventHandler eventHandler, PackageIdentifier packageName) {
       throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Path getBuildFileForPackage(PackageIdentifier packageId) {
+      Package pkg = pkgMap.get(packageId);
+      if (pkg == null) {
+        return null;
+      }
+      return pkg.getBuildFile().getPath();
     }
   }
 

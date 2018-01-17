@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.rules.android;
 import com.android.resources.ResourceFolderType;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.actions.Artifact;
@@ -43,15 +44,16 @@ import javax.annotation.Nullable;
  */
 @Immutable
 public final class LocalResourceContainer {
-  public static final String[] RESOURCES_ATTRIBUTES = new String[] {
-      "manifest",
-      "resource_files",
-      "local_resource_files",
-      "assets",
-      "assets_dir",
-      "inline_constants",
-      "exports_manifest"
-  };
+  public static final String[] RESOURCES_ATTRIBUTES =
+      new String[] {
+        "manifest",
+        "resource_files",
+        "local_resource_files",
+        "assets",
+        "assets_dir",
+        "inline_constants",
+        "exports_manifest"
+      };
 
   /** Set of allowable android directories prefixes. */
   public static final ImmutableSet<String> RESOURCE_DIRECTORY_TYPES =
@@ -65,9 +67,7 @@ public final class LocalResourceContainer {
               + "<resource directory>/{%s}/<file>",
           Joiner.on(',').join(RESOURCE_DIRECTORY_TYPES));
 
-  /**
-   * Determines if the attributes contain resource and asset attributes.
-   */
+  /** Determines if the attributes contain resource and asset attributes. */
   public static boolean definesAndroidResources(AttributeMap attributes) {
     for (String attribute : RESOURCES_ATTRIBUTES) {
       if (attributes.isAttributeValueExplicitlySpecified(attribute)) {
@@ -79,13 +79,12 @@ public final class LocalResourceContainer {
 
   /**
    * Checks validity of a RuleContext to produce an AndroidData.
-   * 
+   *
    * @throws RuleErrorException if the RuleContext is invalid. Accumulated errors will be available
    *     via {@code ruleContext}
    */
   public static void validateRuleContext(RuleContext ruleContext) throws RuleErrorException {
     validateAssetsAndAssetsDir(ruleContext);
-    validateNoResourcesAttribute(ruleContext);
     validateNoAndroidResourcesInSources(ruleContext);
     validateManifest(ruleContext);
   }
@@ -100,19 +99,7 @@ public final class LocalResourceContainer {
   }
 
   /**
-   * Validates that there are no resources defined if there are resource attributes defined.
-   */
-  private static void validateNoResourcesAttribute(RuleContext ruleContext)
-      throws RuleErrorException {
-    if (ruleContext.attributes().isAttributeValueExplicitlySpecified("resources")) {
-      ruleContext.throwWithAttributeError("resources",
-          String.format("resources cannot be set when any of %s are defined.",
-              Joiner.on(", ").join(RESOURCES_ATTRIBUTES)));
-    }
-  }
-
-  /**
-   * Validates that there are no android_resources srcjars in the srcs, as android_resource rules
+   * Validates that there are no targets with resources in the srcs, as they
    * should not be used with the Android data logic.
    */
   private static void validateNoAndroidResourcesInSources(RuleContext ruleContext)
@@ -120,15 +107,16 @@ public final class LocalResourceContainer {
     Iterable<AndroidResourcesProvider> resources =
         ruleContext.getPrerequisites("srcs", Mode.TARGET, AndroidResourcesProvider.class);
     for (AndroidResourcesProvider provider : resources) {
-      ruleContext.throwWithAttributeError("srcs",
-          String.format("srcs should not contain android_resource label %s", provider.getLabel()));
+      ruleContext.throwWithAttributeError(
+          "srcs",
+          String.format("srcs should not contain label with resources %s", provider.getLabel()));
     }
   }
 
   private static void validateManifest(RuleContext ruleContext) throws RuleErrorException {
     if (ruleContext.getPrerequisiteArtifact("manifest", Mode.TARGET) == null) {
-      ruleContext.throwWithAttributeError("manifest",
-          "manifest is required when resource_files or assets are defined.");
+      ruleContext.throwWithAttributeError(
+          "manifest", "manifest is required when resource_files or assets are defined.");
     }
   }
 
@@ -178,27 +166,25 @@ public final class LocalResourceContainer {
   }
 
   /**
-   * Creates a {@link LocalResourceContainer} containing the resources included in a {@link
-   * FileProvider}.
+   * Creates a {@link LocalResourceContainer} containing all the resources and assets in directory
+   * artifacts.
    *
    * <p>In general, {@link #forAssetsAndResources(RuleContext, String, PathFragment, String)} should
    * be used instead. No assets or transitive resources will be included in the container produced
    * by this method.
    *
-   * @param ruleContext the current context
-   * @param resourceFileProvider the provider containing resources
-   * @param resourcesAttr the attribute used to refer to resource files in this target.
+   * @param assetsDir the tree artifact containing a {@code assets/} directory
+   * @param resourcesDir the tree artifact containing a {@code res/} directory
    */
-  public static LocalResourceContainer forResourceFileProvider(
-      RuleContext ruleContext, FileProvider resourceFileProvider, String resourcesAttr)
-      throws RuleErrorException {
-    ImmutableList<Artifact> resources = getResources(ImmutableList.of(resourceFileProvider));
-
+  static LocalResourceContainer forAssetsAndResourcesDirectories(
+      Artifact assetsDir, Artifact resourcesDir) {
+    Preconditions.checkArgument(resourcesDir.isTreeArtifact());
+    Preconditions.checkArgument(assetsDir.isTreeArtifact());
     return new LocalResourceContainer(
-        resources,
-        getResourceRoots(ruleContext, resources, resourcesAttr),
-        ImmutableList.of(),
-        ImmutableList.of());
+        ImmutableList.of(resourcesDir),
+        ImmutableList.of(resourcesDir.getExecPath().getChild("res")),
+        ImmutableList.of(assetsDir),
+        ImmutableList.of(assetsDir.getExecPath().getChild("assets")));
   }
 
   private static ImmutableList<Artifact> getResources(Iterable<FileProvider> targets) {
@@ -286,9 +272,20 @@ public final class LocalResourceContainer {
     PathFragment packageFragment =
         file.getArtifactOwner().getLabel().getPackageIdentifier().getSourceRoot();
     PathFragment packageRelativePath = file.getRootRelativePath().relativeTo(packageFragment);
-    resourceRoots.add(
-        trimTail(file.getExecPath(), makeRelativeTo(resourceDir, packageRelativePath)));
-
+    try {
+      resourceRoots.add(
+          trimTail(file.getExecPath(), makeRelativeTo(resourceDir, packageRelativePath)));
+    } catch (IllegalArgumentException e) {
+      ruleErrorConsumer.attributeError(
+          resourcesAttr,
+          String.format(
+              "'%s' (generated by '%s') is not under the directory '%s' (derived from %s).",
+              file.getRootRelativePath(),
+              file.getArtifactOwner().getLabel(),
+              packageRelativePath,
+              file.getRootRelativePath()));
+      throw new RuleErrorException();
+    }
     return resourceDir;
   }
 
@@ -353,10 +350,10 @@ public final class LocalResourceContainer {
       ImmutableList<PathFragment> resourceRoots,
       ImmutableList<Artifact> assets,
       ImmutableList<PathFragment> assetRoots) {
-        this.resources = resources;
-        this.resourceRoots = resourceRoots;
-        this.assets = assets;
-        this.assetRoots = assetRoots;
+    this.resources = resources;
+    this.resourceRoots = resourceRoots;
+    this.assets = assets;
+    this.assetRoots = assetRoots;
   }
 
   public ImmutableList<Artifact> getResources() {

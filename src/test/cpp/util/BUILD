@@ -22,13 +22,7 @@ cc_test(
     name = "file_test",
     size = "small",
     srcs = ["file_test.cc"] + select({
-        "//src:windows": [
-            "file_windows_test.cc",
-        ],
-        "//src:windows_msys": [
-            "file_windows_test.cc",
-        ],
-        "//src:windows_msvc": [
+        "//src/conditions:windows": [
             "file_windows_test.cc",
         ],
         "//conditions:default": [
@@ -40,15 +34,7 @@ cc_test(
         "//src/main/cpp/util:file",
         "//third_party:gtest",
     ] + select({
-        "//src:windows": [
-            ":windows_test_util",
-            "//src/main/native/windows:lib-file",
-        ],
-        "//src:windows_msys": [
-            ":windows_test_util",
-            "//src/main/native/windows:lib-file",
-        ],
-        "//src:windows_msvc": [
+        "//src/conditions:windows": [
             ":windows_test_util",
             "//src/main/native/windows:lib-file",
         ],
@@ -90,15 +76,11 @@ cc_library(
     name = "windows_test_util",
     testonly = 1,
     srcs = select({
-        "//src:windows": ["windows_test_util.cc"],
-        "//src:windows_msys": ["windows_test_util.cc"],
-        "//src:windows_msvc": ["windows_test_util.cc"],
+        "//src/conditions:windows": ["windows_test_util.cc"],
         "//conditions:default": [],
     }),
     hdrs = select({
-        "//src:windows": ["windows_test_util.h"],
-        "//src:windows_msys": ["windows_test_util.h"],
-        "//src:windows_msvc": ["windows_test_util.h"],
+        "//src/conditions:windows": ["windows_test_util.h"],
         "//conditions:default": [],
     }),
     visibility = [
@@ -111,21 +93,11 @@ cc_test(
     name = "windows_test_util_test",
     size = "small",
     srcs = select({
-        "//src:windows": ["windows_test_util_test.cc"],
-        "//src:windows_msys": ["windows_test_util_test.cc"],
-        "//src:windows_msvc": ["windows_test_util_test.cc"],
+        "//src/conditions:windows": ["windows_test_util_test.cc"],
         "//conditions:default": ["dummy_test.cc"],
     }),
     deps = select({
-        "//src:windows": [
-            ":windows_test_util",
-            "//third_party:gtest",
-        ],
-        "//src:windows_msys": [
-            ":windows_test_util",
-            "//third_party:gtest",
-        ],
-        "//src:windows_msvc": [
+        "//src/conditions:windows": [
             ":windows_test_util",
             "//third_party:gtest",
         ],

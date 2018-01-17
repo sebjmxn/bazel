@@ -27,6 +27,7 @@ import com.google.devtools.build.lib.cmdline.RepositoryName;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.events.Location;
 import com.google.devtools.build.lib.packages.BuildFileContainsErrorsException;
+import com.google.devtools.build.lib.packages.BuildFileName;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.repository.ExternalPackageException;
@@ -34,11 +35,8 @@ import com.google.devtools.build.lib.repository.ExternalPackageUtil;
 import com.google.devtools.build.lib.repository.ExternalRuleNotFoundException;
 import com.google.devtools.build.lib.skyframe.ActionEnvironmentFunction;
 import com.google.devtools.build.lib.skyframe.FileStateValue.RegularFileStateValue;
-import com.google.devtools.build.lib.skyframe.FileSymlinkException;
 import com.google.devtools.build.lib.skyframe.FileValue;
-import com.google.devtools.build.lib.skyframe.InconsistentFilesystemException;
 import com.google.devtools.build.lib.skyframe.PackageLookupValue;
-import com.google.devtools.build.lib.skyframe.PackageLookupValue.BuildFileName;
 import com.google.devtools.build.lib.syntax.EvalException;
 import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
@@ -218,13 +216,7 @@ public abstract class RepositoryFunction {
       }
 
       SkyKey fileSkyKey = FileValue.key(rootedPath);
-      FileValue fileValue =
-          (FileValue)
-              env.getValueOrThrow(
-                  fileSkyKey,
-                  IOException.class,
-                  FileSymlinkException.class,
-                  InconsistentFilesystemException.class);
+      FileValue fileValue = (FileValue) env.getValueOrThrow(fileSkyKey, IOException.class);
 
       if (fileValue == null || !fileValue.isFile() || fileValue.isSpecialFile()) {
         return false;
@@ -234,10 +226,7 @@ public abstract class RepositoryFunction {
     } catch (LabelSyntaxException e) {
       throw new IllegalStateException(
           "Key " + key + " is not a correct file key (should be in form FILE:label)", e);
-    } catch (IOException
-        | FileSymlinkException
-        | InconsistentFilesystemException
-        | EvalException e) {
+    } catch (IOException | EvalException e) {
       // Consider those exception to be a cause for invalidation
       return false;
     }
@@ -488,9 +477,8 @@ public abstract class RepositoryFunction {
         repositoryDirectory, PathFragment.EMPTY_FRAGMENT));
     FileValue value;
     try {
-      value = (FileValue) env.getValueOrThrow(outputDirectoryKey, IOException.class,
-          FileSymlinkException.class, InconsistentFilesystemException.class);
-    } catch (IOException | FileSymlinkException | InconsistentFilesystemException e) {
+      value = (FileValue) env.getValueOrThrow(outputDirectoryKey, IOException.class);
+    } catch (IOException e) {
       throw new RepositoryFunctionException(
           new IOException("Could not access " + repositoryDirectory + ": " + e.getMessage()),
           Transience.PERSISTENT);

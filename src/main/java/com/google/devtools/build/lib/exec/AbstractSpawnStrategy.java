@@ -15,9 +15,7 @@
 package com.google.devtools.build.lib.exec;
 
 import com.google.common.base.Preconditions;
-import com.google.common.base.Predicates;
-import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Iterables;
+import com.google.common.collect.ImmutableList;
 import com.google.common.eventbus.EventBus;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionInput;
@@ -44,7 +42,6 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.SortedMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -55,19 +52,19 @@ public abstract class AbstractSpawnStrategy implements SandboxedSpawnActionConte
   private final SpawnRunner spawnRunner;
   private final AtomicInteger execCount = new AtomicInteger();
 
-  public AbstractSpawnStrategy(SpawnRunner spawnRunner) {
-    this.spawnInputExpander = new SpawnInputExpander(false);
+  public AbstractSpawnStrategy(Path execRoot, SpawnRunner spawnRunner) {
+    this.spawnInputExpander = new SpawnInputExpander(execRoot, false);
     this.spawnRunner = spawnRunner;
   }
 
   @Override
-  public Set<SpawnResult> exec(Spawn spawn, ActionExecutionContext actionExecutionContext)
+  public List<SpawnResult> exec(Spawn spawn, ActionExecutionContext actionExecutionContext)
       throws ExecException, InterruptedException {
     return exec(spawn, actionExecutionContext, null);
   }
 
   @Override
-  public Set<SpawnResult> exec(
+  public List<SpawnResult> exec(
       Spawn spawn,
       ActionExecutionContext actionExecutionContext,
       AtomicReference<Class<? extends SpawnActionContext>> writeOutputFiles)
@@ -85,7 +82,7 @@ public abstract class AbstractSpawnStrategy implements SandboxedSpawnActionConte
     SpawnCache cache = actionExecutionContext.getContext(SpawnCache.class);
     // In production, the getContext method guarantees that we never get null back. However, our
     // integration tests don't set it up correctly, so cache may be null in testing.
-    if (cache == null || !Spawns.mayBeCached(spawn)) {
+    if (cache == null) {
       cache = SpawnCache.NO_CACHE;
     }
     SpawnResult spawnResult;
@@ -106,17 +103,20 @@ public abstract class AbstractSpawnStrategy implements SandboxedSpawnActionConte
       throw new EnvironmentalExecException("Unexpected IO error.", e);
     }
 
-    if ((spawnResult.status() != Status.SUCCESS) || (spawnResult.exitCode() != 0)) {
+    if (spawnResult.status() != Status.SUCCESS) {
       String cwd = actionExecutionContext.getExecRoot().getPathString();
+      String resultMessage = spawnResult.getFailureMessage();
       String message =
-          CommandFailureUtils.describeCommandFailure(
-              actionExecutionContext.getVerboseFailures(),
-              spawn.getArguments(),
-              spawn.getEnvironment(),
-              cwd);
+          resultMessage != ""
+              ? resultMessage
+              : CommandFailureUtils.describeCommandFailure(
+                  actionExecutionContext.getVerboseFailures(),
+                  spawn.getArguments(),
+                  spawn.getEnvironment(),
+                  cwd);
       throw new SpawnExecException(message, spawnResult, /*forciblyRunRemotely=*/false);
     }
-    return ImmutableSet.of(spawnResult);
+    return ImmutableList.of(spawnResult);
   }
 
   private List<Path> listExistingOutputFiles(Spawn spawn, Path execRoot) {
@@ -165,8 +165,7 @@ public abstract class AbstractSpawnStrategy implements SandboxedSpawnActionConte
         // TODO(philwo): Benchmark whether using an ExecutionService to do multiple operations in
         // parallel speeds up prefetching of inputs.
         // TODO(philwo): Do we have to expand middleman artifacts here?
-        actionExecutionContext.getActionInputPrefetcher().prefetchFiles(
-            Iterables.filter(getInputMapping().values(), Predicates.notNull()));
+        actionExecutionContext.getActionInputPrefetcher().prefetchFiles(getInputMapping().values());
       }
     }
 

@@ -37,7 +37,6 @@ import com.google.devtools.build.lib.packages.RuleFactory.BuildLangTypedAttribut
 import com.google.devtools.build.lib.skylarkinterface.Param;
 import com.google.devtools.build.lib.skylarkinterface.SkylarkSignature;
 import com.google.devtools.build.lib.skylarkinterface.SkylarkValue;
-import com.google.devtools.build.lib.syntax.AssignmentStatement;
 import com.google.devtools.build.lib.syntax.BaseFunction;
 import com.google.devtools.build.lib.syntax.BazelLibrary;
 import com.google.devtools.build.lib.syntax.BuildFileAST;
@@ -48,11 +47,9 @@ import com.google.devtools.build.lib.syntax.Environment.Extension;
 import com.google.devtools.build.lib.syntax.Environment.Phase;
 import com.google.devtools.build.lib.syntax.EvalException;
 import com.google.devtools.build.lib.syntax.EvalUtils;
-import com.google.devtools.build.lib.syntax.Expression;
 import com.google.devtools.build.lib.syntax.FuncallExpression;
 import com.google.devtools.build.lib.syntax.FunctionSignature;
 import com.google.devtools.build.lib.syntax.GlobList;
-import com.google.devtools.build.lib.syntax.Identifier;
 import com.google.devtools.build.lib.syntax.Mutability;
 import com.google.devtools.build.lib.syntax.ParserInputSource;
 import com.google.devtools.build.lib.syntax.Runtime;
@@ -396,7 +393,7 @@ public final class PackageFactory {
    * <p>Only intended to be called by BlazeRuntime or {@link FactoryForTesting#create}.
    *
    * <p>Do not call this constructor directly in tests; please use
-   * TestConstants#PACKAGE_FACTORY_FACTORY_FOR_TESTING instead.
+   * TestConstants#PACKAGE_FACTORY_BUILDER_FACTORY_FOR_TESTING instead.
    */
   public PackageFactory(
       RuleClassProvider ruleClassProvider,
@@ -436,6 +433,11 @@ public final class PackageFactory {
     threadPool.setMaximumPoolSize(globbingThreads);
   }
 
+  /**
+   * Sets the number of directories to eagerly traverse on the first glob for a given package, in
+   * order to warm the filesystem. -1 means do no eager traversal. See {@code
+   * PackageCacheOptions#maxDirectoriesToEagerlyVisitInGlobbing}.
+   */
   public void setMaxDirectoriesToEagerlyVisitInGlobbing(
       int maxDirectoriesToEagerlyVisitInGlobbing) {
     this.maxDirectoriesToEagerlyVisitInGlobbing = maxDirectoriesToEagerlyVisitInGlobbing;
@@ -591,7 +593,12 @@ public final class PackageFactory {
     }
 
     GlobList<String> globList = GlobList.captureResults(includes, excludes, matches);
-    return MutableList.copyOf(env, globList);
+    if (env.getSemantics().incompatibleDisableGlobTracking()) {
+      // Converting to ImmutableList will remove glob information from the list.
+      return MutableList.copyOf(env, ImmutableList.copyOf(globList));
+    } else {
+      return MutableList.copyOf(env, globList);
+    }
   }
 
   /**
@@ -599,6 +606,7 @@ public final class PackageFactory {
    * PythonPreprocessor. We annotate the package with additional dependencies. (A 'real' subinclude
    * will never be seen by the parser, because the presence of "subinclude" triggers preprocessing.)
    */
+  // TODO(b/35913039): Remove this and all references to 'mocksubinclude'.
   @SkylarkSignature(
     name = "mocksubinclude",
     returnType = Runtime.NoneType.class,
@@ -1300,13 +1308,13 @@ public final class PackageFactory {
     // show up below.
     BuildFileAST buildFileAST =
         parseBuildFile(packageId, input, preludeStatements, localReporterForParsing);
-    AstAfterPreprocessing astAfterPreprocessing =
-        new AstAfterPreprocessing(buildFileAST, localReporterForParsing);
-    return createPackageFromPreprocessingAst(
+    AstParseResult astParseResult =
+        new AstParseResult(buildFileAST, localReporterForParsing);
+    return createPackageFromAst(
         workspaceName,
         packageId,
         buildFile,
-        astAfterPreprocessing,
+        astParseResult,
         imports,
         skylarkFileDependencies,
         defaultVisibility,
@@ -1326,11 +1334,11 @@ public final class PackageFactory {
     return buildFileAST;
   }
 
-  public Package.Builder createPackageFromPreprocessingAst(
+  public Package.Builder createPackageFromAst(
       String workspaceName,
       PackageIdentifier packageId,
       Path buildFile,
-      AstAfterPreprocessing astAfterPreprocessing,
+      AstParseResult astParseResult,
       Map<String, Extension> imports,
       ImmutableList<Label> skylarkFileDependencies,
       RuleVisibility defaultVisibility,
@@ -1347,11 +1355,11 @@ public final class PackageFactory {
       return evaluateBuildFile(
           workspaceName,
           packageId,
-          astAfterPreprocessing.ast,
+          astParseResult.ast,
           buildFile,
           globber,
-          astAfterPreprocessing.allEvents,
-          astAfterPreprocessing.allPosts,
+          astParseResult.allEvents,
+          astParseResult.allPosts,
           defaultVisibility,
           skylarkSemantics,
           false /* containsError */,
@@ -1555,8 +1563,9 @@ public final class PackageFactory {
    */
   private ClassObject newNativeModule() {
     ImmutableMap.Builder<String, Object> builder = new ImmutableMap.Builder<>();
-    for (String nativeFunction : Runtime.getFunctionNames(SkylarkNativeModule.class)) {
-      builder.put(nativeFunction, Runtime.getFunction(SkylarkNativeModule.class, nativeFunction));
+    Runtime.BuiltinRegistry builtins = Runtime.getBuiltinRegistry();
+    for (String nativeFunction : builtins.getFunctionNames(SkylarkNativeModule.class)) {
+      builder.put(nativeFunction, builtins.getFunction(SkylarkNativeModule.class, nativeFunction));
     }
     builder.putAll(ruleFunctions);
     builder.put("package", newPackageFunction(packageArguments));
@@ -1568,7 +1577,6 @@ public final class PackageFactory {
     return NativeProvider.STRUCT.create(builder.build(), "no native function or rule '%s'");
   }
 
-  /** @param fakeEnv specify if we declare no-op functions, or real functions. */
   private void buildPkgEnv(
       Environment pkgEnv,
       PackageContext context,
@@ -1604,7 +1612,7 @@ public final class PackageFactory {
   }
 
   /**
-   * Called by a caller of {@link #createPackageFromPreprocessingAst} after this caller has fully
+   * Called by a caller of {@link #createPackageFromAst} after this caller has fully
    * loaded the package.
    */
   public void afterDoneLoadingPackage(Package pkg, SkylarkSemantics skylarkSemantics) {
@@ -1685,10 +1693,6 @@ public final class PackageFactory {
         pkgBuilder.setContainsErrors();
       }
 
-      if (!validateAssignmentStatements(pkgEnv, buildFileAST, eventHandler)) {
-        pkgBuilder.setContainsErrors();
-      }
-
       if (buildFileAST.containsErrors()) {
         pkgBuilder.setContainsErrors();
       }
@@ -1705,36 +1709,6 @@ public final class PackageFactory {
     pkgBuilder.addPosts(eventHandler.getPosts());
     pkgBuilder.addEvents(eventHandler.getEvents());
     return pkgBuilder;
-  }
-
-  /** Visit all targets and expand the globs in parallel. */
-  /**
-   * Tests a build AST to ensure that it contains no assignment statements that redefine built-in
-   * build rules.
-   *
-   * @param pkgEnv a package environment initialized with all of the built-in build rules
-   * @param ast the build file AST to be tested
-   * @param eventHandler a eventHandler where any errors should be logged
-   * @return true if the build file contains no redefinitions of built-in functions
-   */
-  // TODO(bazel-team): Remove this check. It should be moved to LValue.assign
-  private static boolean validateAssignmentStatements(
-      Environment pkgEnv, BuildFileAST ast, ExtendedEventHandler eventHandler) {
-    for (Statement stmt : ast.getStatements()) {
-      if (stmt instanceof AssignmentStatement) {
-        Expression lvalue = ((AssignmentStatement) stmt).getLValue().getExpression();
-        if (!(lvalue instanceof Identifier)) {
-          continue;
-        }
-        String target = ((Identifier) lvalue).getName();
-        if (pkgEnv.hasVariable(target)) {
-          eventHandler.handle(Event.error(stmt.getLocation(), "Reassignment of builtin build "
-              + "function '" + target + "' not permitted"));
-          return false;
-        }
-      }
-    }
-    return true;
   }
 
   // Reports an error and returns false iff package identifier was illegal.

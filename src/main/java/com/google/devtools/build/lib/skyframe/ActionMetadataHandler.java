@@ -219,7 +219,7 @@ public class ActionMetadataHandler implements MetadataHandler {
     }
     // We do not cache exceptions besides nonexistence here, because it is unlikely that the file
     // will be requested from this cache too many times.
-    fileValue = constructFileValue(artifact, null);
+    fileValue = constructFileValue(artifact, /*statNoFollow=*/ null);
     return maybeStoreAdditionalData(artifact, fileValue, null);
   }
 
@@ -261,8 +261,7 @@ public class ActionMetadataHandler implements MetadataHandler {
     // metadata separately.
     // Use the FileValue's digest if no digest was injected, or if the file can't be digested.
     injectedDigest = injectedDigest != null || !isFile ? injectedDigest : data.getDigest();
-    FileArtifactValue value =
-        FileArtifactValue.create(artifact, isFile, isFile ? data.getSize() : 0, injectedDigest);
+    FileArtifactValue value = FileArtifactValue.create(artifact, data, injectedDigest);
     FileArtifactValue oldValue = additionalOutputData.putIfAbsent(artifact, value);
     checkInconsistentData(artifact, oldValue, value);
     return metadataFromValue(value);
@@ -576,17 +575,13 @@ public class ActionMetadataHandler implements MetadataHandler {
     }
     RootedPath realRootedPath = RootedPath.toRootedPathMaybeUnderRoot(realPath,
         ImmutableList.of(artifact.getRoot().getPath()));
-    FileStateValue fileStateValue;
-    FileStateValue realFileStateValue;
-    try {
-      fileStateValue = FileStateValue.createWithStatNoFollow(rootedPath, statNoFollow, tsgm);
-      // TODO(bazel-team): consider avoiding a 'stat' here when the symlink target hasn't changed
-      // and is a source file (since changes to those are checked separately).
-      realFileStateValue = realPath.equals(path) ? fileStateValue
-          : FileStateValue.create(realRootedPath, tsgm);
-    } catch (InconsistentFilesystemException e) {
-      throw new IOException(e);
-    }
+    FileStateValue fileStateValue =
+        FileStateValue.createWithStatNoFollow(rootedPath, statNoFollow, tsgm);
+    // TODO(bazel-team): consider avoiding a 'stat' here when the symlink target hasn't changed
+    // and is a source file (since changes to those are checked separately).
+    FileStateValue realFileStateValue = realPath.equals(path)
+        ? fileStateValue
+        : FileStateValue.create(realRootedPath, tsgm);
     return FileValue.value(rootedPath, fileStateValue, realRootedPath, realFileStateValue);
   }
 

@@ -14,23 +14,33 @@
 package com.google.devtools.build.lib.skyframe;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableSortedSet;
+import com.google.common.collect.Interner;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.analysis.config.BuildConfiguration.Fragment;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
+import com.google.devtools.build.lib.concurrent.BlazeInterners;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
-import com.google.devtools.build.skyframe.LegacySkyKey;
+import com.google.devtools.build.lib.skyframe.serialization.InjectingObjectCodec;
+import com.google.devtools.build.lib.skyframe.serialization.autocodec.AutoCodec;
+import com.google.devtools.build.lib.vfs.FileSystemProvider;
+import com.google.devtools.build.skyframe.SkyFunctionName;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
 import java.io.Serializable;
 import java.util.Objects;
 import java.util.Set;
 
-/**
- * A Skyframe value representing a {@link BuildConfiguration}.
- */
+/** A Skyframe value representing a {@link BuildConfiguration}. */
 // TODO(bazel-team): mark this immutable when BuildConfiguration is immutable.
 // @Immutable
+@AutoCodec(dependency = FileSystemProvider.class)
 @ThreadSafe
 public class BuildConfigurationValue implements SkyValue {
+  public static final InjectingObjectCodec<BuildConfigurationValue, FileSystemProvider> CODEC =
+      new BuildConfigurationValue_AutoCodec();
+
+  private static final Interner<Key> keyInterner = BlazeInterners.newWeakInterner();
 
   private final BuildConfiguration configuration;
 
@@ -51,26 +61,24 @@ public class BuildConfigurationValue implements SkyValue {
   @ThreadSafe
   public static SkyKey key(Set<Class<? extends BuildConfiguration.Fragment>> fragments,
       BuildOptions buildOptions) {
-    return LegacySkyKey.create(
-        SkyFunctions.BUILD_CONFIGURATION, new Key(fragments, buildOptions));
+    return keyInterner.intern(
+        new Key(
+            ImmutableSortedSet.copyOf(BuildConfiguration.lexicalFragmentSorter, fragments),
+            buildOptions));
   }
 
-  static final class Key implements Serializable {
-    private final Set<Class<? extends BuildConfiguration.Fragment>> fragments;
+  static final class Key implements SkyKey, Serializable {
+    private final ImmutableSortedSet<Class<? extends BuildConfiguration.Fragment>> fragments;
     private final BuildOptions buildOptions;
-    private final boolean enableActions;
+    // If hashCode really is -1, we'll recompute it from scratch each time. Oh well.
+    private volatile int hashCode = -1;
 
-    Key(Set<Class<? extends BuildConfiguration.Fragment>> fragments,
-        BuildOptions buildOptions) {
+    Key(ImmutableSortedSet<Class<? extends Fragment>> fragments, BuildOptions buildOptions) {
       this.fragments = fragments;
       this.buildOptions = Preconditions.checkNotNull(buildOptions);
-      // Cache this value for quicker access on .equals() / .hashCode(). We don't cache it inside
-      // BuildOptions because BuildOptions is mutable, so a cached value there could fall out of
-      // date while the BuildOptions is being prepared for this key.
-      this.enableActions = buildOptions.enableActions();
     }
 
-    Set<Class<? extends BuildConfiguration.Fragment>> getFragments() {
+    ImmutableSortedSet<Class<? extends BuildConfiguration.Fragment>> getFragments() {
       return fragments;
     }
 
@@ -79,19 +87,29 @@ public class BuildConfigurationValue implements SkyValue {
     }
 
     @Override
+    public SkyFunctionName functionName() {
+      return SkyFunctions.BUILD_CONFIGURATION;
+    }
+
+    @Override
     public boolean equals(Object o) {
+      if (this == o) {
+        return true;
+      }
       if (!(o instanceof Key)) {
         return false;
       }
       Key otherConfig = (Key) o;
-      return Objects.equals(fragments, otherConfig.fragments)
-          && Objects.equals(buildOptions, otherConfig.buildOptions)
-          && enableActions == otherConfig.enableActions;
+      return buildOptions.equals(otherConfig.buildOptions)
+          && Objects.equals(fragments, otherConfig.fragments);
     }
 
     @Override
     public int hashCode() {
-      return Objects.hash(fragments, buildOptions, enableActions);
+      if (hashCode == -1) {
+        hashCode = Objects.hash(fragments, buildOptions);
+      }
+      return hashCode;
     }
   }
 }

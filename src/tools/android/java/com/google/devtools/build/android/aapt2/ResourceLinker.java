@@ -39,10 +39,14 @@ import java.util.stream.Collectors;
 public class ResourceLinker {
 
   /** Represents errors thrown during linking. */
-  public static class LinkError extends RuntimeException {
+  public static class LinkError extends Aapt2Exception {
 
-    public LinkError(Throwable e) {
+    private LinkError(Throwable e) {
       super(e);
+    }
+
+    public static LinkError of(IOException e) {
+      return new LinkError(e);
     }
   }
 
@@ -63,6 +67,7 @@ public class ResourceLinker {
   private Path baseApk;
   private List<CompiledResources> include = ImmutableList.of();
   private List<Path> assetDirs = ImmutableList.of();
+  private boolean conditionalKeepRules = false;
 
   private ResourceLinker(Path aapt2, Path workingDirectory) {
     this.aapt2 = aapt2;
@@ -98,6 +103,11 @@ public class ResourceLinker {
 
   public ResourceLinker buildVersion(Revision buildToolsVersion) {
     this.buildToolsVersion = buildToolsVersion;
+    return this;
+  }
+
+  public ResourceLinker conditionalKeepRules(boolean conditionalKeepRules) {
+    this.conditionalKeepRules = conditionalKeepRules;
     return this;
   }
 
@@ -186,7 +196,7 @@ public class ResourceLinker {
       profiler.recordEndOf("sourcejar");
       return StaticLibrary.from(outPath, rTxt, ImmutableList.of(), sourceJar);
     } catch (IOException e) {
-      throw new LinkError(e);
+      throw LinkError.of(e);
     }
   }
 
@@ -243,6 +253,8 @@ public class ResourceLinker {
               .add("--java", javaSourceDirectory)
               .add("--proguard", proguardConfig)
               .add("--proguard-main-dex", mainDexProguard)
+              .when(conditionalKeepRules)
+              .thenAdd("--proguard-conditional-keep-rules")
               .add("-o", outPath)
               .execute(String.format("Linking %s", compiled.getManifest())));
       profiler.recordEndOf("fulllink");

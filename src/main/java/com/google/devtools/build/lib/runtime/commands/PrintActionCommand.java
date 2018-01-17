@@ -19,14 +19,14 @@ import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.ActionAnalysisMetadata;
 import com.google.devtools.build.lib.actions.ActionAnalysisMetadata.MiddlemanType;
 import com.google.devtools.build.lib.actions.ActionGraph;
+import com.google.devtools.build.lib.actions.ActionKeyContext;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.CommandLineExpansionException;
 import com.google.devtools.build.lib.actions.extra.DetailedExtraActionInfo;
 import com.google.devtools.build.lib.actions.extra.ExtraActionSummary;
-import com.google.devtools.build.lib.analysis.BuildView;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.FileProvider;
-import com.google.devtools.build.lib.analysis.OutputGroupProvider;
+import com.google.devtools.build.lib.analysis.OutputGroupInfo;
 import com.google.devtools.build.lib.analysis.PrintActionVisitor;
 import com.google.devtools.build.lib.analysis.configuredtargets.RuleConfiguredTarget;
 import com.google.devtools.build.lib.buildtool.BuildRequest;
@@ -44,6 +44,7 @@ import com.google.devtools.build.lib.runtime.BlazeCommand;
 import com.google.devtools.build.lib.runtime.BlazeRuntime;
 import com.google.devtools.build.lib.runtime.Command;
 import com.google.devtools.build.lib.runtime.CommandEnvironment;
+import com.google.devtools.build.lib.runtime.KeepGoingOption;
 import com.google.devtools.build.lib.util.ExitCode;
 import com.google.devtools.build.lib.util.io.OutErr;
 import com.google.devtools.common.options.Option;
@@ -125,8 +126,8 @@ public final class PrintActionCommand implements BlazeCommand {
       this.options = options;
       this.outErr = outErr;
       this.requestedTargets = requestedTargets;
-      BuildView.Options viewOptions = options.getOptions(BuildView.Options.class);
-      keepGoing = viewOptions.keepGoing;
+      KeepGoingOption keepGoingOption = options.getOptions(KeepGoingOption.class);
+      keepGoing = keepGoingOption.keepGoing;
       summaryBuilder = ExtraActionSummary.newBuilder();
       actionMnemonicMatcher = new Predicate<ActionAnalysisMetadata>() {
         @Override
@@ -171,17 +172,22 @@ public final class PrintActionCommand implements BlazeCommand {
 
       for (ConfiguredTarget configuredTarget : result.getActualTargets()) {
         NestedSet<Artifact> filesToCompile = NestedSetBuilder.emptySet(Order.STABLE_ORDER);
-        OutputGroupProvider outputGroupProvider = OutputGroupProvider.get(configuredTarget);
-        if (outputGroupProvider != null) {
+        OutputGroupInfo outputGroupInfo = OutputGroupInfo.get(configuredTarget);
+        if (outputGroupInfo != null) {
           filesToCompile =
-              outputGroupProvider.getOutputGroup(OutputGroupProvider.FILES_TO_COMPILE);
+              outputGroupInfo.getOutputGroup(OutputGroupInfo.FILES_TO_COMPILE);
         }
         if (!filesToCompile.isEmpty()) {
           try {
             if (compileOneDependency) {
-              gatherActionsForFiles(configuredTarget, actionGraph, targets);
+              gatherActionsForFiles(
+                  configuredTarget,
+                  actionGraph,
+                  env.getSkyframeExecutor().getActionKeyContext(),
+                  targets);
             } else {
-              gatherActionsForTarget(configuredTarget, actionGraph);
+              gatherActionsForTarget(
+                  configuredTarget, actionGraph, env.getSkyframeExecutor().getActionKeyContext());
             }
           } catch (CommandLineExpansionException e) {
             env.getReporter().handle(Event.error(null, "Error expanding command line: " + e));
@@ -199,16 +205,22 @@ public final class PrintActionCommand implements BlazeCommand {
     }
 
     private BuildResult gatherActionsForFiles(
-        ConfiguredTarget configuredTarget, ActionGraph actionGraph, List<String> files)
+        ConfiguredTarget configuredTarget,
+        ActionGraph actionGraph,
+        ActionKeyContext actionKeyContext,
+        List<String> files)
         throws CommandLineExpansionException {
       Set<String> filesDesired = new LinkedHashSet<>(files);
       ActionFilter filter = new DefaultActionFilter(filesDesired, actionMnemonicMatcher);
 
-      gatherActionsForFile(configuredTarget, filter, actionGraph);
+      gatherActionsForFile(configuredTarget, filter, actionGraph, actionKeyContext);
       return null;
     }
 
-    private void gatherActionsForTarget(ConfiguredTarget configuredTarget, ActionGraph actionGraph)
+    private void gatherActionsForTarget(
+        ConfiguredTarget configuredTarget,
+        ActionGraph actionGraph,
+        ActionKeyContext actionKeyContext)
         throws CommandLineExpansionException {
       if (!(configuredTarget.getTarget() instanceof Rule)) {
         return;
@@ -227,7 +239,7 @@ public final class PrintActionCommand implements BlazeCommand {
       for (ActionAnalysisMetadata action : actions) {
         if (action instanceof Action) {
           DetailedExtraActionInfo.Builder detail = DetailedExtraActionInfo.newBuilder();
-          detail.setAction(((Action) action).getExtraActionInfo());
+          detail.setAction(((Action) action).getExtraActionInfo(actionKeyContext));
           summaryBuilder.addAction(detail);
         }
       }
@@ -238,10 +250,13 @@ public final class PrintActionCommand implements BlazeCommand {
      * extra_action if the filter evaluates to {@code true}.
      */
     private void gatherActionsForFile(
-        ConfiguredTarget configuredTarget, ActionFilter filter, ActionGraph actionGraph)
+        ConfiguredTarget configuredTarget,
+        ActionFilter filter,
+        ActionGraph actionGraph,
+        ActionKeyContext actionKeyContext)
         throws CommandLineExpansionException {
-      NestedSet<Artifact> artifacts = OutputGroupProvider.get(configuredTarget)
-          .getOutputGroup(OutputGroupProvider.FILES_TO_COMPILE);
+      NestedSet<Artifact> artifacts = OutputGroupInfo.get(configuredTarget)
+          .getOutputGroup(OutputGroupInfo.FILES_TO_COMPILE);
 
       if (artifacts.isEmpty()) {
         return;
@@ -252,7 +267,7 @@ public final class PrintActionCommand implements BlazeCommand {
         if (filter.shouldOutput(action, configuredTarget, actionGraph)) {
           if (action instanceof Action) {
             DetailedExtraActionInfo.Builder detail = DetailedExtraActionInfo.newBuilder();
-            detail.setAction(((Action) action).getExtraActionInfo());
+            detail.setAction(((Action) action).getExtraActionInfo(actionKeyContext));
             summaryBuilder.addAction(detail);
           }
         }
